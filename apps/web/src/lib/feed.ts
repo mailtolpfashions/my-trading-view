@@ -6,16 +6,39 @@ import type { Candle, ClientMessage, DataQuality, DataStatus, Instrument, Market
 
 export const FEED_URL = process.env.NEXT_PUBLIC_FEED_URL ?? 'http://localhost:4001';
 
+// ---- feed access token (issued by our server for the signed-in user; refreshed before it expires) ----
+let cached: { token: string; exp: number } | null = null;
+let inflight: Promise<string> | null = null;
+
+export async function feedToken(): Promise<string> {
+  if (cached && cached.exp - 60 > Date.now() / 1000) return cached.token;
+  inflight ??= fetch('/api/feed-token', { cache: 'no-store' })
+    .then(async (r) => {
+      if (r.status === 401) { window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`; throw new Error('Signed out'); }
+      if (!r.ok) throw new Error('Could not authorise the market data feed');
+      cached = (await r.json()) as { token: string; exp: number };
+      return cached.token;
+    })
+    .finally(() => { inflight = null; });
+  return inflight;
+}
+
+/** fetch() to the feed service with the user's access token. */
+export async function feedFetch(url: string, init?: RequestInit): Promise<Response> {
+  const token = await feedToken();
+  return fetch(url, { ...init, headers: { ...init?.headers, Authorization: `Bearer ${token}` } });
+}
+
 export type CandleResponse = { instrument: Instrument; tf: Timeframe; status: DataStatus; quality: DataQuality; candles: Candle[] };
 
 export async function fetchCandles(symbol: string, tf: Timeframe, signal?: AbortSignal): Promise<CandleResponse> {
-  const res = await fetch(`${FEED_URL}/api/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}`, { signal });
+  const res = await feedFetch(`${FEED_URL}/api/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}`, { signal });
   if (!res.ok) throw new Error(res.status === 404 ? `No data for ${symbol}` : 'Market data is unavailable right now');
   return res.json();
 }
 
 export async function searchSymbols(q: string, signal?: AbortSignal): Promise<Instrument[]> {
-  const res = await fetch(`${FEED_URL}/api/search?q=${encodeURIComponent(q)}`, { signal });
+  const res = await feedFetch(`${FEED_URL}/api/search?q=${encodeURIComponent(q)}`, { signal });
   return res.ok ? res.json() : [];
 }
 
@@ -38,8 +61,18 @@ export function useQuotes(symbols: string[]) {
 
   useEffect(() => {
     let closed = false, retry = 0, timer: ReturnType<typeof setTimeout>;
-    const connect = () => {
-      const ws = new WebSocket(FEED_URL.replace(/^http/, 'ws') + '/ws');
+    // The feed authorises each connection with a token and closes it when the token expires, so plan changes
+    // (upgrade, expiry) take effect on the automatic reconnect.
+    const connect = async () => {
+      let token: string;
+      try {
+        token = await feedToken();
+      } catch {
+        if (!closed) timer = setTimeout(connect, Math.min(30_000, 1000 * 2 ** retry++));
+        return;
+      }
+      if (closed) return;
+      const ws = new WebSocket(`${FEED_URL.replace(/^http/, 'ws')}/ws?token=${encodeURIComponent(token)}`);
       wsRef.current = ws;
       ws.onopen = () => {
         retry = 0;
@@ -67,7 +100,7 @@ export function useQuotes(symbols: string[]) {
         if (!closed) timer = setTimeout(connect, Math.min(30_000, 1000 * 2 ** retry++));
       };
     };
-    connect();
+    void connect();
     return () => {
       closed = true;
       clearTimeout(timer);
@@ -94,7 +127,7 @@ export function useQuotes(symbols: string[]) {
 
 // ---- paper trading API ----
 async function paperCall<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${FEED_URL}/api/paper${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
+  const res = await feedFetch(`${FEED_URL}/api/paper${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.message ?? 'Paper trading is unavailable right now');
   return body as T;

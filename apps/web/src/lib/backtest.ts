@@ -1,11 +1,11 @@
 import type { BacktestResult, Condition, IndicatorName, Operand, Strategy } from '@mtv/backtest';
 import type { Candle, DataQuality, DataStatus, Instrument, Timeframe } from '@mtv/shared';
-import { FEED_URL } from './feed';
+import { FEED_URL, feedFetch } from './feed';
 
 export type BacktestResponse = { instrument: Instrument; tf: Timeframe; status: DataStatus; quality: DataQuality; result: BacktestResult; candles: Candle[] };
 
 export async function runBacktestApi(symbol: string, tf: Timeframe, strategy: Strategy): Promise<BacktestResponse> {
-  const res = await fetch(`${FEED_URL}/api/backtest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol, tf, strategy }) });
+  const res = await feedFetch(`${FEED_URL}/api/backtest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol, tf, strategy }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.message ?? 'Backtest failed');
   return body as BacktestResponse;

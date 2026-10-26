@@ -7,15 +7,16 @@ import { mergeTick } from '@mtv/indicators';
 import { marketSession, type Candle, type DataQuality, type Instrument, type MarketSession, type Timeframe } from '@mtv/shared';
 import { LogoMark } from '@/components/logo';
 import { STUDIES } from '@/lib/chart/studies';
-import { fetchCandles, useQuotes } from '@/lib/feed';
+import { FEED_URL, feedFetch, fetchCandles, useQuotes } from '@/lib/feed';
 import { fmt, tfLabel } from '@/lib/format';
-import { BacktestView } from '@/components/backtest/backtest-view';
+import { BacktestModule } from '@/components/backtest/backtest-module';
 import { OptionsView } from '@/components/options/options-view';
 import { ChartView, type ChartType } from './chart-view';
 import { DataCheck } from './data-check';
 import { OrderTicket, type TicketRequest } from './order-ticket';
 import { PaperPanel } from './paper-panel';
 import { SymbolSearch } from './symbol-search';
+import { UserMenu, type TerminalUser } from './user-menu';
 import { Watchlist } from './watchlist';
 
 type Sym = Pick<Instrument, 'symbol' | 'name' | 'exchange'>;
@@ -52,7 +53,7 @@ function usePersisted<T>(key: string, initial: T): [T, (v: T) => void] {
   return [v, set];
 }
 
-export function Terminal() {
+export function Terminal({ user }: { user: TerminalUser }) {
   const [sym, setSym] = usePersisted<Sym>('mtv.symbol', { symbol: 'NIFTY', name: 'NIFTY 50', exchange: 'NSE' });
   const [tf, setTf] = usePersisted<Timeframe>('mtv.tf', '5');
   const [chartType, setChartType] = usePersisted<ChartType>('mtv.chartType', 'candles');
@@ -88,7 +89,19 @@ export function Terminal() {
       .catch((e: Error) => { if (e.name !== 'AbortError') setError(e.message); })
       .finally(() => !ctrl.signal.aborted && setLoading(false));
     return () => ctrl.abort();
-  }, [sym.symbol, tf]);
+  }, [sym.symbol, tf, status?.provider]); // reload from the new source when Kite connects or its session expires
+
+  // ---- Kite connection (daily login) ----
+  const [kite, setKite] = useState<{ selected: boolean; configured: boolean; loggedIn: boolean; userName: string | null } | null>(null);
+  useEffect(() => {
+    feedFetch(`${FEED_URL}/api/kite/status`).then((r) => r.json()).then(setKite, () => setKite(null));
+  }, [status?.provider]);
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get('kite');
+    if (!result) return;
+    setNotice(result === 'connected' ? 'Kite connected: live prices are on' : result === 'cancelled' ? 'Kite login cancelled' : 'Kite login failed. Please try again.');
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
 
   // ---- live bar from streamed quotes ----
   const q = quotes[sym.symbol];
@@ -138,7 +151,7 @@ export function Terminal() {
       <header className="flex items-center gap-3">
         <Link href="/" className="flex items-center gap-2.5 pr-1" aria-label="My Trading View home">
           <LogoMark size={26} />
-          <span className="hidden text-[15.5px] font-extrabold tracking-[-0.03em] xl:inline">My Trading View</span>
+          <span className="hidden text-[15.5px] font-extrabold tracking-[-0.03em] whitespace-nowrap 2xl:inline">My Trading View</span>
         </Link>
         <nav className="hidden gap-0.5 rounded-full bg-panel p-1 shadow-[var(--shadow-panel)] lg:flex" aria-label="Modules">
           {MODULES.map((m) => {
@@ -151,7 +164,7 @@ export function Terminal() {
                 onClick={() => live && setModule(m)}
                 aria-current={on ? 'page' : undefined}
                 title={live ? undefined : `${m}: coming in a later build step`}
-                className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold ${on ? 'bg-ink text-white' : 'text-ink-2 hover:bg-raised disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent'}`}
+                className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold whitespace-nowrap ${on ? 'bg-ink text-white' : 'text-ink-2 hover:bg-raised disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent'}`}
               >
                 {on && <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-accent align-[2px]" />}
                 {m}
@@ -167,8 +180,23 @@ export function Terminal() {
           <span className={`h-2 w-2 rounded-full ${session === 'open' ? 'live-dot bg-up' : session === 'pre-open' ? 'bg-accent' : 'bg-muted'}`} />
           {session === 'open' ? 'Market open' : session === 'pre-open' ? 'Pre-open' : 'Market closed'}
         </span>
-        {delayed && <span className="flex h-8 items-center rounded-full bg-accent px-3 text-[12px] font-bold whitespace-nowrap text-accent-ink" title="Free data source. Live data arrives with broker connections.">Delayed</span>}
+        {status?.provider === 'kite' && (
+          <span className="flex h-8 items-center gap-1.5 rounded-full bg-up-soft px-3 text-[12px] font-bold whitespace-nowrap text-up" title={kite?.userName ? `Zerodha Kite · ${kite.userName}. Session ends 06:00 IST.` : 'Zerodha Kite'}>
+            <span className="live-dot h-2 w-2 rounded-full bg-up" /> Live · Kite
+          </span>
+        )}
+        {user.admin && delayed && kite?.selected && kite.configured && !kite.loggedIn && (
+          <a href={`${FEED_URL}/api/kite/login`} className="flex h-8 items-center rounded-full bg-ink px-3 text-[12px] font-bold whitespace-nowrap text-white hover:bg-black" title="Log in to Zerodha once a day for live prices">
+            Connect Kite
+          </a>
+        )}
+        {delayed && (
+          <span className="flex h-8 items-center rounded-full bg-accent px-3 text-[12px] font-bold whitespace-nowrap text-accent-ink" title={user.plan === 'LIVE' ? 'The live data source is unavailable right now; showing delayed prices.' : 'Free plan: prices are 15 minutes delayed. Upgrade to Live for real-time data.'}>
+            Delayed
+          </span>
+        )}
         {!connected && <span className="flex h-8 items-center rounded-full bg-down-soft px-3 text-[12px] font-bold whitespace-nowrap text-down">Feed offline</span>}
+        <UserMenu user={user} />
       </header>
 
       {/* market pulse */}
@@ -187,7 +215,7 @@ export function Terminal() {
       </div>
 
       {/* workspace */}
-      {module === 'Backtest' ? <BacktestView /> : module === 'Option chain' ? <OptionsView /> : (
+      {module === 'Backtest' ? <BacktestModule /> : module === 'Option chain' ? <OptionsView /> : (
       <main className="grid min-h-0 grid-cols-[1fr_380px] grid-rows-[1fr_210px] gap-2">
         <section className="panel grid min-h-0 min-w-0 grid-rows-[44px_1fr_34px] overflow-hidden">
           {/* chart toolbar */}

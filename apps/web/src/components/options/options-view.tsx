@@ -83,8 +83,18 @@ export function OptionsView() {
     const itm = spot != null && (kind === 'CE' ? strike < spot : strike > spot);
     const oi = <td className={`relative px-2 text-right ${itm ? 'bg-[#fbf8ee]' : ''}`}><i className={`absolute top-1.5 bottom-1.5 ${kind === 'CE' ? 'right-0' : 'left-0'} rounded-full opacity-30 ${kind === 'CE' ? 'bg-down' : 'bg-up'}`} style={{ width: `${(q.oi / maxOi) * 100}%` }} /><span className="relative">{(q.oi / 1e5).toFixed(1)}L</span></td>;
     const iv = <td className={`px-2 text-right text-muted ${itm ? 'bg-[#fbf8ee]' : ''}`}>{q.iv == null ? '—' : (q.iv * 100).toFixed(1)}</td>;
+    // Legs already in the strategy at this strike: net lots, + bought, − sold.
+    const held = legs.filter((l) => l.kind === kind && l.strikePaise === strike && l.expiry === chain?.expiry);
+    const net = held.reduce((s, l) => s + (l.side === 'BUY' ? l.lots : -l.lots), 0);
+    const tint = !held.length ? (itm ? 'bg-[#fbf8ee]' : '') : net > 0 ? 'bg-blue/10 ring-2 ring-inset ring-blue' : net < 0 ? 'bg-down/10 ring-2 ring-inset ring-down' : 'bg-raised ring-2 ring-inset ring-muted';
     const ltp = (
-      <td className={`group relative px-2 text-right font-semibold ${itm ? 'bg-[#fbf8ee]' : ''} ${q.traded ? '' : 'text-muted'}`} title={q.traded ? undefined : 'No trades that day: NSE carried the previous close forward'}>
+      <td className={`group relative px-2 text-right font-semibold ${tint} ${q.traded ? '' : 'text-muted'}`} title={q.traded ? undefined : 'No trades that day: NSE carried the previous close forward'}>
+        {held.length > 0 && (
+          <span className={`absolute top-1/2 left-1 -translate-y-1/2 rounded px-1 text-[10px] leading-4 font-bold text-white ${net > 0 ? 'bg-blue' : net < 0 ? 'bg-down' : 'bg-muted'}`}
+            title={held.map((l) => `${l.side === 'BUY' ? 'Bought' : 'Sold'} ${l.lots} lot${l.lots > 1 ? 's' : ''} @ ${fmt(l.pricePaise / 100)}`).join(', ')}>
+            {net > 0 ? `B ${net}` : net < 0 ? `S ${-net}` : 'B/S'}
+          </span>
+        )}
         {fmt(q.closePaise / 100)}{q.traded ? '' : '*'}
         <span className="absolute inset-0.5 hidden gap-0.5 group-hover:flex">
           <button type="button" onClick={() => addLeg(kind, 'BUY', strike)} className="flex-1 rounded-md bg-blue text-[11px] font-bold text-white">B</button>
@@ -138,7 +148,10 @@ export function OptionsView() {
                 return (
                   <tr key={r.strikePaise} className={`h-8 border-t border-line ${atm ? 'outline-2 -outline-offset-2 outline-accent' : ''}`}>
                     {cell(r.CE, 'CE', r.strikePaise)}
-                    <td className={`px-2 text-center font-semibold ${atm ? 'bg-accent text-accent-ink' : 'bg-raised'}`}>{fmtStrike(r.strikePaise)}</td>
+                    <td className={`px-2 text-center font-semibold ${atm ? 'bg-accent text-accent-ink' : 'bg-raised'}`}>
+                      {legs.some((l) => l.strikePaise === r.strikePaise && l.expiry === chain?.expiry) && <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-ink align-[2px]" aria-label="In strategy" />}
+                      {fmtStrike(r.strikePaise)}
+                    </td>
                     {cell(r.PE, 'PE', r.strikePaise)}
                   </tr>
                 );

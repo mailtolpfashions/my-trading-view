@@ -5,10 +5,19 @@
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./feed-token": "./src/feed-token.ts",
+    "./billing": "./src/billing.ts"
+  },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@mtv/paper": "*"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.5"
   }
 }

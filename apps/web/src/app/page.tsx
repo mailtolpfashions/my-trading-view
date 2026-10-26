@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Logo } from '@/components/logo';
 import { SiteFooter } from '@/components/site-footer';
+import { LANDING } from '@/lib/site-mode';
 
 const CONTACT = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? 'support@mytradingview.in';
 const BETA_MAIL = `mailto:${CONTACT}?subject=${encodeURIComponent('My Trading View beta access')}`;
@@ -41,7 +42,9 @@ const FAQ = [
   { q: 'Is My Trading View investment advice?', a: 'No. It is a charting, research and practice tool. Signals are generated from published rules for research purposes. We are not a SEBI-registered investment adviser or research analyst. Trading in securities is subject to market risk.' },
   { q: 'Is the market data live?', a: 'During the beta, prices may be delayed and every screen says so. Live data arrives with broker connections, starting with Zerodha Kite Connect.' },
   { q: 'Which brokers will be supported?', a: 'Zerodha first, then Upstox, Dhan, Angel One and Fyers. Your broker login stays with your broker.' },
-  { q: 'What does it cost?', a: 'The beta is free. Pricing for paid plans will be announced before the beta ends.' },
+  LANDING
+    ? { q: 'What does it cost?', a: 'There will be a Free plan with delayed charts, backtesting and paper trading, and a Live plan with real-time NSE data. Prices will be announced at launch.' }
+    : { q: 'What does it cost?', a: 'The Free plan costs nothing: delayed charts, backtesting and paper trading. The Live plan adds real-time NSE data; see the pricing page.' },
 ];
 
 export default function Home() {
@@ -56,6 +59,7 @@ export default function Home() {
             ['#modules', 'Modules'],
             ['#why', 'Why us'],
             ['#faq', 'FAQ'],
+            ...(LANDING ? [] : [['/pricing', 'Pricing']]),
           ].map(([href, label]) => (
             <a key={href} href={href} className="rounded-full px-4 py-1.5 text-[13.5px] font-semibold text-ink-2 hover:bg-raised hover:text-ink">
               {label}

@@ -11,16 +11,19 @@
   },
   "dependencies": {
     "@mtv/backtest": "^0.1.0",
+    "@mtv/db": "^0.1.0",
     "@mtv/indicators": "^0.1.0",
     "@mtv/options": "^0.1.0",
     "@mtv/paper": "^0.1.0",
     "@mtv/shared": "^0.1.0",
+    "better-auth": "^1.7.12",
     "clsx": "^2.1.1",
     "lightweight-charts": "^5.2.1",
     "lucide-react": "1.60.0",
     "next": "15.5.28",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.3",

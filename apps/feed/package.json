@@ -18,7 +18,8 @@
     "@mtv/paper": "^0.1.0",
     "@mtv/shared": "*",
     "fastify": "^5.12.7",
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.2",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

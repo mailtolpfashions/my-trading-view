@@ -105,9 +105,11 @@ export async function syncFno(from: string, log: (m: string) => void): Promise<v
   }
 }
 
+/** Runs the sync now and every 30 minutes. Failures (e.g. the database still starting) are logged, never fatal. */
 export function startFnoSync(from: string, log: (m: string) => void) {
-  void syncFno(from, log);
-  setInterval(() => void syncFno(from, log), RETRY_MS);
+  const run = () => syncFno(from, log).catch((e) => log(`F&O sync failed, will retry: ${(e as Error).message.split('\n').slice(-2).join(' ')}`));
+  setTimeout(run, 5_000); // give the database a moment after a cold start
+  setInterval(run, RETRY_MS);
 }
 
 export async function fnoStatus() {

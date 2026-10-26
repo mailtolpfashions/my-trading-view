@@ -7,11 +7,121 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ---- Accounts (better-auth tables) ----
+
+model User {
+  id            String         @id
+  name          String
+  email         String         @unique
+  emailVerified Boolean        @default(false)
+  image         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+  subscriptions Subscription[]
+  payments      Payment[]
+  liveUsage     LiveUsage[]
+  paperAccount  PaperAccount?
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("verification")
+}
+
+// ---- Subscriptions ----
+
+model Subscription {
+  id                     String    @id @default(cuid())
+  userId                 String
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                   String // LIVE
+  interval               String // month | year
+  /// PENDING (checkout started) | ACTIVE | HALTED (payment failed) | CANCELLED
+  status                 String
+  provider               String // billing-sandbox | razorpay
+  providerSubscriptionId String    @unique
+  /// Paid access lasts until this moment, even after cancelling.
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean   @default(false)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([userId, status])
+}
+
+model Payment {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    String
+  /// The provider's payment id; unique so a webhook delivered twice records one payment.
+  paymentId   String   @unique
+  amountPaise Int
+  currency    String
+  createdAt   DateTime @default(now())
+}
+
+/// One row per user per month in which they received live (real-time) data: the basis for exchange per-user fees.
+model LiveUsage {
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  month     String // YYYY-MM (IST)
+  firstSeen DateTime @default(now())
+
+  @@id([userId, month])
+}
+
 // Paper trading. Money is stored as integer paise (BigInt) and positions/cash are never stored:
 // they are rebuilt from PaperTrade rows, so balances cannot drift from the trade history.
 
 model PaperAccount {
   id                String       @id @default(cuid())
+  /// Owner. Null only for the single pre-accounts paper account created during development.
+  userId            String?      @unique
+  user              User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
   name              String       @default("Paper account")
   startingCashPaise BigInt
   createdAt         DateTime     @default(now())

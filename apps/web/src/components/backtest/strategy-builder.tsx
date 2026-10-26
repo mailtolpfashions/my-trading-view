@@ -38,7 +38,7 @@ function OperandInput({ value, onChange }: { value: Operand; onChange: (o: Opera
   );
 }
 
-function Rules({ title, rules, onChange, optional }: { title: string; rules: RuleSet; onChange: (r: RuleSet) => void; optional?: boolean }) {
+export function Rules({ title, rules, onChange, optional }: { title: string; rules: RuleSet; onChange: (r: RuleSet) => void; optional?: boolean }) {
   const set = (i: number, c: Condition) => onChange({ ...rules, conditions: rules.conditions.map((x, j) => (j === i ? c : x)) });
   return (
     <div className="rounded-[12px] bg-raised p-3">

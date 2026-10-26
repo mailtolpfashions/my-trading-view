@@ -15,11 +15,15 @@ const toTrade = (t: DbTrade): StoredTrade => ({
   pricePaise: paise(t.pricePaise), chargesPaise: paise(t.chargesPaise), charges: t.charges as Charges, time: Math.floor(t.time.getTime() / 1000), tradeDate: t.tradeDate,
 });
 
-/** Single paper account for now; accounts become per-user when sign-in arrives. */
+/** One paper account per user, created with default funds on first use. */
 export class PrismaPaperRepo implements PaperRepo {
-  async account() {
-    const a = (await prisma.paperAccount.findFirst({ orderBy: { createdAt: 'asc' } })) ?? (await prisma.paperAccount.create({ data: { startingCashPaise: BigInt(DEFAULT_STARTING_CASH) } }));
+  async account(userId: string) {
+    const a = await prisma.paperAccount.upsert({ where: { userId }, create: { userId, startingCashPaise: BigInt(DEFAULT_STARTING_CASH) }, update: {} });
     return { id: a.id, startingCashPaise: paise(a.startingCashPaise), resetAt: a.resetAt.toISOString() };
+  }
+  async activeUsers() {
+    const rows = await prisma.paperAccount.findMany({ where: { userId: { not: null }, OR: [{ orders: { some: { status: { in: ['OPEN', 'TRIGGER_PENDING'] } } } }, { trades: { some: {} } }] }, select: { userId: true } });
+    return rows.map((r) => r.userId!);
   }
   async trades(accountId: string) {
     return (await prisma.paperTrade.findMany({ where: { accountId }, orderBy: { time: 'asc' } })).map(toTrade);
@@ -41,8 +45,8 @@ export class PrismaPaperRepo implements PaperRepo {
     });
     return toOrder(row);
   }
-  async updateOrder(id: string, from: PaperOrder['status'][], patch: Partial<Pick<PaperOrder, 'status' | 'triggered' | 'rejectReason'>>) {
-    const r = await prisma.paperOrder.updateMany({ where: { id, status: { in: from } }, data: patch });
+  async updateOrder(accountId: string, id: string, from: PaperOrder['status'][], patch: Partial<Pick<PaperOrder, 'status' | 'triggered' | 'rejectReason'>>) {
+    const r = await prisma.paperOrder.updateMany({ where: { id, accountId, status: { in: from } }, data: patch });
     return r.count === 1;
   }
   async fillOrder(accountId: string, orderId: string, from: PaperOrder['status'][], t: Omit<StoredTrade, 'id'>) {
@@ -67,41 +71,51 @@ export class PrismaPaperRepo implements PaperRepo {
   }
 }
 
-/** In-memory repository with the same conditional-update semantics, for tests. */
+/** In-memory repository with the same per-account and conditional-update semantics, for tests. */
 export class MemoryPaperRepo implements PaperRepo {
-  acc = { id: 'acc', startingCashPaise: DEFAULT_STARTING_CASH, resetAt: new Date(0).toISOString() };
-  ordersList: PaperOrder[] = [];
-  tradesList: StoredTrade[] = [];
+  accounts = new Map<string, { id: string; userId: string; startingCashPaise: Paise; resetAt: string }>();
+  ordersList: (PaperOrder & { accountId: string })[] = [];
+  tradesList: (StoredTrade & { accountId: string })[] = [];
   private seq = 0;
   clock = () => 0;
 
-  async account() { return { ...this.acc }; }
-  async trades() { return this.tradesList.map((t) => ({ ...t })); }
-  async orders(_: string, f: { open?: boolean; sinceTradeDate?: string }) {
-    return this.ordersList.filter((o) => (!f.open || o.status === 'OPEN' || o.status === 'TRIGGER_PENDING') && (!f.sinceTradeDate || o.tradeDate >= f.sinceTradeDate)).map((o) => ({ ...o }));
+  async account(userId: string) {
+    let a = this.accounts.get(userId);
+    if (!a) { a = { id: `acc-${userId}`, userId, startingCashPaise: DEFAULT_STARTING_CASH, resetAt: new Date(0).toISOString() }; this.accounts.set(userId, a); }
+    return { id: a.id, startingCashPaise: a.startingCashPaise, resetAt: a.resetAt };
   }
-  async createOrder(_: string, o: Omit<PaperOrder, 'id' | 'createdAt'>) {
-    const order = { ...o, id: `o${++this.seq}`, createdAt: this.clock() };
+  async activeUsers() {
+    return [...this.accounts.values()].filter((a) => this.ordersList.some((o) => o.accountId === a.id) || this.tradesList.some((t) => t.accountId === a.id)).map((a) => a.userId);
+  }
+  async trades(accountId: string) { return this.tradesList.filter((t) => t.accountId === accountId).map(({ accountId: _, ...t }) => ({ ...t })); }
+  async orders(accountId: string, f: { open?: boolean; sinceTradeDate?: string }) {
+    return this.ordersList
+      .filter((o) => o.accountId === accountId && (!f.open || o.status === 'OPEN' || o.status === 'TRIGGER_PENDING') && (!f.sinceTradeDate || o.tradeDate >= f.sinceTradeDate))
+      .map(({ accountId: _, ...o }) => ({ ...o }));
+  }
+  async createOrder(accountId: string, o: Omit<PaperOrder, 'id' | 'createdAt'>) {
+    const order = { ...o, id: `o${++this.seq}`, createdAt: this.clock(), accountId };
     this.ordersList.push(order);
-    return { ...order };
+    const { accountId: _, ...out } = order;
+    return { ...out };
   }
-  async updateOrder(id: string, from: PaperOrder['status'][], patch: Partial<PaperOrder>) {
-    const o = this.ordersList.find((x) => x.id === id);
+  async updateOrder(accountId: string, id: string, from: PaperOrder['status'][], patch: Partial<PaperOrder>) {
+    const o = this.ordersList.find((x) => x.id === id && x.accountId === accountId);
     if (!o || !from.includes(o.status)) return false;
     Object.assign(o, patch);
     return true;
   }
-  async fillOrder(_: string, orderId: string, from: PaperOrder['status'][], t: Omit<StoredTrade, 'id'>) {
-    const o = this.ordersList.find((x) => x.id === orderId);
+  async fillOrder(accountId: string, orderId: string, from: PaperOrder['status'][], t: Omit<StoredTrade, 'id'>) {
+    const o = this.ordersList.find((x) => x.id === orderId && x.accountId === accountId);
     if (!o || !from.includes(o.status)) return false;
     o.status = 'COMPLETE';
     o.avgFillPaise = t.pricePaise;
-    this.tradesList.push({ ...t, id: `t${++this.seq}` });
+    this.tradesList.push({ ...t, id: `t${++this.seq}`, accountId });
     return true;
   }
-  async reset(_: string, startingCashPaise: Paise) {
-    this.ordersList = [];
-    this.tradesList = [];
-    this.acc = { ...this.acc, startingCashPaise };
+  async reset(accountId: string, startingCashPaise: Paise) {
+    this.ordersList = this.ordersList.filter((o) => o.accountId !== accountId);
+    this.tradesList = this.tradesList.filter((t) => t.accountId !== accountId);
+    for (const a of this.accounts.values()) if (a.id === accountId) a.startingCashPaise = startingCashPaise;
   }
 }

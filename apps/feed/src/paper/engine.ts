@@ -27,12 +27,15 @@ export type StoredTrade = Trade & { charges: Charges };
 
 /** Storage the engine needs. Fill and status changes are conditional on the current status, so nothing happens twice. */
 export interface PaperRepo {
-  account(): Promise<{ id: string; startingCashPaise: Paise; resetAt: string }>;
+  /** The user's paper account, created with default funds on first use. */
+  account(userId: string): Promise<{ id: string; startingCashPaise: Paise; resetAt: string }>;
+  /** Users who have any paper orders or trades (the engine works their orders and positions on each tick). */
+  activeUsers(): Promise<string[]>;
   trades(accountId: string): Promise<StoredTrade[]>;
   orders(accountId: string, filter: { open?: boolean; sinceTradeDate?: string }): Promise<PaperOrder[]>;
   createOrder(accountId: string, o: Omit<PaperOrder, 'id' | 'createdAt'>): Promise<PaperOrder>;
-  /** Updates only if the order is currently in one of `from`. Returns false if it was not. */
-  updateOrder(id: string, from: PaperOrder['status'][], patch: Partial<Pick<PaperOrder, 'status' | 'triggered' | 'rejectReason'>>): Promise<boolean>;
+  /** Updates only if the order belongs to `accountId` and is currently in one of `from`. Returns false otherwise. */
+  updateOrder(accountId: string, id: string, from: PaperOrder['status'][], patch: Partial<Pick<PaperOrder, 'status' | 'triggered' | 'rejectReason'>>): Promise<boolean>;
   /** Marks the order COMPLETE and records its trade atomically, only if it is still open. */
   fillOrder(accountId: string, orderId: string, from: PaperOrder['status'][], trade: Omit<StoredTrade, 'id'>): Promise<boolean>;
   reset(accountId: string, startingCashPaise: Paise): Promise<void>;
@@ -40,16 +43,19 @@ export interface PaperRepo {
 
 export type EngineDeps = {
   repo: PaperRepo;
-  /** Latest LTP in paise from the cached quote stream, if any. */
-  ltp(symbol: string): Paise | undefined;
-  /** Fetches a fresh quote (used at order placement). */
-  freshLtp(symbol: string): Promise<Paise | undefined>;
+  /**
+   * Latest LTP in paise as this user may see it (live for the Live plan, 15-minute delayed for Free when the source is
+   * live), so paper fills never use prices the user is not entitled to.
+   */
+  ltp(symbol: string, userId: string): Paise | undefined;
+  /** Fetches a fresh quote for this user (used at order placement). */
+  freshLtp(symbol: string, userId: string): Promise<Paise | undefined>;
   /** Close of the last 5-minute bar at or before 15:20 IST on `date`, for an intraday position whose square-off was missed. */
   squareOffPrice(symbol: string, date: string): Promise<Paise | undefined>;
   isTradable(symbol: string): boolean;
   session(): MarketSession;
   now(): number; // UTC epoch seconds
-  onChange(): void;
+  onChange(userId: string): void;
   log(msg: string): void;
 };
 
@@ -71,8 +77,8 @@ export class PaperEngine {
     return next;
   }
 
-  private async state() {
-    const acc = await this.d.repo.account();
+  private async state(userId: string) {
+    const acc = await this.d.repo.account(userId);
     const trades = await this.d.repo.trades(acc.id);
     const open = await this.d.repo.orders(acc.id, { open: true });
     return { acc, trades, open, ledger: buildLedger(trades, acc.startingCashPaise) };
@@ -94,13 +100,13 @@ export class PaperEngine {
     return opening * ref + computeCharges({ side: o.side, product: o.product, qty: o.qty, pricePaise: ref }).total;
   }
 
-  private blocked(ledger: Ledger, open: PaperOrder[]) {
-    return open.reduce((sum, o) => sum + this.required(ledger, o, this.d.ltp(o.symbol) ?? o.pricePaise ?? o.triggerPaise ?? 0), 0);
+  private blocked(userId: string, ledger: Ledger, open: PaperOrder[]) {
+    return open.reduce((sum, o) => sum + this.required(ledger, o, this.d.ltp(o.symbol, userId) ?? o.pricePaise ?? o.triggerPaise ?? 0), 0);
   }
 
-  placeOrder(input: PlaceOrderInput): Promise<PaperOrder> {
+  placeOrder(userId: string, input: PlaceOrderInput): Promise<PaperOrder> {
     return this.serial(async () => {
-      const { acc, ledger, open } = await this.state();
+      const { acc, ledger, open } = await this.state(userId);
       const now = this.d.now();
       const tradeDate = istDate(now);
       const symbol = input.symbol.toUpperCase();
@@ -109,7 +115,7 @@ export class PaperEngine {
 
       const reject = async (reason: string) => {
         const o = await this.d.repo.createOrder(acc.id, { ...base, pricePaise, triggerPaise, status: 'REJECTED', rejectReason: reason });
-        this.d.onChange();
+        this.d.onChange(userId);
         return o;
       };
 
@@ -123,7 +129,7 @@ export class PaperEngine {
       if (this.d.session() !== 'open') return reject('Market is closed. Orders can be placed 09:15–15:30 IST on trading days.');
       if (!this.d.isTradable(symbol)) return reject(`${symbol} cannot be traded here: only NSE equities (indices and F&O need a broker connection)`);
       if (input.product === 'MIS' && istMinutes(now) >= SQUARE_OFF) return reject('Intraday (MIS) orders are not accepted after 15:20 IST');
-      const ltp = await this.d.freshLtp(symbol);
+      const ltp = await this.d.freshLtp(symbol, userId);
       if (!ltp) return reject(`No price available for ${symbol}`);
       const invalid = validateOrder({ side: input.side, type: input.type, qty: input.qty, pricePaise: pricePaise ?? undefined, triggerPaise: triggerPaise ?? undefined }, ltp);
       if (invalid) return reject(invalid);
@@ -135,32 +141,34 @@ export class PaperEngine {
       }
 
       const need = this.required(ledger, { symbol, product: input.product, side: input.side, qty: input.qty, type: input.type, pricePaise, triggerPaise }, ltp);
-      const f = funds(ledger, (s) => (s === symbol ? ltp : this.d.ltp(s)), this.blocked(ledger, open));
+      const f = funds(ledger, (s) => (s === symbol ? ltp : this.d.ltp(s, userId)), this.blocked(userId, ledger, open));
       if (need > f.availablePaise) return reject(`Insufficient funds: this order needs ₹${(need / 100).toFixed(2)}, available ₹${(f.availablePaise / 100).toFixed(2)}`);
 
       const status = input.type === 'SL' || input.type === 'SLM' ? 'TRIGGER_PENDING' : 'OPEN';
       const order = await this.d.repo.createOrder(acc.id, { ...base, pricePaise, triggerPaise, status, rejectReason: null });
       await this.tryFill(acc.id, order, ltp, true);
-      this.d.onChange();
+      this.d.onChange(userId);
       return (await this.d.repo.orders(acc.id, { sinceTradeDate: tradeDate })).find((o) => o.id === order.id) ?? order;
     });
   }
 
-  cancelOrder(id: string): Promise<boolean> {
+  /** Cancels one of this user's open orders. Another user's order id is simply "not found". */
+  cancelOrder(userId: string, id: string): Promise<boolean> {
     return this.serial(async () => {
-      const ok = await this.d.repo.updateOrder(id, OPEN_STATES, { status: 'CANCELLED', rejectReason: 'Cancelled by you' });
-      if (ok) this.d.onChange();
+      const acc = await this.d.repo.account(userId);
+      const ok = await this.d.repo.updateOrder(acc.id, id, OPEN_STATES, { status: 'CANCELLED', rejectReason: 'Cancelled by you' });
+      if (ok) this.d.onChange(userId);
       return ok;
     });
   }
 
-  reset(startingCash: number | string): Promise<void> {
+  reset(userId: string, startingCash: number | string): Promise<void> {
     return this.serial(async () => {
       const p = toPaise(startingCash);
       if (p < 10_000_00 || p > 10_00_00_000_00) throw new Error('Starting funds must be between ₹10,000 and ₹10 crore');
-      const acc = await this.d.repo.account();
+      const acc = await this.d.repo.account(userId);
       await this.d.repo.reset(acc.id, p);
-      this.d.onChange();
+      this.d.onChange(userId);
     });
   }
 
@@ -169,7 +177,7 @@ export class PaperEngine {
     let r = evaluate({ side: order.side, type: order.type, pricePaise: order.pricePaise ?? undefined, triggerPaise: order.triggerPaise ?? undefined, triggered: order.triggered }, ltp, isNew);
     let changed = false;
     if (r.action === 'trigger') {
-      if (!(await this.d.repo.updateOrder(order.id, ['TRIGGER_PENDING'], { status: 'OPEN', triggered: true }))) return false;
+      if (!(await this.d.repo.updateOrder(accountId, order.id, ['TRIGGER_PENDING'], { status: 'OPEN', triggered: true }))) return false;
       changed = true;
       order = { ...order, status: 'OPEN', triggered: true };
       r = evaluate({ side: order.side, type: order.type, pricePaise: order.pricePaise ?? undefined, triggerPaise: order.triggerPaise ?? undefined, triggered: true }, ltp, true);
@@ -190,26 +198,28 @@ export class PaperEngine {
     return ok;
   }
 
-  /** Called on every quote poll: works resting orders, then end-of-day housekeeping. */
+  /** Called on every quote poll: for each user, works resting orders, then end-of-day housekeeping. */
   tick(): Promise<void> {
     return this.serial(async () => {
-      const { acc, open } = await this.state();
-      const now = this.d.now();
-      let changed = false;
-      if (this.d.session() === 'open') {
-        for (const o of open) {
-          const ltp = this.d.ltp(o.symbol);
-          if (!ltp || o.tradeDate !== istDate(now)) continue;
-          changed = (await this.tryFill(acc.id, o, ltp, false)) || changed;
+      for (const userId of await this.d.repo.activeUsers()) {
+        const { acc, open } = await this.state(userId);
+        const now = this.d.now();
+        let changed = false;
+        if (this.d.session() === 'open') {
+          for (const o of open) {
+            const ltp = this.d.ltp(o.symbol, userId);
+            if (!ltp || o.tradeDate !== istDate(now)) continue;
+            changed = (await this.tryFill(acc.id, o, ltp, false)) || changed;
+          }
         }
+        changed = (await this.housekeeping(userId, acc.id, acc.startingCashPaise)) || changed;
+        if (changed) this.d.onChange(userId);
       }
-      changed = (await this.housekeeping(acc.id)) || changed;
-      if (changed) this.d.onChange();
     });
   }
 
   /** Expires unfilled orders after the close (or from earlier days) and squares off intraday positions from 15:20 IST. */
-  private async housekeeping(accountId: string): Promise<boolean> {
+  private async housekeeping(userId: string, accountId: string, startingCashPaise: Paise): Promise<boolean> {
     const now = this.d.now();
     const today = istDate(now);
     const mins = istMinutes(now);
@@ -219,18 +229,18 @@ export class PaperEngine {
       const stale = o.tradeDate < today || (mins >= CLOSE && o.tradeDate === today);
       const misCutoff = o.product === 'MIS' && o.tradeDate === today && mins >= SQUARE_OFF;
       if (stale || misCutoff) {
-        changed = (await this.d.repo.updateOrder(o.id, OPEN_STATES, { status: 'CANCELLED', rejectReason: stale ? 'Expired at market close' : 'Cancelled at intraday square-off (15:20 IST)' })) || changed;
+        changed = (await this.d.repo.updateOrder(accountId, o.id, OPEN_STATES, { status: 'CANCELLED', rejectReason: stale ? 'Expired at market close' : 'Cancelled at intraday square-off (15:20 IST)' })) || changed;
       }
     }
 
-    const ledger = buildLedger(await this.d.repo.trades(accountId), (await this.d.repo.account()).startingCashPaise);
+    const ledger = buildLedger(await this.d.repo.trades(accountId), startingCashPaise);
     for (const p of ledger.positions.filter((p) => p.product === 'MIS' && p.qty !== 0)) {
       const sameDay = p.lastTradeDate === today;
       if (sameDay && mins < SQUARE_OFF) continue;
       // During today's session after 15:20: square off at the current price. If the 15:20 square-off was missed
       // (server down), use the 15:20 bar close of that day, stamped 15:20 IST.
       const live = sameDay && this.d.session() === 'open';
-      const price = live ? this.d.ltp(p.symbol) : await this.d.squareOffPrice(p.symbol, p.lastTradeDate);
+      const price = live ? this.d.ltp(p.symbol, userId) : await this.d.squareOffPrice(p.symbol, p.lastTradeDate);
       if (!price) { this.d.log(`Square-off for ${p.symbol} waiting for a price`); continue; }
       const time = live ? now : Date.parse(`${p.lastTradeDate}T15:20:00Z`) / 1000 - IST;
       const side: Side = p.qty > 0 ? 'SELL' : 'BUY';
@@ -242,16 +252,21 @@ export class PaperEngine {
     return changed;
   }
 
-  /** Symbols the engine needs quotes for: open orders and open positions. */
+  /** Symbols the engine needs quotes for: every active user's open orders and open positions. */
   async symbols(): Promise<string[]> {
-    const { open, ledger } = await this.state();
-    return [...new Set([...open.map((o) => o.symbol), ...ledger.positions.filter((p) => p.qty !== 0).map((p) => p.symbol)])];
+    const out = new Set<string>();
+    for (const userId of await this.d.repo.activeUsers()) {
+      const { open, ledger } = await this.state(userId);
+      open.forEach((o) => out.add(o.symbol));
+      ledger.positions.filter((p) => p.qty !== 0).forEach((p) => out.add(p.symbol));
+    }
+    return [...out];
   }
 
-  async snapshot(): Promise<PaperSnapshot> {
-    const { acc, trades, open, ledger } = await this.state();
+  async snapshot(userId: string): Promise<PaperSnapshot> {
+    const { acc, trades, open, ledger } = await this.state(userId);
     const today = istDate(this.d.now());
-    const f = funds(ledger, (s) => this.d.ltp(s), this.blocked(ledger, open));
+    const f = funds(ledger, (s) => this.d.ltp(s, userId), this.blocked(userId, ledger, open));
     const orders = await this.d.repo.orders(acc.id, { sinceTradeDate: today });
     const all = [...new Map([...open, ...orders].map((o) => [o.id, o])).values()].sort((a, b) => b.createdAt - a.createdAt);
     return {
@@ -262,7 +277,7 @@ export class PaperEngine {
       positions: ledger.positions
         .filter((p) => p.qty !== 0 || p.lastTradeDate === today)
         .map((p) => {
-          const ltp = this.d.ltp(p.symbol) ?? null;
+          const ltp = this.d.ltp(p.symbol, userId) ?? null;
           return { symbol: p.symbol, product: p.product, qty: p.qty, avgPricePaise: avgPricePaise(p), ltpPaise: ltp, unrealisedPaise: ltp ? unrealisedPaise(p, ltp) : 0, realisedPaise: p.realisedPaise, chargesPaise: p.chargesPaise };
         }),
       orders: all,

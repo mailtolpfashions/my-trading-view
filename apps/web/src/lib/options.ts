@@ -1,4 +1,4 @@
-import { FEED_URL } from './feed';
+import { FEED_URL, feedFetch } from './feed';
 
 export type ChainSide = { closePaise: number; settlePaise: number; oi: number; volume: number; traded: boolean; iv: number | null; delta: number | null; theta: number | null; vega: number | null; gamma: number | null };
 export type ChainRow = { strikePaise: number; CE: ChainSide | null; PE: ChainSide | null };
@@ -15,7 +15,7 @@ export type Chain = {
 };
 
 export async function fetchChain(underlying: string, expiry?: string): Promise<Chain> {
-  const res = await fetch(`${FEED_URL}/api/fno/chain?underlying=${underlying}${expiry ? `&expiry=${expiry}` : ''}`);
+  const res = await feedFetch(`${FEED_URL}/api/fno/chain?underlying=${underlying}${expiry ? `&expiry=${expiry}` : ''}`);
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.message ?? 'Option chain unavailable');
   return body as Chain;

@@ -9,6 +9,7 @@
     "dev": "concurrently -n db,feed,web -c magenta,yellow,cyan \"npm run start -w @mtv/db\" \"npm run dev -w @mtv/feed\" \"npm run dev -w @mtv/web\"",
     "build": "npm run generate -w @mtv/db && npm run build --workspace @mtv/web",
     "start": "concurrently -n db,feed,web -c magenta,yellow,cyan \"npm run start -w @mtv/db\" \"npm run start -w @mtv/feed\" \"npm run start -w @mtv/web\"",
+    "app": "concurrently -n feed,web -c yellow,cyan \"npm run start -w @mtv/feed\" \"npm run start -w @mtv/web\"",
     "db:start": "npm run start -w @mtv/db",
     "db:migrate": "npm run migrate -w @mtv/db",
     "typecheck": "npm run typecheck --workspaces --if-present",
