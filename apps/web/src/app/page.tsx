@@ -76,8 +76,8 @@ export default function Home() {
           <span className="live-dot h-2 w-2 rounded-full bg-up" aria-hidden="true" />
           Beta for NSE &amp; BSE traders
         </span>
-        <h1 className="mx-auto mt-6 max-w-[900px] text-[clamp(36px,6vw,68px)] leading-[1.02] font-extrabold tracking-[-0.045em]">
-          India&rsquo;s all-in-one <span className="rounded-[0.18em] bg-accent px-[0.12em] text-accent-ink [box-decoration-break:clone]">trading workspace</span>
+        <h1 className="mx-auto mt-6 max-w-[900px] text-[clamp(36px,6vw,68px)] leading-[1.36] font-extrabold tracking-[-0.045em]">
+          India&rsquo;s all-in-one <span className="rounded-[0.16em] bg-accent px-[0.12em] text-accent-ink [box-decoration-break:clone]">trading workspace</span>
         </h1>
         <p className="mx-auto mt-5 max-w-[640px] text-[17px] leading-relaxed text-ink-2">
           Charts with every indicator, live option chains, futures analytics, rule-based signals, backtesting and paper trading. One terminal, built for the Indian market.

@@ -17,6 +17,7 @@
   --color-accent: #ffc21a;
   --color-accent-ink: #3d2c00;
   --color-accent-soft: #fff4cc;
+  --color-accent-deep: #b07d00; /* accent as text, large headings only (about 2.9:1 on canvas) */
 
   /* Market colours match TradingView so charts and tables agree. */
   --color-up: #089981;
