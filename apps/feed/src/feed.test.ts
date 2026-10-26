@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Instrument } from '@mtv/shared';
-import { parseChart, parseSpark, withinSession } from './providers/free';
+import { checkGranularity, parseChart, parseSpark, withinSession } from './providers/free';
 import { auditCandles } from './quality';
 import { parseEquityList, searchInstruments } from './symbols';
 
@@ -26,6 +26,13 @@ describe('parseChart', () => {
     expect(withinSession(at(15, 25))).toBe(true);
     expect(withinSession(at(15, 30))).toBe(false);
     expect(withinSession(at(9, 15))).toBe(true);
+  });
+  it('refuses bars of the wrong size (Yahoo returns monthly bars for range=max)', () => {
+    const resp = (g: string) => ({ chart: { error: null, result: [{ meta: { dataGranularity: g }, timestamp: [1], indicators: { quote: [{ open: [1], high: [1], low: [1], close: [1], volume: [1] }] } }] } });
+    expect(() => checkGranularity(resp('1mo'), '1d')).toThrow(/1mo bars for a 1d request/);
+    expect(() => checkGranularity(resp('1mo'), '1wk')).toThrow();
+    expect(() => checkGranularity(resp('1d'), '1d')).not.toThrow();
+    expect(() => checkGranularity(resp('1h'), '60m')).not.toThrow(); // Yahoo reports 60m as 1h
   });
   it('returns nothing when Yahoo has no result', () => {
     expect(parseChart({ chart: { result: null, error: { code: 'Not Found', description: '' } } })).toEqual([]);

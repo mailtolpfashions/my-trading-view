@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@mtv/backtest": "^0.1.0",
     "@mtv/indicators": "^0.1.0",
     "@mtv/paper": "^0.1.0",
     "@mtv/shared": "^0.1.0",

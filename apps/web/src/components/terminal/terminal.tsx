@@ -9,6 +9,7 @@ import { LogoMark } from '@/components/logo';
 import { STUDIES } from '@/lib/chart/studies';
 import { fetchCandles, useQuotes } from '@/lib/feed';
 import { fmt, tfLabel } from '@/lib/format';
+import { BacktestView } from '@/components/backtest/backtest-view';
 import { ChartView, type ChartType } from './chart-view';
 import { DataCheck } from './data-check';
 import { OrderTicket, type TicketRequest } from './order-ticket';
@@ -24,6 +25,7 @@ const PULSE_NAMES: Record<string, string> = { NIFTY: 'NIFTY 50', MIDCPNIFTY: 'MI
 const DEFAULT_WATCH = ['NIFTY', 'BANKNIFTY', 'SENSEX', 'FINNIFTY', 'INDIAVIX', 'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 'SBIN', 'BHARTIARTL', 'ITC', 'LT', 'AXISBANK', 'KOTAKBANK', 'BAJFINANCE', 'MARUTI'];
 const TFS: Timeframe[] = ['1', '5', '15', '30', '60', 'D', 'W'];
 const MODULES = ['Chart', 'Option chain', 'Futures', 'Signals', 'Backtest', 'Paper', 'Algo', 'Research'];
+const LIVE_MODULES = ['Chart', 'Backtest'];
 const DAY = 86400;
 const RANGES: [label: string, tf: Timeframe, seconds: number | (() => number)][] = [
   ['1D', '1', DAY], ['5D', '5', 7 * DAY], ['1M', '30', 31 * DAY], ['3M', '60', 92 * DAY], ['6M', '60', 183 * DAY],
@@ -63,6 +65,7 @@ export function Terminal() {
   const [menu, setMenu] = useState<null | 'type' | 'ind'>(null);
   const [side, setSide] = useState<'watch' | 'chain' | 'signals' | 'scanner'>('watch');
   const [notice, setNotice] = useState<string | null>(null);
+  const [module, setModule] = useState('Chart');
 
   const subscribed = useMemo(() => [...new Set([...PULSE, ...watch, sym.symbol])], [watch, sym.symbol]);
   const { quotes, status, session: feedSession, connected, paper } = useQuotes(subscribed);
@@ -137,18 +140,23 @@ export function Terminal() {
           <span className="hidden text-[15.5px] font-extrabold tracking-[-0.03em] xl:inline">My Trading View</span>
         </Link>
         <nav className="hidden gap-0.5 rounded-full bg-panel p-1 shadow-[var(--shadow-panel)] lg:flex" aria-label="Modules">
-          {MODULES.map((m, i) => (
-            <button
-              key={m}
-              type="button"
-              disabled={i > 0}
-              title={i > 0 ? `${m}: coming in a later build step` : undefined}
-              className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold ${i === 0 ? 'bg-ink text-white' : 'text-ink-2 disabled:cursor-not-allowed disabled:opacity-55'}`}
-            >
-              {i === 0 && <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-accent align-[2px]" />}
-              {m}
-            </button>
-          ))}
+          {MODULES.map((m) => {
+            const live = LIVE_MODULES.includes(m), on = m === module;
+            return (
+              <button
+                key={m}
+                type="button"
+                disabled={!live}
+                onClick={() => live && setModule(m)}
+                aria-current={on ? 'page' : undefined}
+                title={live ? undefined : `${m}: coming in a later build step`}
+                className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold ${on ? 'bg-ink text-white' : 'text-ink-2 hover:bg-raised disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent'}`}
+              >
+                {on && <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-accent align-[2px]" />}
+                {m}
+              </button>
+            );
+          })}
         </nav>
         <button type="button" onClick={() => setSearch('chart')} className="ml-auto flex h-[38px] w-full max-w-[420px] items-center gap-2.5 rounded-full bg-panel pr-1.5 pl-4 text-[13px] text-muted shadow-[var(--shadow-panel)]">
           <Search size={15} aria-hidden="true" /> Search symbols
@@ -178,6 +186,7 @@ export function Terminal() {
       </div>
 
       {/* workspace */}
+      {module === 'Backtest' ? <BacktestView /> : (
       <main className="grid min-h-0 grid-cols-[1fr_380px] grid-rows-[1fr_210px] gap-2">
         <section className="panel grid min-h-0 min-w-0 grid-rows-[44px_1fr_34px] overflow-hidden">
           {/* chart toolbar */}
@@ -307,6 +316,7 @@ export function Terminal() {
 
         <PaperPanel snapshot={paper} unavailable={connected && !paper} onTicket={setTicket} onNotice={setNotice} />
       </main>
+      )}
 
       <OrderTicket req={ticket} snapshot={paper} delayed={delayed} onClose={() => setTicket(null)} onDone={setNotice} />
 

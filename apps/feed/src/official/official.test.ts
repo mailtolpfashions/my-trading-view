@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { strToU8, zipSync } from 'fflate';
 import { bhavcopyUrl, indexCloseUrl, parseBhavcopy, parseIndexClose, recentWeekdays, splitCsvLine, unzipFirstCsv } from './nse-files';
-import { applyOfficial, type DayRecord } from './store';
+import { applyOfficial, isCorporateActionRatio, type DayRecord } from './store';
 
 // Header layouts as published by NSE (index close file and the UDiFF cash-market bhavcopy).
 const INDEX_CSV = [
@@ -70,7 +70,7 @@ describe('applyOfficial', () => {
     expect(r.candles[0]).toBe(ours[0]);
     expect(r.candles[1]).toBe(ours[1]);
     expect(r.candles[2]).toEqual({ time: t(26), open: 1192, high: 1205.4, low: 1188.1, close: 1201.8, volume: 9000 });
-    expect(r.official).toEqual({ verified: 2, corrected: [{ time: t(26), fields: ['close', 'volume'] }], latest: '2026-10-26' });
+    expect(r.official).toEqual({ verified: 2, corrected: [{ time: t(26), fields: ['close', 'volume'] }], adjusted: [], latest: '2026-10-26' });
   });
   it('adds official bars for dates the free source is missing, in time order', () => {
     const today = { time: t(27), open: 1200, high: 1210, low: 1195, close: 1205, volume: 100 };
@@ -82,6 +82,18 @@ describe('applyOfficial', () => {
   });
   it('does not add anything for a symbol NSE has no record of', () => {
     expect(applyOfficial('UNKNOWN', [], lookup, ['2026-10-23']).candles).toEqual([]);
+  });
+  it('keeps split/bonus-adjusted bars instead of overwriting them with the unadjusted NSE record', () => {
+    // NSE record before a 1:1 bonus: 2380/2410/2360/2400; the free source now shows it halved
+    const pre = { '2026-10-23': rec('2026-10-23', { XYZ: { open: 2380, high: 2410, low: 2360, close: 2400, volume: 1000 } }) };
+    const ours = [{ time: t(23), open: 1190, high: 1205, low: 1180, close: 1200, volume: 2000 }];
+    const r = applyOfficial('XYZ', ours, (d) => pre[d as keyof typeof pre], ['2026-10-23']);
+    expect(r.candles[0]).toBe(ours[0]);
+    expect(r.official).toMatchObject({ corrected: [], adjusted: [t(23)] });
+  });
+  it('still corrects a genuine error that is not a uniform ratio', () => {
+    expect(isCorporateActionRatio({ open: 1180, high: 1192, low: 1175, close: 1150 }, { open: 1180, high: 1192, low: 1175, close: 1190 })).toBe(false);
+    expect(isCorporateActionRatio({ open: 1180.5, high: 1192, low: 1175, close: 1190 }, { open: 1180, high: 1192, low: 1175, close: 1190 })).toBe(false);
   });
   it('ignores float noise below a paisa', () => {
     const r = applyOfficial('RELIANCE', [{ time: t(23), open: 1180.0000001, high: 1192, low: 1175, close: 1190, volume: 5000 }], lookup, ['2026-10-23']);

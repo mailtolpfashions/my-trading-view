@@ -2,6 +2,7 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import Fastify from 'fastify';
 import type { WebSocket } from 'ws';
+import { BacktestError, runBacktest, type Strategy } from '@mtv/backtest';
 import { toPaise, type PlaceOrderInput } from '@mtv/paper';
 import { NEEDS_BROKER, TIMEFRAMES, marketSession, type ClientMessage, type Quote, type ServerMessage, type Timeframe } from '@mtv/shared';
 import { PaperEngine } from './paper/engine';
@@ -60,6 +61,32 @@ app.get<{ Querystring: { symbols?: string } }>('/api/quotes', async (req, reply)
   } catch (e) {
     req.log.error(e);
     return reply.code(502).send({ error: 'upstream_failed' });
+  }
+});
+
+// ---- backtesting ----
+app.post<{ Body: { symbol?: string; tf?: string; strategy?: Strategy } }>('/api/backtest', async (req, reply) => {
+  const symbol = String(req.body?.symbol ?? '').toUpperCase();
+  const tf = (req.body?.tf ?? 'D') as Timeframe;
+  const instrument = findInstrument(symbol);
+  if (!instrument) return reply.code(404).send({ error: 'unknown_symbol', message: `Unknown symbol ${symbol}` });
+  if (!TIMEFRAMES.includes(tf)) return reply.code(400).send({ error: 'bad_timeframe', message: 'Unknown timeframe' });
+  if (!req.body?.strategy) return reply.code(400).send({ error: 'bad_strategy', message: 'Missing strategy' });
+  try {
+    let raw = await provider.candles(symbol, tf, true);
+    let official;
+    if (tf === 'D') ({ candles: raw, official } = applyOfficial(symbol, raw));
+    const { candles, quality } = auditCandles(raw, tf);
+    if (official) quality.official = official;
+    const started = performance.now();
+    const result = runBacktest(candles, tf, req.body.strategy);
+    req.log.info({ symbol, tf, bars: candles.length, trades: result.trades.length, ms: Math.round(performance.now() - started) }, 'backtest');
+    return { instrument, tf, status: provider.status, quality, result, candles };
+  } catch (e) {
+    if (e instanceof BacktestError) return reply.code(400).send({ error: 'bad_strategy', message: e.message });
+    if (e instanceof NotFoundError) return reply.code(404).send({ error: 'no_data', message: `No data for ${symbol}` });
+    req.log.error(e);
+    return reply.code(502).send({ error: 'upstream_failed', message: 'Market data is unavailable right now' });
   }
 });
 

@@ -59,7 +59,13 @@ export type DataQuality = {
    * Daily charts only: comparison with NSE's official end-of-day files. Where an official record exists it
    * replaces the free source's bar, and every replaced bar is listed so the user can see what changed.
    */
-  official?: { verified: number; corrected: { time: number; fields: string[] }[]; latest: string | null };
+  official?: {
+    verified: number;
+    corrected: { time: number; fields: string[] }[];
+    /** Bars kept as-is because they differ from NSE's record by a uniform split/bonus ratio (prices are adjusted). */
+    adjusted: number[];
+    latest: string | null;
+  };
 };
 
 // ---- WebSocket protocol (browser <-> feed) ----

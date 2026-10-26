@@ -29,7 +29,8 @@ export function DataCheck({ quality, delayed }: { quality: DataQuality | null; d
     <p className="mt-2">
       {off.verified
         ? <>Checked against <b className="font-bold text-ink">NSE&rsquo;s official end-of-day files</b> for {off.verified} day{off.verified > 1 ? 's' : ''} (latest {day(off.latest!)}).
-            {off.corrected.length ? ` ${off.corrected.length} bar${off.corrected.length > 1 ? 's were' : ' was'} corrected or added from NSE's official record:${off.corrected.slice(0, 8).map((c) => `${ist(c.time).slice(0, 5)} (${c.fields.join(', ')})`).join('; ')}.` : ' All matched exactly.'}</>
+            {off.corrected.length ? ` ${off.corrected.length} bar${off.corrected.length > 1 ? 's were' : ' was'} corrected or added from NSE's official record:${off.corrected.slice(0, 8).map((c) => `${ist(c.time).slice(0, 5)} (${c.fields.join(', ')})`).join('; ')}.` : off.adjusted?.length ? '' : ' All matched exactly.'}
+            {off.adjusted?.length ? ` ${off.adjusted.length} bar${off.adjusted.length > 1 ? 's differ' : ' differs'} from NSE's record by a split/bonus ratio and ${off.adjusted.length > 1 ? 'were' : 'was'} kept adjusted, as TradingView shows them.` : ''}</>
         : <>Not yet checked against NSE&rsquo;s official end-of-day files; they download automatically each evening.</>}
     </p>
   );

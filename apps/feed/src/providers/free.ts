@@ -17,12 +17,27 @@ const INTERVALS: Record<Timeframe, [interval: string, range: string]> = {
   '30': ['30m', '1mo'],
   '60': ['60m', '6mo'],
   D: ['1d', '5y'],
-  W: ['1wk', 'max'],
+  W: ['1wk', '20y'],
 };
+
+/**
+ * Backtests use the deepest history Yahoo serves at the requested bar size. Never use range=max:
+ * Yahoo then silently returns MONTHLY bars for daily and weekly requests.
+ */
+const DEEP_RANGES: Record<Timeframe, string> = { '1': '7d', '5': '60d', '15': '60d', '30': '60d', '60': '730d', D: '10y', W: '20y' };
+
+/** The bar size Yahoo reports back for each interval we request. */
+const GRANULARITY: Record<string, string> = { '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m', '60m': '1h', '1d': '1d', '1wk': '1wk' };
+
+/** Refuses a response whose bars are not the size we asked for, instead of mislabelling them. */
+export function checkGranularity(json: YahooChart, interval: string) {
+  const got = json.chart.result?.[0]?.meta?.dataGranularity;
+  if (got && got !== GRANULARITY[interval]) throw new Error(`Yahoo returned ${got} bars for a ${interval} request`);
+}
 
 type YahooChart = {
   chart: {
-    result: { timestamp?: number[]; indicators: { quote: { open: (number | null)[]; high: (number | null)[]; low: (number | null)[]; close: (number | null)[]; volume: (number | null)[] }[] } }[] | null;
+    result: { meta?: { dataGranularity?: string }; timestamp?: number[]; indicators: { quote: { open: (number | null)[]; high: (number | null)[]; low: (number | null)[]; close: (number | null)[]; volume: (number | null)[] }[] } }[] | null;
     error: { code: string; description: string } | null;
   };
 };
@@ -79,12 +94,15 @@ export class FreeProvider implements MarketDataProvider {
   private candleCache = new TtlCache<Candle[]>();
   private quoteCache = new TtlCache<Quote[]>();
 
-  async candles(symbol: string, tf: Timeframe): Promise<Candle[]> {
-    const [interval, range] = INTERVALS[tf];
+  async candles(symbol: string, tf: Timeframe, deep = false): Promise<Candle[]> {
+    const interval = INTERVALS[tf][0];
+    const range = deep ? DEEP_RANGES[tf] : INTERVALS[tf][1];
     const ttl = tf === 'D' || tf === 'W' ? 10 * 60_000 : 30_000;
-    return this.candleCache.get(`${symbol}:${tf}`, ttl, async () => {
+    return this.candleCache.get(`${symbol}:${tf}:${range}`, ttl, async () => {
       const url = `${BASE}/v8/finance/chart/${encodeURIComponent(yahooTicker(symbol))}?interval=${interval}&range=${range}&includePrePost=false`;
-      let candles = parseChart(await getJson<YahooChart>(url));
+      const json = await getJson<YahooChart>(url);
+      checkGranularity(json, interval);
+      let candles = parseChart(json);
       if (tf !== 'D' && tf !== 'W') candles = candles.filter(withinSession);
       if (!candles.length) throw new NotFoundError(symbol);
       return candles;

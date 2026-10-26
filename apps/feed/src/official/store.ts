@@ -48,6 +48,7 @@ export function applyOfficial(
 ) {
   let verified = 0, latest: TradeDate | null = null;
   const corrected: { time: number; fields: string[] }[] = [];
+  const adjusted: number[] = [];
   const out = candles.map((c) => {
     const date = tradeDate(c.time);
     const off = lookup(date)?.bars[symbol];
@@ -57,6 +58,12 @@ export function applyOfficial(
     const fields: string[] = (['open', 'high', 'low', 'close'] as const).filter((k) => r2(c[k]) !== r2(off[k]));
     if (off.volume != null && c.volume !== off.volume) fields.push('volume');
     if (!fields.length) return c;
+    // A uniform ratio across all prices means a split/bonus happened after NSE's record was saved: our bar is
+    // already adjusted and NSE's is the actual traded price that day. Keep the adjusted bar; report it.
+    if (isCorporateActionRatio(c, off)) {
+      adjusted.push(c.time);
+      return c;
+    }
     corrected.push({ time: c.time, fields });
     return { time: c.time, open: off.open, high: off.high, low: off.low, close: off.close, volume: off.volume ?? c.volume };
   });
@@ -74,5 +81,12 @@ export function applyOfficial(
   }
   out.sort((a, b) => a.time - b.time);
   corrected.sort((a, b) => a.time - b.time);
-  return { candles: out, official: { verified, corrected, latest } };
+  return { candles: out, official: { verified, corrected, adjusted, latest } };
+}
+
+/** True when every price differs from NSE's by the same factor (within 0.5%) and that factor is not ~1. */
+export function isCorporateActionRatio(c: Pick<Candle, 'open' | 'high' | 'low' | 'close'>, off: OfficialBar): boolean {
+  const ratios = (['open', 'high', 'low', 'close'] as const).map((k) => c[k] / off[k]);
+  const [min, max] = [Math.min(...ratios), Math.max(...ratios)];
+  return Math.abs(ratios[0] - 1) > 0.02 && (max - min) / max < 0.005;
 }
