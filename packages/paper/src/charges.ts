@@ -31,6 +31,34 @@ export type Charges = {
   total: Paise;
 };
 
+/** Index options (NSE). Same effective date and source caveats as CHARGE_RATES. */
+export const OPTION_CHARGE_RATES = {
+  effectiveFrom: '2024-10-01',
+  brokeragePerOrderPaise: 20_00, // flat ₹20 per executed order
+  sttSell: 0.001, // 0.1% of premium, sell side
+  sttExercise: 0.00125, // 0.125% of intrinsic value on options exercised at expiry (paid by the buyer)
+  exchangeTxn: 0.0003503, // NSE options: 0.03503% of premium
+  sebiFee: 0.000001,
+  stampDutyBuy: 0.00003, // 0.003% of premium, buy side
+  gst: 0.18,
+} as const;
+
+/** Charges for one executed option order. Premium turnover = qty × premium. */
+export function computeOptionCharges(o: { side: Side; qty: number; premiumPaise: Paise }): Charges {
+  const r = OPTION_CHARGE_RATES;
+  const turnover = o.qty * o.premiumPaise;
+  const brokerage = turnover > 0 ? r.brokeragePerOrderPaise : 0;
+  const stt = o.side === 'SELL' ? applyRate(turnover, r.sttSell) : 0;
+  const exchangeTxn = applyRate(turnover, r.exchangeTxn);
+  const sebiFee = applyRate(turnover, r.sebiFee);
+  const stampDuty = o.side === 'BUY' ? applyRate(turnover, r.stampDutyBuy) : 0;
+  const gst = applyRate(brokerage + exchangeTxn + sebiFee, r.gst);
+  return { brokerage, stt, exchangeTxn, sebiFee, stampDuty, gst, dpCharge: 0, total: brokerage + stt + exchangeTxn + sebiFee + stampDuty + gst };
+}
+
+/** STT when a long in-the-money option is exercised at expiry: 0.125% of qty × intrinsic value. */
+export const exerciseStt = (qty: number, intrinsicPaise: Paise) => (intrinsicPaise > 0 ? applyRate(qty * intrinsicPaise, OPTION_CHARGE_RATES.sttExercise) : 0);
+
 /**
  * Charges for one executed order. `firstDeliverySellToday` adds the DP charge, which brokers levy once per scrip
  * per day when shares leave your demat account. Each component is rounded to the paisa.

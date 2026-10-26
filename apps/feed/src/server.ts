@@ -11,6 +11,9 @@ import { FreeProvider } from './providers/free';
 import { NotFoundError, type MarketDataProvider } from './providers/types';
 import { officialAttempts, startOfficialJob } from './official/job';
 import { applyOfficial, loadOfficialStore, storedDays } from './official/store';
+import { FNO_UNDERLYINGS, type FnoUnderlying } from './fno/bhavcopy';
+import { getChain, latestFnoDate } from './fno/chain';
+import { fnoStatus, startFnoSync } from './fno/store';
 import { auditCandles } from './quality';
 import { findInstrument, loadEquities, searchInstruments } from './symbols';
 
@@ -88,6 +91,17 @@ app.post<{ Body: { symbol?: string; tf?: string; strategy?: Strategy } }>('/api/
     req.log.error(e);
     return reply.code(502).send({ error: 'upstream_failed', message: 'Market data is unavailable right now' });
   }
+});
+
+app.get('/api/fno/status', async () => fnoStatus());
+
+app.get<{ Querystring: { underlying?: string; date?: string; expiry?: string } }>('/api/fno/chain', async (req, reply) => {
+  const u = String(req.query.underlying ?? 'NIFTY').toUpperCase();
+  if (!(FNO_UNDERLYINGS as readonly string[]).includes(u)) return reply.code(400).send({ error: 'bad_underlying', message: 'Options data covers NIFTY and BANKNIFTY' });
+  const date = await latestFnoDate(u as FnoUnderlying, req.query.date);
+  if (!date) return reply.code(404).send({ error: 'no_data', message: 'No F&O data downloaded yet' });
+  const chain = await getChain(u as FnoUnderlying, date, req.query.expiry);
+  return chain ?? reply.code(404).send({ error: 'no_data', message: `No options for ${u} on ${date}` });
 });
 
 app.get('/api/official/status', async () => ({ days: storedDays(), attempts: officialAttempts() }));
@@ -216,5 +230,7 @@ async function loop() {
 await loadEquities((m) => app.log.info(m));
 app.log.info(`Loaded ${await loadOfficialStore()} days of NSE official data`);
 startOfficialJob((m) => app.log.info(m));
+// Three years of NSE F&O end-of-day history for index options, downloaded politely in the background.
+startFnoSync(process.env.FNO_BACKFILL_FROM ?? '2023-11-01', (m) => app.log.info(m));
 await app.listen({ port: PORT, host: '127.0.0.1' });
 void loop();

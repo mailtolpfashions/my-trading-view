@@ -14,6 +14,7 @@
     "@fastify/websocket": "^11.3.4",
     "@mtv/backtest": "^0.1.0",
     "@mtv/db": "^0.1.0",
+    "@mtv/options": "^0.1.0",
     "@mtv/paper": "^0.1.0",
     "@mtv/shared": "*",
     "fastify": "^5.12.7",

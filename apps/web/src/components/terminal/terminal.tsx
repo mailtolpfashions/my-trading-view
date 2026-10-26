@@ -10,6 +10,7 @@ import { STUDIES } from '@/lib/chart/studies';
 import { fetchCandles, useQuotes } from '@/lib/feed';
 import { fmt, tfLabel } from '@/lib/format';
 import { BacktestView } from '@/components/backtest/backtest-view';
+import { OptionsView } from '@/components/options/options-view';
 import { ChartView, type ChartType } from './chart-view';
 import { DataCheck } from './data-check';
 import { OrderTicket, type TicketRequest } from './order-ticket';
@@ -25,7 +26,7 @@ const PULSE_NAMES: Record<string, string> = { NIFTY: 'NIFTY 50', MIDCPNIFTY: 'MI
 const DEFAULT_WATCH = ['NIFTY', 'BANKNIFTY', 'SENSEX', 'FINNIFTY', 'INDIAVIX', 'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 'SBIN', 'BHARTIARTL', 'ITC', 'LT', 'AXISBANK', 'KOTAKBANK', 'BAJFINANCE', 'MARUTI'];
 const TFS: Timeframe[] = ['1', '5', '15', '30', '60', 'D', 'W'];
 const MODULES = ['Chart', 'Option chain', 'Futures', 'Signals', 'Backtest', 'Paper', 'Algo', 'Research'];
-const LIVE_MODULES = ['Chart', 'Backtest'];
+const LIVE_MODULES = ['Chart', 'Option chain', 'Backtest'];
 const DAY = 86400;
 const RANGES: [label: string, tf: Timeframe, seconds: number | (() => number)][] = [
   ['1D', '1', DAY], ['5D', '5', 7 * DAY], ['1M', '30', 31 * DAY], ['3M', '60', 92 * DAY], ['6M', '60', 183 * DAY],
@@ -186,7 +187,7 @@ export function Terminal() {
       </div>
 
       {/* workspace */}
-      {module === 'Backtest' ? <BacktestView /> : (
+      {module === 'Backtest' ? <BacktestView /> : module === 'Option chain' ? <OptionsView /> : (
       <main className="grid min-h-0 grid-cols-[1fr_380px] grid-rows-[1fr_210px] gap-2">
         <section className="panel grid min-h-0 min-w-0 grid-rows-[44px_1fr_34px] overflow-hidden">
           {/* chart toolbar */}

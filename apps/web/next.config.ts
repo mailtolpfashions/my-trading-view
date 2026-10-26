@@ -2,7 +2,7 @@ import type { NextConfig } from 'next';
 
 // Env comes from the repo-root .env via dotenv-cli in package.json scripts.
 const nextConfig: NextConfig = {
-  transpilePackages: ['@mtv/shared', '@mtv/indicators', '@mtv/paper', '@mtv/backtest'],
+  transpilePackages: ['@mtv/shared', '@mtv/indicators', '@mtv/paper', '@mtv/backtest', '@mtv/options'],
   async headers() {
     return [
       {

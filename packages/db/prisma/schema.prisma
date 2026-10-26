@@ -47,6 +47,52 @@ model PaperOrder {
   @@index([accountId, status])
 }
 
+// NSE F&O end-of-day data (official bhavcopy) for index derivatives. Prices in integer paise.
+
+model FnoEod {
+  date        String // trading date, YYYY-MM-DD
+  underlying  String // NIFTY | BANKNIFTY
+  kind        String // FUT | CE | PE
+  expiry      String // YYYY-MM-DD
+  /// Strike in paise (0 for futures)
+  strikePaise Int
+  openPaise   Int
+  highPaise   Int
+  lowPaise    Int
+  /// NSE's close. For an untraded contract this is carried forward, not a traded price: check `traded`.
+  closePaise  Int
+  settlePaise Int
+  oi          BigInt
+  volume      BigInt
+  traded      Boolean
+
+  @@id([date, underlying, kind, expiry, strikePaise])
+  @@index([underlying, expiry, kind, strikePaise])
+}
+
+model FnoDayMeta {
+  date       String
+  underlying String
+  /// Lot size that day (from the file, or derived from futures turnover for the old layout; null if ambiguous)
+  lotSize    Int?
+  /// Underlying index close in paise (from the file, or NSE's official index-close file)
+  spotPaise  Int?
+  source     String // udiff | old
+  fetchedAt  DateTime @default(now())
+
+  @@id([date, underlying])
+}
+
+/// One row per date attempted, so holidays and finished days are never downloaded twice.
+model FnoFetch {
+  date      String   @id
+  /// saved | not-published | error
+  status    String
+  message   String?
+  attempts  Int      @default(1)
+  updatedAt DateTime @updatedAt
+}
+
 model PaperTrade {
   id           String       @id @default(cuid())
   /// One fill per order (no partial fills in the simulation); unique so an order can never fill twice.

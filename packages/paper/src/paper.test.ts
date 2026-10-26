@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyRate, buildLedger, computeCharges, evaluate, formatRupees, funds, toPaise, unrealisedPaise, validateOrder, type Trade } from './index';
+import { applyRate, buildLedger, computeCharges, computeOptionCharges, evaluate, exerciseStt, formatRupees, funds, toPaise, unrealisedPaise, validateOrder, type Trade } from './index';
 
 describe('money', () => {
   it('parses rupees to integer paise without float error', () => {
@@ -49,6 +49,25 @@ describe('charges (hand-calculated)', () => {
     const base = { side: 'SELL', product: 'CNC', qty: 10, pricePaise: 100_00 } as const;
     expect(computeCharges({ ...base, firstDeliverySellToday: true }).dpCharge).toBe(15_34);
     expect(computeCharges(base).dpCharge).toBe(0);
+  });
+});
+
+describe('option charges (hand-calculated)', () => {
+  it('sell 65 NIFTY PE @ ₹121.35', () => {
+    // turnover ₹7,887.75 · brokerage ₹20 · STT 0.1% ₹7.88775 -> ₹7.89 · exch 0.03503% ₹2.7631 -> ₹2.76
+    // SEBI ₹0.0079 -> ₹0.01 · no stamp on sell · GST 18% × (20 + 2.76 + 0.01) = ₹4.0986 -> ₹4.10 · total ₹34.76
+    expect(computeOptionCharges({ side: 'SELL', qty: 65, premiumPaise: 121_35 })).toEqual({
+      brokerage: 20_00, stt: 789, exchangeTxn: 276, sebiFee: 1, stampDuty: 0, gst: 410, dpCharge: 0, total: 34_76,
+    });
+  });
+  it('buy 65 NIFTY CE @ ₹120.50', () => {
+    // turnover ₹7,832.50 · brokerage ₹20 · no STT on buy · exch ₹2.7437 -> ₹2.74 · SEBI ₹0.01 · stamp 0.003% ₹0.2350 -> ₹0.23
+    // GST 18% × (20 + 2.74 + 0.01) = ₹4.095 -> ₹4.10 (half-up) · total ₹27.08
+    expect(computeOptionCharges({ side: 'BUY', qty: 65, premiumPaise: 120_50 }).total).toBe(27_08);
+  });
+  it('STT on exercise: 0.125% of intrinsic value, nothing when out of the money', () => {
+    expect(exerciseStt(65, 150_00)).toBe(1219); // 65 × ₹150 = ₹9,750 × 0.125% = ₹12.1875 -> ₹12.19
+    expect(exerciseStt(65, 0)).toBe(0);
   });
 });
 
