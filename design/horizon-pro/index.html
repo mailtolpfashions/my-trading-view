@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Horizon Pro — My Trading View</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../tv-samples/tvkit.css">
+<style>
+  :root {
+    --canvas: #e8e7e2; --panel: #ffffff; --raised: #f5f4f0; --ink: #121212; --ink-2: #45453f; --muted: #8b8a83; --line: #ecebe6; --hover: #f3f2ee;
+    --accent: #ffc21a; --accent-ink: #3d2c00; --accent-soft: #fff4cc;
+    --mono: 'DM Mono', ui-monospace, monospace;
+    --r: 14px; --shadow: 0 1px 0 rgb(18 18 18 / .04), 0 8px 24px -12px rgb(18 18 18 / .16);
+  }
+  body { font-family: Manrope, system-ui, sans-serif; background: var(--canvas); display: grid; grid-template-rows: 56px 30px 1fr; gap: 8px; padding: 0 8px 8px; height: 100dvh; }
+  .num, td, .wl-r span, .det-px b, .pulse b, .oc-r, .sc-r { font-family: var(--mono); }
+  .pnl2 { background: var(--panel); border-radius: var(--r); box-shadow: var(--shadow); min-width: 0; min-height: 0; overflow: hidden; }
+
+  /* header */
+  header { display: flex; align-items: center; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 15.5px; letter-spacing: -0.03em; width: auto; height: auto; background: none; color: var(--ink); margin: 0; border-radius: 0; }
+  .mark { width: 26px; height: 26px; border-radius: 8px; background: var(--ink); position: relative; overflow: hidden; }
+  .mark::before { content: ''; position: absolute; left: 5px; right: 5px; bottom: 6px; height: 11px; background: linear-gradient(90deg, var(--accent) 0 30%, transparent 30% 40%, var(--accent) 40% 65%, transparent 65% 75%, var(--accent) 75%); clip-path: polygon(0 60%, 30% 100%, 30% 30%, 65% 70%, 65% 0, 100% 40%, 100% 100%, 0 100%); }
+  nav.mods { display: flex; gap: 2px; background: var(--panel); border-radius: 999px; padding: 4px; box-shadow: var(--shadow); }
+  nav.mods button { padding: 6px 13px; border-radius: 999px; font-weight: 600; font-size: 12.5px; color: var(--ink-2); }
+  nav.mods button:hover { background: var(--hover); }
+  nav.mods button.on { background: var(--ink); color: #fff; }
+  nav.mods button.on::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-right: 7px; vertical-align: 1px; }
+  .cmd { flex: 1; max-width: 460px; margin-left: auto; height: 38px; border-radius: 999px; background: var(--panel); box-shadow: var(--shadow); display: flex; align-items: center; gap: 10px; padding: 0 6px 0 16px; color: var(--muted); cursor: text; }
+  .cmd kbd { margin-left: auto; font: 11px var(--mono); background: var(--raised); padding: 5px 10px; border-radius: 999px; color: var(--ink-2); }
+  .chip { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 13px; border-radius: 999px; background: var(--panel); box-shadow: var(--shadow); font-weight: 600; font-size: 12px; white-space: nowrap; }
+  .chip.delay { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
+  .mkt-open::before { box-shadow: 0 0 0 3px #d9f2ea; }
+  .avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--ink); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 12px; }
+
+  /* market pulse strip */
+  .pulse { display: flex; gap: 6px; align-items: center; overflow: hidden; white-space: nowrap; }
+  .pulse span { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; border-radius: 999px; background: rgb(255 255 255 / .6); font-size: 12px; font-weight: 600; color: var(--ink-2); }
+  .pulse b { font-weight: 500; color: var(--ink); } .pulse em { font-style: normal; font-family: var(--mono); font-size: 11.5px; }
+  .pulse .lbl { background: none; color: var(--muted); font-weight: 700; font-size: 10.5px; letter-spacing: .1em; }
+
+  /* workspace */
+  main { display: grid; grid-template-columns: 1fr 370px; grid-template-rows: 1fr 200px; gap: 8px; min-height: 0; }
+  .chartp { display: grid; grid-template-rows: 44px 1fr 34px; }
+  .side2 { grid-row: 1 / 3; grid-column: 2; display: flex; flex-direction: column; }
+  .bottom { display: flex; flex-direction: column; }
+
+  /* chart toolbar inside the panel */
+  .ctb { display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; }
+  .ctb .tb-sym { background: var(--raised); border-radius: 999px; min-width: 120px; height: 30px; font-family: Manrope; }
+  .ctb .tb-tf { border-radius: 999px; font: 500 12px var(--mono); height: 28px; padding: 0 10px; }
+  .ctb .tb-tf.on { background: var(--ink); color: #fff; }
+  .ctb .tb-btn, .ctb .tb-ico { border-radius: 999px; height: 30px; font-weight: 600; font-size: 12.5px; }
+  .seg2 { display: inline-flex; background: var(--raised); border-radius: 999px; padding: 3px; margin-left: 4px; }
+  .seg2 button { width: 30px; height: 24px; border-radius: 999px; display: grid; place-items: center; color: var(--muted); }
+  .seg2 button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px rgb(18 18 18 / .15); }
+
+  .cbody { display: grid; grid-template-columns: 48px 1fr; min-height: 0; }
+  .cbody .tr { width: 48px; border-radius: 0; border-right: 1px solid var(--line); }
+  .cbody .tr-b { width: 34px; height: 34px; border-radius: 10px; }
+  .cbody .tr-b.on { background: var(--ink); color: var(--accent); }
+  .stage { position: relative; min-width: 0; min-height: 0; display: flex; }
+  .stage > .tvc { flex: 1; }
+  .grid4 { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 1px; background: var(--line); }
+  .cell { background: #fff; display: flex; flex-direction: column; min-height: 0; min-width: 0; outline: 2px solid transparent; outline-offset: -2px; }
+  .cell.on { outline-color: var(--accent); z-index: 1; }
+  .cell .tvc-legend { font-size: 11.5px; } .cell .tvc-wm b { font-size: clamp(20px, 3vw, 44px); } .cell .tvc-wm span { font-size: clamp(10px, 1.1vw, 15px); }
+  .chartp .rb { border-top: 1px solid var(--line); } .rb button { border-radius: 999px; }
+  .rb-opt.on { color: var(--ink); font-weight: 700; }
+  .tvc-legend .dot { color: var(--accent-ink); border-color: var(--accent); background: var(--accent-soft); }
+  .tvc-legend .logo { background: var(--ink); }
+
+  /* side panel */
+  .tabs2 { display: flex; gap: 2px; margin: 10px 10px 4px; background: var(--raised); border-radius: 999px; padding: 3px; }
+  .tabs2 button { flex: 1; padding: 6px 0; border-radius: 999px; font-weight: 600; font-size: 12px; color: var(--ink-2); }
+  .tabs2 button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px rgb(18 18 18 / .14); }
+  .sbody { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .wl-h { display: none; }
+  .wl-r { border-radius: 10px; margin: 0 6px; padding: 0 8px; } .wl-r.on { background: var(--ink); color: #fff; } .wl-r.on .u, .wl-r.on .d { color: var(--accent); }
+  .wl-cols { padding-left: 40px; padding-right: 14px; } .wl-sec { padding-left: 16px; font-weight: 700; letter-spacing: .1em; }
+  .det { margin: 8px; border: 0; border-radius: 12px; background: var(--raised); }
+
+  .oc-h { display: flex; align-items: center; gap: 8px; padding: 8px 12px; } .oc-h b { font-size: 14px; font-weight: 800; }
+  .oc-sel { margin-left: auto; height: 28px; border: 0; background: var(--raised); border-radius: 999px; padding: 0 10px; font: 600 12px Manrope; }
+  .oc-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 0 10px 8px; }
+  .oc-stats div { background: var(--raised); border-radius: 10px; padding: 6px 8px; } .oc-stats small { display: block; color: var(--muted); font-size: 10.5px; font-weight: 600; } .oc-stats b { font: 500 12.5px var(--mono); }
+  .oc-cols, .oc-r { display: grid; grid-template-columns: 1fr 70px 62px 70px 1fr; align-items: center; text-align: center; }
+  .oc-cols { font-size: 10.5px; color: var(--muted); font-weight: 700; height: 24px; letter-spacing: .05em; }
+  .oc-body { overflow: auto; flex: 1; padding: 0 6px 6px; }
+  .oc-r { height: 29px; font-size: 12px; border-radius: 8px; }
+  .oc-r .itm { background: #fbf8ee; align-self: stretch; display: grid; place-items: center; }
+  .oc-r .k { font-weight: 500; background: var(--raised); align-self: stretch; display: grid; place-items: center; }
+  .oc-r.atm > * { background: var(--accent) !important; color: var(--accent-ink); }
+  .oc-r.atm > :first-child { border-radius: 8px 0 0 8px; } .oc-r.atm > :last-child { border-radius: 0 8px 8px 0; }
+  .oi { position: relative; height: 100%; display: flex; align-items: center; padding: 0 6px; font-size: 11px; color: var(--ink-2); }
+  .oi i { position: absolute; top: 9px; bottom: 9px; border-radius: 999px; opacity: .3; }
+  .oi.ce { justify-content: flex-end; } .oi.ce i { right: 0; background: var(--down); } .oi.pe i { left: 0; background: var(--up); } .oi span { position: relative; }
+  .ltp { cursor: pointer; position: relative; } .ltp .bs { display: none; position: absolute; inset: 3px; gap: 2px; } .ltp:hover .bs { display: flex; }
+  .bs button { flex: 1; border-radius: 6px; color: #fff; font: 700 11px Manrope; } .bs .b { background: var(--blue); } .bs .s { background: var(--down); }
+
+  .sig { padding: 6px 10px 10px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+  .sig-c { border-radius: 12px; padding: 12px; background: var(--raised); }
+  .sig-c.hero { background: var(--ink); color: #fff; } .sig-c.hero p, .sig-c.hero small { color: #b8b7af !important; }
+  .sig-c .t { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .tag { font: 500 11px var(--mono); padding: 2px 9px; border-radius: 999px; } .tag.b { background: var(--accent); color: var(--accent-ink); } .tag.s { background: var(--down); color: #fff; }
+  .sig-c p { color: var(--muted); font-size: 12px; margin: 4px 0 8px; }
+  .sig-c .m { display: grid; grid-template-columns: repeat(3, 1fr); font: 12px var(--mono); } .sig-c .m small { display: block; color: var(--muted); font: 600 10.5px Manrope; }
+  .sig-note { font-size: 11px; color: var(--muted); padding: 0 4px; }
+
+  .sc-r { display: grid; grid-template-columns: 1fr 54px 50px 96px; gap: 4px; align-items: center; padding: 0 14px; height: 31px; font-size: 12px; text-align: right; }
+  .sc-r b { text-align: left; font: 600 12.5px Manrope; } .sc-r.h { color: var(--muted); font: 700 10.5px Manrope; height: 24px; letter-spacing: .05em; }
+  .bu { font: 700 10.5px Manrope; padding: 2px 6px; border-radius: 999px; text-align: center; }
+  .bu.lb { background: #e0f2ef; color: var(--up); } .bu.sc2 { background: #e8f0fe; color: var(--blue); } .bu.sb { background: #fde8ea; color: var(--down); } .bu.lu { background: #fff3e0; color: #b45309; }
+
+  /* bottom panel */
+  .bp-tabs { display: flex; align-items: center; gap: 4px; padding: 8px 10px 6px; }
+  .bp-tabs button { padding: 5px 12px; border-radius: 999px; font-weight: 600; font-size: 12.5px; color: var(--ink-2); }
+  .bp-tabs button.on { background: var(--ink); color: #fff; }
+  .acct { margin-left: auto; display: flex; gap: 6px; font-size: 12px; }
+  .acct span { background: var(--raised); border-radius: 999px; padding: 4px 11px; color: var(--muted); font-weight: 600; } .acct b { color: var(--ink); font: 500 12px var(--mono); }
+  .bp-body { overflow: auto; flex: 1; padding: 0 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: right; font: 700 10.5px Manrope; color: var(--muted); padding: 6px 10px; letter-spacing: .05em; text-transform: uppercase; position: sticky; top: 0; background: #fff; }
+  td { text-align: right; padding: 7px 10px; border-top: 1px solid var(--line); } th:first-child, td:first-child { text-align: left; }
+  .empty { padding: 26px; text-align: center; color: var(--muted); }
+  .pill { font: 600 10.5px Manrope; padding: 2px 8px; border-radius: 999px; background: var(--raised); color: var(--ink-2); }
+
+  /* order ticket */
+  .dlg { border-radius: 18px; }
+  .ot { padding: 0 20px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .ot-side { display: grid; grid-template-columns: 1fr 1fr; background: var(--raised); border-radius: 999px; padding: 3px; }
+  .ot-side button { padding: 8px; border-radius: 999px; font-weight: 700; } .ot-side .on.b { background: var(--blue); color: #fff; } .ot-side .on.s { background: var(--down); color: #fff; }
+  .ot label { display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 8px; color: var(--ink-2); font-weight: 600; }
+  .ot input { height: 36px; border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; font: 500 13px var(--mono); }
+  .ot .seg { display: flex; gap: 6px; } .ot .seg span { flex: 1; text-align: center; padding: 7px; border-radius: 999px; background: var(--raised); cursor: pointer; font-weight: 600; } .ot .seg .on { background: var(--ink); color: #fff; }
+  .ot-sum { display: flex; justify-content: space-between; color: var(--ink-2); font-size: 12.5px; }
+  .ot-go { height: 42px; border-radius: 999px; color: #fff; font-weight: 700; }
+  .ot-mode { font-size: 11.5px; color: var(--muted); text-align: center; }
+
+  /* mockup-only accent picker */
+  .picker { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 8px; background: var(--ink); color: #cfcec6; padding: 6px 8px 6px 14px; border-radius: 999px; font-size: 11.5px; font-weight: 600; box-shadow: 0 12px 30px -8px rgb(0 0 0 / .45); }
+  .picker button { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; }
+  .picker button.on { border-color: #fff; }
+  .picker .x { width: auto; height: auto; color: #8b8a83; padding: 0 4px; border: 0; }
+  .foot { left: auto; right: 390px; bottom: 16px; background: none; }
+  .cbody .tr { overflow-y: auto; gap: 0; }
+</style>
+</head>
+<body>
+  <header>
+    <span class="brand"><span class="mark"></span>My Trading View</span>
+    <nav class="mods"><button class="on">Chart</button><button>Option chain</button><button>Futures</button><button>Signals</button><button>Backtest</button><button>Paper</button><button>Algo</button><button>Research</button></nav>
+    <div class="cmd" data-act="search">⌕ Ask or search: "NIFTY 25000 CE", "add RSI", "RELIANCE 15m" <kbd>Ctrl K</kbd></div>
+    <span class="chip"><span data-mkt></span></span>
+    <span class="chip delay">Delayed 15m</span>
+    <span class="avatar">MP</span>
+  </header>
+
+  <div class="pulse">
+    <span class="lbl">MARKET PULSE</span>
+    <span>NIFTY 50 <b>24,872.35</b><em class="u">+0.62%</em></span>
+    <span>BANKNIFTY <b>53,418.90</b><em class="d">−0.21%</em></span>
+    <span>SENSEX <b>81,544.10</b><em class="u">+0.55%</em></span>
+    <span>FINNIFTY <b>23,912.45</b><em class="u">+0.34%</em></span>
+    <span>INDIA VIX <b>12.84</b><em class="d">−3.09%</em></span>
+    <span>GIFT NIFTY <b>24,918.00</b><em class="u">+0.41%</em></span>
+    <span>USDINR <b>84.07</b><em class="u">+0.04%</em></span>
+    <span>A/D <b>1,412 / 968</b></span>
+  </div>
+
+  <main id="app">
+    <section class="pnl2 chartp">
+      <div class="ctb">
+        <button class="tb-sym" data-act="search"><span data-symlabel style="font-weight:700;color:var(--ink)">NIFTY</span></button>
+        <i class="tb-sep"></i>
+        <button class="tb-tf on" data-tf="5">5m</button><button class="tb-tf" data-tf="15">15m</button><button class="tb-tf" data-tf="60">1h</button><button class="tb-tf" data-tf="D">1D</button>
+        <i class="tb-sep"></i>
+        <div class="tb-dd"><button class="tb-ico" data-act="type" title="Chart type" data-icon="candles"></button>
+          <div class="menu" data-menu="type"><button data-type="candles">Candles</button><button data-type="ha">Heikin Ashi</button><button data-type="bars">Bars</button><button data-type="line">Line</button><button data-type="area">Area</button></div></div>
+        <button class="tb-btn" data-act="indicators" data-icon="ind">Indicators</button>
+        <button class="tb-btn" data-act="alert" data-icon="alert">Alert</button>
+        <button class="tb-btn" data-icon="replay">Replay</button>
+        <span class="seg2" title="Layout"><button class="on" data-layout="1" title="Single chart">▢</button><button data-layout="4" title="4 charts">⊞</button></span>
+        <span class="tb-flex"></span>
+        <button class="tb-ico" data-icon="undo" title="Undo"></button><button class="tb-ico" data-icon="redo" title="Redo"></button>
+        <button class="tb-ico" data-icon="camera" title="Snapshot"></button><button class="tb-ico" data-icon="full" title="Fullscreen"></button>
+      </div>
+      <div class="cbody">
+        <div data-slot="tools"></div>
+        <div class="stage">
+          <div id="single" class="tvc"></div>
+          <div class="grid4" id="grid" hidden><div class="cell" data-cell="0"></div><div class="cell" data-cell="1"></div><div class="cell" data-cell="2"></div><div class="cell" data-cell="3"></div></div>
+        </div>
+      </div>
+      <div data-slot="range"></div>
+    </section>
+
+    <section class="pnl2 side2">
+      <div class="tabs2"><button data-side="watch">Watchlist</button><button class="on" data-side="chain">Option chain</button><button data-side="sig">Signals</button><button data-side="scan">Scanner</button></div>
+      <div class="sbody" id="side"></div>
+    </section>
+
+    <section class="pnl2 bottom">
+      <div class="bp-tabs">
+        <button class="on" data-bp="pos">Positions</button><button data-bp="ord">Orders</button><button data-bp="sig">Signal log</button>
+        <div class="acct"><span>Mode <b>Paper</b></span><span>Funds <b>₹10,00,000</b></span><span>Day P&amp;L <b data-pnl>₹0.00</b></span></div>
+      </div>
+      <div class="bp-body" data-bpbody></div>
+    </section>
+  </main>
+
+  <div class="picker">Accent (mockup)
+    <button class="on" style="background:#ffc21a" data-acc="#ffc21a|#3d2c00|#fff4cc" title="Amber"></button>
+    <button style="background:#ff6a1a" data-acc="#ff6a1a|#ffffff|#ffe8db" title="Tangerine"></button>
+    <button style="background:#3355ff" data-acc="#3355ff|#ffffff|#e6ebff" title="Cobalt"></button>
+    <button style="background:#121212;border-color:#555" data-acc="#121212|#ffffff|#ecebe6" title="Ink"></button>
+    <button class="x" title="Hide" onclick="this.parentElement.remove()">×</button>
+  </div>
+  <div class="foot">Research tool · not SEBI-registered advice · subject to market risk · sample data</div>
+
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="../tv-samples/tvkit.js"></script>
+<script>
+  const { fmt, icon } = TVK;
+  const $ = (s) => document.querySelector(`[data-slot="${s}"]`);
+  $('tools').outerHTML = TVK.toolrail();
+  $('range').outerHTML = TVK.rangebar();
+  document.querySelectorAll('[data-icon]').forEach((b) => b.insertAdjacentHTML('afterbegin', icon(b.dataset.icon, 17)));
+
+  // ----- charts: single by default, 2×2 grid on demand -----
+  const charts = [];
+  const tryCross = (ch, t) => { try { ch.setCrosshair(t); } catch (e) { /* time missing at this interval */ } };
+  const single = TVK.mountChart(document.getElementById('single'), {
+    symbol: 'NIFTY', onTrade: (side, sym, px) => ticket(side, sym, px),
+    onLoad: () => { single.addIndicator('VWAP'); single.addIndicator('Supertrend 10 3'); },
+  });
+  charts.push(single); charts.active = single;
+  let gridCharts = null;
+  function mountGrid() {
+    const setup = [['NIFTY', '5', ['EMA 9', 'EMA 21']], ['BANKNIFTY', '5', ['VWAP']], ['NIFTY FUT', '15', ['Supertrend 10 3']], ['NIFTY 24900 STRADDLE', '5', ['VWAP']]];
+    gridCharts = setup.map(([sym, tf, inds], i) => {
+      const cell = document.querySelector(`[data-cell="${i}"]`);
+      const ch = TVK.mountChart(cell, { symbol: sym, tf, compact: true, rsi: false, onLoad: () => inds.forEach((n) => ch.addIndicator(n)), onCrosshair: (t) => gridCharts.forEach((o) => o !== ch && tryCross(o, t)) });
+      cell.addEventListener('mousedown', () => activate(ch, cell));
+      return ch;
+    });
+  }
+  function activate(ch, cell) {
+    charts.active = ch;
+    document.querySelectorAll('.cell').forEach((c) => c.classList.toggle('on', c === cell));
+    document.querySelectorAll('[data-symlabel]').forEach((l) => (l.textContent = ch.state.symbol));
+    document.querySelectorAll('[data-tf]').forEach((b) => b.classList.toggle('on', b.dataset.tf === ch.state.tf));
+  }
+  document.querySelectorAll('[data-layout]').forEach((b) => (b.onclick = () => {
+    const four = b.dataset.layout === '4';
+    document.querySelectorAll('[data-layout]').forEach((x) => x.classList.toggle('on', x === b));
+    document.getElementById('single').hidden = four; document.getElementById('grid').hidden = !four;
+    if (four && !gridCharts) mountGrid();
+    if (four) activate(gridCharts[0], document.querySelector('[data-cell="0"]')); else activate(single, null);
+  }));
+  TVK.wire(document.getElementById('app'), charts);
+  TVK.wire(document.querySelector('header'), charts);
+
+  // ----- paper trading -----
+  const positions = [], orders = [];
+  let tab = 'pos';
+  const LOT = 75; // sample lot size; the app reads it from the F&O contract master
+  function ticket(side, inst, price) {
+    let s = side, type = 'Market', product = 'MIS';
+    const d = TVK.dialog(`<div class="dlg-h"><b>${inst}</b><button data-close>×</button></div>
+      <div class="ot">
+        <div class="ot-side"><button class="b" data-s="BUY">Buy</button><button class="s" data-s="SELL">Sell</button></div>
+        <label>Product<div class="seg"><span class="on">MIS</span><span>NRML</span></div></label>
+        <label>Order type<div class="seg" data-g="type"><span class="on">Market</span><span>Limit</span><span>SL</span></div></label>
+        <label>Lots<input type="number" value="1" min="1" data-lots></label>
+        <div class="ot-sum"><span>Qty <b data-qty></b></span><span>Approx. value <b data-val></b></span></div>
+        <button class="ot-go" data-go></button>
+        <div class="ot-mode">Paper trading · connect a broker in Settings for live orders</div>
+      </div>`);
+    const upd = () => {
+      d.querySelectorAll('[data-s]').forEach((b) => b.classList.toggle('on', b.dataset.s === s));
+      const lots = Math.max(1, +d.querySelector('[data-lots]').value || 1);
+      d.querySelector('[data-qty]').textContent = lots * LOT; d.querySelector('[data-val]').textContent = '₹' + fmt(lots * LOT * price);
+      const go = d.querySelector('[data-go]'); go.textContent = `${s === 'BUY' ? 'Buy' : 'Sell'} ${lots * LOT} @ ${type === 'Market' ? 'Market' : fmt(price)}`; go.style.background = s === 'BUY' ? 'var(--blue)' : 'var(--down)';
+    };
+    d.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => { s = b.dataset.s; upd(); }));
+    d.querySelectorAll('.seg span').forEach((sp) => (sp.onclick = () => { sp.parentElement.querySelectorAll('span').forEach((x) => x.classList.toggle('on', x === sp)); if (sp.parentElement.dataset.g === 'type') type = sp.textContent; else product = sp.textContent; upd(); }));
+    d.querySelector('[data-lots]').oninput = upd;
+    d.querySelector('[data-go]').onclick = () => {
+      const qty = Math.max(1, +d.querySelector('[data-lots]').value || 1) * LOT * (s === 'BUY' ? 1 : -1);
+      orders.unshift({ t: new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(11, 19), inst, side: s, qty: Math.abs(qty), price, product });
+      const p = positions.find((x) => x.inst === inst);
+      if (p) { p.avg = (p.avg * p.qty + price * qty) / (p.qty + qty || 1); p.qty += qty; } else positions.push({ inst, qty, avg: price, ltp: price, product });
+      d.remove(); TVK.toast(`Paper order filled: ${s} ${Math.abs(qty)} ${inst} @ ${fmt(price)}`); tab = 'pos'; renderBP();
+    };
+    upd();
+  }
+  function renderBP() {
+    document.querySelectorAll('[data-bp]').forEach((b) => b.classList.toggle('on', b.dataset.bp === tab));
+    const body = document.querySelector('[data-bpbody]');
+    let pnl = 0; positions.forEach((p) => (pnl += (p.ltp - p.avg) * p.qty));
+    const pe = document.querySelector('[data-pnl]'); pe.textContent = (pnl >= 0 ? '+₹' : '−₹') + fmt(Math.abs(pnl)); pe.className = pnl >= 0 ? 'u' : 'd';
+    if (tab === 'pos') body.innerHTML = positions.length ? `<table><tr><th>Instrument</th><th>Product</th><th>Qty</th><th>Avg</th><th>LTP</th><th>P&amp;L</th></tr>${positions.map((p) => { const v = (p.ltp - p.avg) * p.qty; return `<tr><td>${p.inst}</td><td>${p.product}</td><td class="${p.qty >= 0 ? 'u' : 'd'}">${p.qty}</td><td>${fmt(p.avg)}</td><td>${fmt(p.ltp)}</td><td class="${v >= 0 ? 'u' : 'd'}">${v >= 0 ? '+' : ''}${fmt(v)}</td></tr>`; }).join('')}</table>`
+      : `<div class="empty">No open positions. Hover an option price in the chain and press B / S, or use BUY / SELL on the chart.</div>`;
+    if (tab === 'ord') body.innerHTML = orders.length ? `<table><tr><th>Time</th><th>Side</th><th>Instrument</th><th>Qty</th><th>Price</th><th>Status</th></tr>${orders.map((o) => `<tr><td>${o.t}</td><td class="${o.side === 'BUY' ? 'u' : 'd'}">${o.side}</td><td>${o.inst}</td><td>${o.qty}</td><td>${fmt(o.price)}</td><td><span class="pill">Complete</span></td></tr>`).join('')}</table>` : `<div class="empty">No orders today.</div>`;
+    if (tab === 'sig') body.innerHTML = `<table><tr><th>Time</th><th>Signal</th><th>Instrument</th><th>Side</th><th>Trigger</th><th>Target</th><th>Stop</th><th>Result</th></tr>
+      <tr><td>14:05</td><td>Supertrend + VWAP</td><td>NIFTY</td><td class="u">BUY</td><td>24,880.00</td><td>24,960.00</td><td>24,840.00</td><td><span class="pill">Open</span></td></tr>
+      <tr><td>11:20</td><td>ORB 15m breakout</td><td>BANKNIFTY</td><td class="d">SELL</td><td>53,480.00</td><td>53,300.00</td><td>53,560.00</td><td class="u">Target hit</td></tr>
+      <tr><td>09:35</td><td>CPR breakout</td><td>NIFTY</td><td class="d">SELL</td><td>24,700.00</td><td>24,640.00</td><td>24,735.00</td><td class="d">Stop hit</td></tr></table>`;
+  }
+  document.querySelectorAll('[data-bp]').forEach((b) => (b.onclick = () => { tab = b.dataset.bp; renderBP(); }));
+
+  // ----- side panel -----
+  const SPOT = 24872.35, lakh = (n) => (n / 1e5).toFixed(1) + 'L';
+  const panels = {
+    watch: () => TVK.watchlist(),
+    chain: () => {
+      const rows = TVK.chainRows(SPOT, 12), max = Math.max(...rows.flatMap((r) => [r.ceOI, r.peOI]));
+      const tce = rows.reduce((a, r) => a + r.ceOI, 0), tpe = rows.reduce((a, r) => a + r.peOI, 0);
+      const cell = (r, side) => { const px = side === 'CE' ? r.ce : r.pe, itm = side === 'CE' ? r.k < SPOT : r.k > SPOT; return `<span class="ltp ${itm ? 'itm' : ''}" data-inst="NIFTY 28OCT ${r.k} ${side}" data-px="${px.toFixed(2)}">${fmt(px)}<span class="bs"><button class="b" data-side="BUY">B</button><button class="s" data-side="SELL">S</button></span></span>`; };
+      return `<div class="oc-h"><b>NIFTY</b><span class="pill">Weekly</span><select class="oc-sel"><option>28 Oct 2026</option><option>04 Nov 2026</option><option>25 Nov 2026</option></select></div>
+        <div class="oc-stats"><div><small>Spot</small><b>${fmt(SPOT)}</b></div><div><small>PCR</small><b>${(tpe / tce).toFixed(2)}</b></div><div><small>Max pain</small><b>24,850</b></div><div><small>ATM IV</small><b>11.8</b></div></div>
+        <div class="oc-cols"><span>CALL OI</span><span>CE</span><span>STRIKE</span><span>PE</span><span>PUT OI</span></div>
+        <div class="oc-body">${rows.map((r) => `<div class="oc-r${r.atm ? ' atm' : ''}">
+          <span class="oi ce ${r.k < SPOT ? 'itm' : ''}"><i style="width:${(r.ceOI / max) * 100}%"></i><span>${lakh(r.ceOI)}</span></span>${cell(r, 'CE')}<span class="k">${r.k}</span>${cell(r, 'PE')}
+          <span class="oi pe ${r.k > SPOT ? 'itm' : ''}"><i style="width:${(r.peOI / max) * 100}%"></i><span>${lakh(r.peOI)}</span></span></div>`).join('')}</div>`;
+    },
+    sig: () => {
+      const c = (n, side, tf, why, hit, pf, dd, hero) => `<div class="sig-c${hero ? ' hero' : ''}"><div class="t"><b>${n}</b><span class="tag ${side === 'BUY' ? 'b' : 's'}">${side}</span></div><p>${tf} · ${why}</p><div class="m"><span><small>Hit-rate 1y</small>${hit}</span><span><small>Profit factor</small>${pf}</span><span><small>Max DD</small>${dd}</span></div></div>`;
+      return `<div class="sig">${c('Supertrend + VWAP · NIFTY', 'BUY', '5m', 'Close above Supertrend(10,3) and VWAP, RSI > 55', '54.2%', '1.41', '−6.8%', true)}
+        ${c('ORB 15m · BANKNIFTY', 'SELL', '15m', 'Break below opening-range low with volume > 1.5× avg', '51.7%', '1.33', '−8.1%')}
+        ${c('Short straddle · NIFTY weekly', 'SELL', 'Expiry day', 'Sell ATM straddle 09:20, 25% SL per leg', '63.0%', '1.22', '−11.4%')}
+        ${c('PCR + OI build-up · FINNIFTY', 'BUY', '15m', 'PCR rising > 1.1 with long build-up in futures', '49.8%', '1.29', '−7.2%')}
+        <p class="sig-note">Signals come from published rules and backtests. Not investment advice; past performance does not guarantee future results.</p></div>`;
+    },
+    scan: () => {
+      const rows = [['TATAMOTORS', -1.42, 6.8, 'sb'], ['SBIN', 2.06, 5.1, 'lb'], ['ADANIENT', 3.18, 4.4, 'lb'], ['HDFCBANK', -0.48, -3.2, 'lu'], ['INFY', 1.12, -2.7, 'sc2'], ['RELIANCE', 1.34, 3.9, 'lb'], ['ICICIBANK', -0.17, 2.2, 'sb'], ['TCS', 0.91, -1.8, 'sc2'], ['AXISBANK', -0.92, -2.4, 'lu'], ['BAJFINANCE', 1.76, 4.8, 'lb'], ['MARUTI', -0.64, 3.1, 'sb'], ['LT', 1.16, 2.7, 'lb']];
+      const label = { lb: 'Long build-up', sc2: 'Short covering', sb: 'Short build-up', lu: 'Long unwinding' };
+      return `<div class="oc-h"><b>OI build-up</b><span class="pill">F&amp;O stocks</span></div><div style="overflow:auto"><div class="sc-r h"><span style="text-align:left">SYMBOL</span><span>PRICE%</span><span>OI%</span><span>BUILD-UP</span></div>` +
+        rows.map(([s, p, oi, k]) => `<div class="sc-r"><b>${s}</b><span class="${p >= 0 ? 'u' : 'd'}">${p >= 0 ? '+' : ''}${p.toFixed(2)}</span><span>${oi >= 0 ? '+' : ''}${oi.toFixed(1)}</span><span class="bu ${k}">${label[k]}</span></div>`).join('') + '</div>';
+    },
+  };
+  function showPanel(key) {
+    const side = document.getElementById('side');
+    side.innerHTML = panels[key]();
+    document.querySelectorAll('[data-side]').forEach((b) => b.classList.toggle('on', b.dataset.side === key));
+    side.querySelectorAll('.ltp').forEach((el) => el.querySelectorAll('[data-side]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); ticket(b.dataset.side, el.dataset.inst, +el.dataset.px); })));
+    side.querySelectorAll('.wl-r').forEach((r) => (r.onclick = () => { if (!TVK.SYMBOLS[r.dataset.sym]) return TVK.toast(`${r.dataset.sym}: loads from the live feed in the app`); side.querySelectorAll('.wl-r').forEach((x) => x.classList.toggle('on', x === r)); charts.active.set('symbol', r.dataset.sym); document.querySelectorAll('[data-symlabel]').forEach((l) => (l.textContent = r.dataset.sym)); }));
+  }
+  document.querySelectorAll('.tabs2 [data-side]').forEach((b) => (b.onclick = () => showPanel(b.dataset.side)));
+  showPanel('chain');
+  renderBP();
+  document.querySelectorAll('nav.mods button:not(.on)').forEach((b) => (b.onclick = () => TVK.toast(`${b.textContent} module: its own page in the app, same shell`)));
+
+  // ----- accent picker (mockup only) -----
+  document.querySelectorAll('[data-acc]').forEach((b) => (b.onclick = () => {
+    const [a, ink, soft] = b.dataset.acc.split('|'), r = document.documentElement.style;
+    r.setProperty('--accent', a); r.setProperty('--accent-ink', ink); r.setProperty('--accent-soft', soft);
+    document.querySelectorAll('[data-acc]').forEach((x) => x.classList.toggle('on', x === b));
+  }));
+
+  setInterval(() => { positions.forEach((p) => (p.ltp = +(p.ltp * (1 + (Math.random() - 0.5) * 0.004)).toFixed(2))); if (tab === 'pos' && positions.length) renderBP(); }, 1000);
+</script>
+</body>
+</html>

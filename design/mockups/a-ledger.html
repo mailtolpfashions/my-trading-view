@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A · Ledger — My Trading View</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --canvas: #f4f1ea; --surface: #fbfaf6; --ink: #16181d; --ink-2: #4a4d55; --muted: #8b8a84;
+    --line: #e2ddd1; --line-2: #cfc8b8; --accent: #e07a1f; --accent-soft: #fbe9d6;
+    --up: #0f8a5f; --up-soft: #dcefe6; --down: #c8412e; --down-soft: #f6e0db;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { font: 13px/1.4 'Instrument Sans', system-ui, sans-serif; background: var(--canvas); color: var(--ink); height: 100dvh; display: grid; grid-template-rows: 30px 56px 1fr 26px; overflow: hidden; }
+  b { font-weight: 600; }
+  .mono, .wl-px, td, .stat b { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ticker ribbon */
+  .ribbon { background: var(--ink); color: #e9e5da; display: flex; gap: 28px; align-items: center; padding: 0 16px; font: 11px var(--mono); white-space: nowrap; overflow: hidden; }
+  .ribbon span em { font-style: normal; margin-left: 6px; }
+  .ribbon .u { color: #6fd3a5; } .ribbon .d { color: #f08b78; }
+
+  header { display: flex; align-items: center; gap: 18px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+  .brand { display: flex; align-items: baseline; gap: 6px; font-weight: 700; font-size: 15px; letter-spacing: -0.02em; }
+  .brand i { width: 10px; height: 10px; background: var(--accent); display: inline-block; transform: rotate(45deg); }
+  .search { flex: 0 1 360px; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 4px; color: var(--muted); }
+  .search kbd { margin-left: auto; font: 10px var(--mono); border: 1px solid var(--line-2); padding: 1px 5px; border-radius: 3px; }
+  nav.tabs { display: flex; gap: 2px; margin-left: 8px; }
+  nav.tabs button { all: unset; cursor: pointer; padding: 18px 12px 16px; font-weight: 500; color: var(--ink-2); border-bottom: 2px solid transparent; }
+  nav.tabs button.on { color: var(--ink); border-color: var(--accent); }
+  .status { margin-left: auto; display: flex; gap: 10px; align-items: center; font-size: 12px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line-2); }
+  .pill.open i { width: 6px; height: 6px; border-radius: 50%; background: var(--up); }
+  .pill.delay { background: var(--accent-soft); border-color: transparent; color: #8a4a10; }
+
+  main { display: grid; grid-template-columns: 268px 1fr 264px; min-height: 0; }
+  aside { border-right: 1px solid var(--line); overflow: auto; background: var(--surface); }
+  aside.right { border-right: 0; border-left: 1px solid var(--line); padding: 16px; }
+  .eyebrow { font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .wl-head { display: flex; justify-content: space-between; padding: 14px 16px 8px; }
+  #watchlist { list-style: none; padding: 0; }
+  .wl-row { display: grid; grid-template-columns: 1fr 60px 92px; align-items: center; gap: 8px; padding: 9px 16px; border-top: 1px solid var(--line); cursor: pointer; }
+  .wl-row.active { background: var(--canvas); box-shadow: inset 2px 0 var(--accent); }
+  .wl-sym { display: flex; flex-direction: column; } .wl-sym small { color: var(--muted); font-size: 10.5px; }
+  .wl-px { display: flex; flex-direction: column; align-items: flex-end; font-size: 12px; }
+  .wl-row.up .spark, .wl-row.up small { color: var(--up); } .wl-row.down .spark, .wl-row.down .wl-px small { color: var(--down); }
+  .spark { width: 60px; height: 22px; }
+
+  section.center { display: flex; flex-direction: column; min-width: 0; }
+  .sym { display: flex; align-items: baseline; gap: 14px; padding: 14px 20px 10px; border-bottom: 1px solid var(--line); }
+  .sym h1 { font-size: 22px; letter-spacing: -0.02em; }
+  .sym .px { font: 600 22px var(--mono); }
+  .sym .chg { color: var(--up); font: 500 13px var(--mono); }
+  .toolbar { display: flex; gap: 4px; align-items: center; padding: 8px 20px; border-bottom: 1px solid var(--line); }
+  .tf { all: unset; cursor: pointer; font: 11.5px var(--mono); padding: 4px 8px; border-radius: 3px; color: var(--ink-2); }
+  .tf.on { background: var(--ink); color: var(--surface); }
+  .sep { width: 1px; height: 18px; background: var(--line-2); margin: 0 8px; }
+  .chip { font-size: 11.5px; padding: 3px 8px; border: 1px solid var(--line-2); border-radius: 3px; display: inline-flex; gap: 6px; align-items: center; }
+  .chip i { width: 10px; height: 2px; display: inline-block; }
+  #chart { flex: 1; min-height: 0; } #rsi { height: 110px; border-top: 1px solid var(--line); }
+  .pane-label { position: relative; } .pane-label span { position: absolute; z-index: 2; left: 20px; top: 6px; font: 10.5px var(--mono); color: var(--muted); }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 12px; margin: 10px 0 22px; }
+  .stat small { display: block; color: var(--muted); font-size: 11px; } .stat b { font-size: 14px; }
+  .range { height: 4px; background: var(--line); position: relative; margin: 8px 0 4px; }
+  .range i { position: absolute; left: 62%; top: -4px; width: 2px; height: 12px; background: var(--ink); }
+  .buildup { padding: 12px; background: var(--up-soft); border-radius: 4px; margin: 10px 0 22px; }
+  .buildup b { color: var(--up); display: block; font-size: 14px; }
+  .signal { border: 1px solid var(--line-2); border-radius: 4px; padding: 12px; margin-top: 10px; }
+  .signal .row { display: flex; justify-content: space-between; margin-top: 6px; font: 11.5px var(--mono); color: var(--ink-2); }
+
+  /* option chain */
+  .oc { padding: 16px 20px; overflow: auto; height: 100%; }
+  .oc-sum { display: flex; gap: 32px; margin-bottom: 14px; align-items: flex-end; }
+  .oc-sum b { font: 600 18px var(--mono); display: block; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { font: 600 10.5px 'Instrument Sans'; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding: 8px; text-align: right; border-bottom: 1px solid var(--ink); position: sticky; top: 0; background: var(--canvas); }
+  td { padding: 7px 8px; text-align: right; border-bottom: 1px solid var(--line); }
+  td.itm { background: #f9f2e4; } td.dim { color: var(--muted); } td.up { color: var(--up); } td.down { color: var(--down); }
+  td.ltp { font-weight: 600; }
+  .strike { text-align: center !important; font-weight: 600; background: var(--surface); border-left: 1px solid var(--line-2); border-right: 1px solid var(--line-2); }
+  tr.atm td { border-top: 1.5px solid var(--accent); border-bottom: 1.5px solid var(--accent); } tr.atm .strike { background: var(--accent); color: #fff; }
+  td.oi { position: relative; min-width: 110px; } td.oi i { position: absolute; top: 6px; bottom: 6px; opacity: 0.22; }
+  td.oi.ce i { right: 8px; background: var(--down); } td.oi.pe i { left: 8px; background: var(--up); } td.oi span { position: relative; }
+
+  footer { border-top: 1px solid var(--line); display: flex; align-items: center; padding: 0 16px; font-size: 11px; color: var(--muted); background: var(--surface); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <div class="ribbon">
+    <span>NIFTY 50 <span data-ltp></span><em class="u">▲ 0.62%</em></span>
+    <span>BANKNIFTY 53,418.90<em class="d">▼ 0.21%</em></span>
+    <span>SENSEX 81,544.10<em class="u">▲ 0.55%</em></span>
+    <span>FINNIFTY 23,912.45<em class="u">▲ 0.34%</em></span>
+    <span>INDIA VIX 12.84<em class="d">▼ 3.10%</em></span>
+    <span>USDINR 84.07<em class="u">▲ 0.04%</em></span>
+    <span>GIFT NIFTY 24,918.0<em class="u">▲ 0.41%</em></span>
+  </div>
+  <header>
+    <div class="brand"><i></i>My Trading View</div>
+    <div class="search">⌕ Search symbol, F&amp;O contract, command <kbd>Ctrl K</kbd></div>
+    <nav class="tabs">
+      <button class="on" data-tab="chart">Chart</button>
+      <button data-tab="chain">Option chain</button>
+      <button>Futures</button>
+      <button>Signals</button>
+      <button>Backtest</button>
+      <button>Paper</button>
+    </nav>
+    <div class="status">
+      <span class="pill open"><i></i>Market open · 11:42 IST</span>
+      <span class="pill delay">Delayed 15 min</span>
+    </div>
+  </header>
+
+  <main>
+    <aside>
+      <div class="wl-head"><span class="eyebrow">Watchlist · Core</span><span class="eyebrow">12</span></div>
+      <ul id="watchlist"></ul>
+    </aside>
+
+    <section class="center" data-view="chart">
+      <div class="sym"><h1>NIFTY 50</h1><span class="px" data-ltp></span><span class="chg">+153.40 (+0.62%)</span></div>
+      <div class="toolbar">
+        <button class="tf">1m</button><button class="tf on">5m</button><button class="tf">15m</button><button class="tf">1h</button><button class="tf">1D</button><button class="tf">1W</button>
+        <span class="sep"></span>
+        <span class="chip"><i style="background:var(--accent)"></i>EMA 20</span>
+        <span class="chip"><i style="background:var(--muted)"></i>EMA 50</span>
+        <span class="chip">RSI 14</span>
+        <span class="chip">+ Indicator</span>
+      </div>
+      <div id="chart"></div>
+      <div class="pane-label"><span>RSI 14</span></div>
+      <div id="rsi"></div>
+    </section>
+
+    <section class="center" data-view="chain" hidden>
+      <div class="oc">
+        <div class="oc-sum">
+          <div><span class="eyebrow">Underlying</span><b>NIFTY · <span data-ltp></span></b></div>
+          <div><span class="eyebrow">Expiry</span><b>28 Oct</b></div>
+          <div><span class="eyebrow">PCR</span><b data-pcr></b></div>
+          <div><span class="eyebrow">Max pain</span><b>24,850</b></div>
+          <div><span class="eyebrow">ATM IV</span><b>11.8</b></div>
+        </div>
+        <table id="chain"></table>
+      </div>
+    </section>
+
+    <aside class="right">
+      <span class="eyebrow">Session</span>
+      <div class="range"><i></i></div>
+      <div style="display:flex;justify-content:space-between;font:11px var(--mono);color:var(--muted)"><span>L 24,688.2</span><span>H 24,903.7</span></div>
+      <div class="stat-grid">
+        <div class="stat"><small>Open</small><b>24,731.05</b></div>
+        <div class="stat"><small>Prev close</small><b>24,718.95</b></div>
+        <div class="stat"><small>VWAP</small><b>24,806.40</b></div>
+        <div class="stat"><small>PCR</small><b data-pcr></b></div>
+      </div>
+      <span class="eyebrow">Futures build-up</span>
+      <div class="buildup"><b>Long build-up</b><span class="mono" style="font-size:11.5px">Price ▲ 0.58% · OI ▲ 4.2%</span></div>
+      <span class="eyebrow">Signals for this symbol</span>
+      <div class="signal">
+        <b>Supertrend + VWAP breakout</b>
+        <div class="row"><span>Rule-based · 5m</span><span style="color:var(--up)">BUY above 24,880</span></div>
+        <div class="row"><span>Backtest 1y hit-rate</span><span>54.2%</span></div>
+        <div class="row"><span>Max drawdown</span><span>−6.8%</span></div>
+      </div>
+    </aside>
+  </main>
+  <footer>Research tool. Not SEBI-registered investment advice. Trading in securities is subject to market risk. · Design mockup: illustrative numbers.</footer>
+
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="shared.js"></script>
+<script>
+  MTV.mount({ bg: '#fbfaf6', text: '#4a4d55', grid: '#efebe1', cross: '#b9b2a2', ink: '#16181d', font: 'JetBrains Mono',
+    up: '#0f8a5f', down: '#c8412e', upSoft: 'rgba(15,138,95,.22)', downSoft: 'rgba(200,65,46,.22)', accent: '#e07a1f', accent2: '#16181d', muted: '#a49c8c' });
+</script>
+</body>
+</html>

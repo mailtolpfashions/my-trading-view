@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Paper trading. Money is stored as integer paise (BigInt) and positions/cash are never stored:
+// they are rebuilt from PaperTrade rows, so balances cannot drift from the trade history.
+
+model PaperAccount {
+  id                String       @id @default(cuid())
+  name              String       @default("Paper account")
+  startingCashPaise BigInt
+  createdAt         DateTime     @default(now())
+  resetAt           DateTime     @default(now())
+  orders            PaperOrder[]
+  trades            PaperTrade[]
+}
+
+model PaperOrder {
+  id           String       @id @default(cuid())
+  accountId    String
+  account      PaperAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  symbol       String
+  side         String // BUY | SELL
+  product      String // CNC | MIS
+  type         String // MARKET | LIMIT | SL | SLM
+  qty          Int
+  pricePaise   BigInt?
+  triggerPaise BigInt?
+  /// OPEN | TRIGGER_PENDING | COMPLETE | CANCELLED | REJECTED
+  status       String
+  triggered    Boolean      @default(false)
+  avgFillPaise BigInt?
+  rejectReason String?
+  /// Set on system orders, e.g. AUTO_SQUAREOFF for intraday positions closed at 15:20 IST
+  tag          String?
+  /// IST trading date, YYYY-MM-DD
+  tradeDate    String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  trade        PaperTrade?
+
+  @@index([accountId, status])
+}
+
+model PaperTrade {
+  id           String       @id @default(cuid())
+  /// One fill per order (no partial fills in the simulation); unique so an order can never fill twice.
+  orderId      String       @unique
+  order        PaperOrder   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  accountId    String
+  account      PaperAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  symbol       String
+  side         String
+  product      String
+  qty          Int
+  pricePaise   BigInt
+  chargesPaise BigInt
+  /// Itemised charges (brokerage, STT, exchange, SEBI, stamp, GST, DP) in paise
+  charges      Json
+  time         DateTime
+  tradeDate    String
+
+  @@index([accountId, time])
+}

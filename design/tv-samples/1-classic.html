@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1 · Classic — My Trading View</title>
+<link rel="stylesheet" href="tvkit.css">
+<style>
+  .main-row { grid-template-columns: 52px 1fr 330px 46px; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div data-slot="top"></div>
+  <div class="row main-row">
+    <div data-slot="tools"></div>
+    <div class="ws"><div id="chart" class="tvc"></div><div data-slot="range"></div></div>
+    <div class="side" data-slot="watch"></div>
+    <div data-slot="rail"></div>
+  </div>
+</div>
+<div class="foot">Research tool · not SEBI-registered advice · subject to market risk · sample data</div>
+
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="tvkit.js"></script>
+<script>
+  const $ = (s) => document.querySelector(`[data-slot="${s}"]`);
+  $('top').outerHTML = TVK.topbar();
+  $('tools').outerHTML = TVK.toolrail();
+  $('range').outerHTML = TVK.rangebar();
+  $('watch').innerHTML = TVK.watchlist();
+  $('rail').outerHTML = TVK.siderail([['list', 'Watchlist', 'watch'], ['alert', 'Alerts'], ['chain', 'Option chain'], ['oi', 'OI analysis'], ['signal', 'Signals'], ['scan', 'Screener'], ['news', 'News'], ['cal', 'Events & results'], ['bell', 'Notifications']], 'watch');
+
+  const chart = TVK.mountChart(document.getElementById('chart'), {
+    symbol: 'NIFTY', onTrade: (side) => TVK.toast(`${side} ticket opens here — paper or broker order`),
+    onLoad: (st) => { if (!st.inds.length) st.inds.length === 0 && chart.addIndicator('EMA 9'); },
+  });
+  const charts = (window.charts = [chart]);
+  TVK.wire(document.getElementById('app'), charts);
+  document.querySelectorAll('.sr-b').forEach((b) => (b.onclick = () => TVK.toast(`${b.title} panel — see sample 2 for the F&O panels`)));
+</script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3 · Multi-chart — My Trading View</title>
+<link rel="stylesheet" href="tvkit.css">
+<style>
+  .main-row { grid-template-columns: 52px 1fr 320px 46px; }
+  .grid4 { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; background: var(--line); min-height: 0; }
+  .cell { background: #fff; display: flex; flex-direction: column; min-height: 0; min-width: 0; position: relative; outline: 2px solid transparent; outline-offset: -2px; }
+  .cell.on { outline-color: var(--accent); z-index: 1; }
+  .cell .tvc-legend { font-size: 12px; } .cell .tvc-legend .l3 { font-size: 11.5px; }
+  .cell .tvc-wm b { font-size: clamp(22px, 3.6vw, 52px); } .cell .tvc-wm span { font-size: clamp(11px, 1.3vw, 18px); }
+  .cell .tvc-rsi { height: 30%; }
+
+  .scan-h { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; } .scan-h b { font-size: 15px; }
+  .chips { display: flex; gap: 4px; padding: 0 12px 8px; flex-wrap: wrap; }
+  .chips span { font-size: 11.5px; padding: 3px 9px; border-radius: 999px; background: var(--hover); cursor: pointer; } .chips .on { background: var(--ink); color: #fff; }
+  .sc { overflow: auto; flex: 1; }
+  .sc-r { display: grid; grid-template-columns: 1fr 58px 58px 92px; gap: 4px; align-items: center; padding: 0 12px; height: 32px; font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid #f3f4f7; }
+  .sc-r b { text-align: left; font-weight: 500; } .sc-r.h { color: var(--muted); font-size: 11.5px; height: 26px; }
+  .bu { font-size: 10.5px; font-weight: 600; padding: 2px 6px; border-radius: 3px; text-align: center; }
+  .bu.lb { background: #e0f2ef; color: var(--up); } .bu.sc2 { background: #e8f0fe; color: var(--blue); } .bu.sb { background: #fde8ea; color: var(--down); } .bu.lu { background: #fff3e0; color: #b45309; }
+  .breadth { padding: 12px; border-top: 1px solid var(--line); }
+  .breadth small { color: var(--muted); } .bb { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin: 6px 0 4px; } .bb i:first-child { background: var(--up); } .bb i:last-child { background: var(--down); }
+  .breadth .lh { display: flex; justify-content: space-between; font-size: 12px; }
+  .fii { display: grid; grid-template-columns: 1fr auto; gap: 4px; margin-top: 10px; font-size: 12.5px; } .fii span { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div data-slot="top"></div>
+  <div class="row main-row">
+    <div data-slot="tools"></div>
+    <div class="ws">
+      <div class="grid4">
+        <div class="cell on" data-cell="0"></div><div class="cell" data-cell="1"></div>
+        <div class="cell" data-cell="2"></div><div class="cell" data-cell="3"></div>
+      </div>
+      <div data-slot="range"></div>
+    </div>
+    <div class="side">
+      <div class="scan-h"><b>Scanner</b><span class="pill" style="font-size:11px;padding:1px 6px;background:var(--hover);border-radius:3px">F&amp;O stocks</span></div>
+      <div class="chips"><span class="on">OI build-up</span><span>Top gainers</span><span>Volume shockers</span><span>52W high</span><span>NR7</span></div>
+      <div class="sc" id="scan"></div>
+      <div class="breadth">
+        <small>Market breadth · NSE</small>
+        <div class="bb"><i style="flex:1412"></i><i style="flex:968"></i></div>
+        <div class="lh"><span class="u">Advances 1,412</span><span class="d">Declines 968</span></div>
+        <div class="fii"><span>FII cash (prov.)</span><b class="d">−₹1,284 cr</b><span>DII cash (prov.)</span><b class="u">+₹2,016 cr</b><span>India VIX</span><b>12.84</b></div>
+      </div>
+    </div>
+    <div data-slot="rail"></div>
+  </div>
+</div>
+<div class="foot">Research tool · not SEBI-registered advice · subject to market risk · sample data</div>
+
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="tvkit.js"></script>
+<script>
+  const $ = (s) => document.querySelector(`[data-slot="${s}"]`);
+  $('top').outerHTML = TVK.topbar({ layoutName: '4 charts · Indices' });
+  $('tools').outerHTML = TVK.toolrail();
+  $('range').outerHTML = TVK.rangebar();
+  $('rail').outerHTML = TVK.siderail([['list', 'Watchlist'], ['scan', 'Scanner', 'scan'], ['chain', 'Option chain'], ['oi', 'OI analysis'], ['signal', 'Signals'], ['news', 'News']], 'scan');
+
+  const setup = [['NIFTY', '5', ['EMA 9', 'EMA 21']], ['BANKNIFTY', '5', ['VWAP']], ['NIFTY FUT', '15', ['Supertrend 10 3']], ['NIFTY 24900 STRADDLE', '5', ['VWAP']]];
+  const charts = [];
+  setup.forEach(([sym, tf, inds], i) => {
+    const cell = document.querySelector(`[data-cell="${i}"]`);
+    const ch = TVK.mountChart(cell, {
+      symbol: sym, tf, compact: true, rsi: i === 0,
+      onLoad: () => inds.forEach((n) => ch.addIndicator(n)),
+      onCrosshair: (t) => charts.forEach((o) => o !== ch && tryCross(o, t)),
+    });
+    charts.push(ch);
+    cell.addEventListener('mousedown', () => {
+      charts.active = ch;
+      document.querySelectorAll('.cell').forEach((c) => c.classList.toggle('on', c === cell));
+      document.querySelectorAll('[data-symlabel]').forEach((l) => (l.textContent = ch.state.symbol));
+      document.querySelectorAll('[data-tf]').forEach((b) => b.classList.toggle('on', b.dataset.tf === ch.state.tf));
+    });
+  });
+  charts.active = charts[0];
+  function tryCross(ch, t) { try { ch.setCrosshair(t); } catch (e) { /* time missing at this interval */ } }
+  TVK.wire(document.getElementById('app'), charts);
+
+  const scan = [['TATAMOTORS', -1.42, 6.8, 'sb'], ['SBIN', 2.06, 5.1, 'lb'], ['ADANIENT', 3.18, 4.4, 'lb'], ['HDFCBANK', -0.48, -3.2, 'lu'], ['INFY', 1.12, -2.7, 'sc2'], ['RELIANCE', 1.34, 3.9, 'lb'], ['ICICIBANK', -0.17, 2.2, 'sb'], ['TCS', 0.91, -1.8, 'sc2'], ['AXISBANK', -0.92, -2.4, 'lu'], ['BAJFINANCE', 1.76, 4.8, 'lb'], ['MARUTI', -0.64, 3.1, 'sb'], ['SUNPHARMA', 0.38, -0.9, 'sc2'], ['LT', 1.16, 2.7, 'lb'], ['WIPRO', -1.08, -1.6, 'lu']];
+  const label = { lb: 'Long build-up', sc2: 'Short covering', sb: 'Short build-up', lu: 'Long unwinding' };
+  document.getElementById('scan').innerHTML = `<div class="sc-r h"><span style="text-align:left">Symbol</span><span>Price%</span><span>OI%</span><span>Build-up</span></div>` +
+    scan.map(([s, p, oi, k]) => `<div class="sc-r"><b>${s}</b><span class="${p >= 0 ? 'u' : 'd'}">${p >= 0 ? '+' : ''}${p.toFixed(2)}</span><span>${oi >= 0 ? '+' : ''}${oi.toFixed(1)}</span><span class="bu ${k}">${label[k]}</span></div>`).join('');
+</script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "my-trading-view",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n db,feed,web -c magenta,yellow,cyan \"npm run start -w @mtv/db\" \"npm run dev -w @mtv/feed\" \"npm run dev -w @mtv/web\"",
+    "build": "npm run generate -w @mtv/db && npm run build --workspace @mtv/web",
+    "start": "concurrently -n db,feed,web -c magenta,yellow,cyan \"npm run start -w @mtv/db\" \"npm run start -w @mtv/feed\" \"npm run start -w @mtv/web\"",
+    "db:start": "npm run start -w @mtv/db",
+    "db:migrate": "npm run migrate -w @mtv/db",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  }
+}

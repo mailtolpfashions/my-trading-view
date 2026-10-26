@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2 · F&amp;O Trader — My Trading View</title>
+<link rel="stylesheet" href="tvkit.css">
+<style>
+  .main-row { grid-template-columns: 52px 1fr 360px 46px; }
+  .center { display: grid; grid-template-rows: 1fr 230px; gap: 4px; min-height: 0; min-width: 0; }
+
+  /* option chain panel */
+  .oc { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+  .oc-h { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+  .oc-h b { font-size: 15px; }
+  .oc-sel { margin-left: auto; height: 28px; border: 1px solid var(--line); border-radius: 4px; padding: 0 8px; font: inherit; }
+  .oc-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border-block: 1px solid var(--line); }
+  .oc-stats div { background: #fff; padding: 6px 10px; } .oc-stats small { display: block; color: var(--muted); font-size: 11px; } .oc-stats b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .oc-cols, .oc-r { display: grid; grid-template-columns: 1fr 72px 66px 72px 1fr; align-items: center; text-align: center; font-variant-numeric: tabular-nums; }
+  .oc-cols { font-size: 11px; color: var(--muted); height: 26px; border-bottom: 1px solid var(--line); }
+  .oc-body { overflow: auto; flex: 1; }
+  .oc-r { height: 30px; border-bottom: 1px solid #f3f4f7; font-size: 12.5px; position: relative; }
+  .oc-r .itm { background: #fffaf2; align-self: stretch; display: grid; place-items: center; }
+  .oc-r .k { font-weight: 600; background: #f8f9fb; align-self: stretch; display: grid; place-items: center; }
+  .oc-r.atm .k { background: var(--accent); color: #fff; }
+  .oc-r.atm { box-shadow: inset 0 1px var(--accent), inset 0 -1px var(--accent); }
+  .oi { position: relative; height: 100%; display: flex; align-items: center; padding: 0 6px; font-size: 11.5px; color: var(--ink-2); }
+  .oi i { position: absolute; top: 8px; bottom: 8px; border-radius: 2px; opacity: .3; }
+  .oi.ce { justify-content: flex-end; } .oi.ce i { right: 0; background: var(--down); } .oi.pe i { left: 0; background: var(--up); } .oi span { position: relative; }
+  .ltp { cursor: pointer; position: relative; } .ltp:hover { outline: 1px solid var(--blue); outline-offset: -1px; border-radius: 3px; }
+  .ltp .bs { display: none; position: absolute; inset: 3px; gap: 2px; } .ltp:hover .bs { display: flex; }
+  .bs button { flex: 1; border-radius: 3px; color: #fff; font-size: 11px; font-weight: 700; } .bs .b { background: var(--blue); } .bs .s { background: var(--down); }
+
+  /* signals panel */
+  .sig { padding: 10px 12px; overflow: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  .sig-c { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+  .sig-c .t { display: flex; justify-content: space-between; align-items: center; }
+  .tag { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 3px; color: #fff; } .tag.b { background: var(--up); } .tag.s { background: var(--down); }
+  .sig-c p { color: var(--muted); font-size: 12px; margin: 4px 0 8px; }
+  .sig-c .m { display: grid; grid-template-columns: repeat(3, 1fr); font-size: 12px; } .sig-c .m small { display: block; color: var(--muted); font-size: 10.5px; }
+  .sig-note { font-size: 11px; color: var(--muted); }
+
+  /* bottom trading panel */
+  .bp { background: var(--panel); border-radius: 6px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .bp-tabs { display: flex; align-items: center; gap: 2px; padding: 0 8px; height: 38px; border-bottom: 1px solid var(--line); }
+  .bp-tabs button { padding: 0 12px; height: 38px; border-bottom: 2px solid transparent; color: var(--ink-2); font-weight: 500; }
+  .bp-tabs button.on { color: var(--ink); border-color: var(--accent); }
+  .bp-tabs .acct { margin-left: auto; display: flex; gap: 18px; font-size: 12.5px; color: var(--ink-2); } .bp-tabs .acct b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .bp-body { overflow: auto; flex: 1; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  th { text-align: right; font-weight: 500; color: var(--muted); font-size: 11.5px; padding: 6px 12px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: #fff; }
+  td { text-align: right; padding: 7px 12px; border-bottom: 1px solid #f3f4f7; } th:first-child, td:first-child { text-align: left; }
+  .empty { padding: 30px; text-align: center; color: var(--muted); }
+  .pill { font-size: 10.5px; padding: 1px 6px; border-radius: 3px; background: var(--hover); color: var(--ink-2); margin-left: 6px; }
+
+  /* order ticket */
+  .ot { padding: 0 20px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .ot-side { display: grid; grid-template-columns: 1fr 1fr; background: var(--hover); border-radius: 6px; padding: 3px; }
+  .ot-side button { padding: 8px; border-radius: 4px; font-weight: 600; } .ot-side .on.b { background: var(--blue); color: #fff; } .ot-side .on.s { background: var(--down); color: #fff; }
+  .ot label { display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 8px; color: var(--ink-2); }
+  .ot input, .ot select { height: 34px; border: 1px solid var(--line); border-radius: 4px; padding: 0 10px; font: inherit; }
+  .ot .seg { display: flex; gap: 6px; } .ot .seg span { flex: 1; text-align: center; padding: 7px; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; } .ot .seg .on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .ot-sum { display: flex; justify-content: space-between; color: var(--ink-2); font-size: 12.5px; }
+  .ot-go { height: 40px; border-radius: 6px; color: #fff; font-weight: 600; }
+  .ot-mode { font-size: 11.5px; color: var(--muted); text-align: center; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div data-slot="top"></div>
+  <div class="row main-row">
+    <div data-slot="tools"></div>
+    <div class="center">
+      <div class="ws"><div id="chart" class="tvc"></div><div data-slot="range"></div></div>
+      <div class="bp">
+        <div class="bp-tabs">
+          <button class="on" data-bp="pos">Positions</button><button data-bp="ord">Orders</button><button data-bp="sig">Signal log</button><button data-bp="pay">Strategy payoff</button>
+          <div class="acct"><span>Mode <b>Paper</b></span><span>Funds <b data-funds>₹10,00,000.00</b></span><span>Day P&amp;L <b data-pnl>₹0.00</b></span></div>
+        </div>
+        <div class="bp-body" data-bpbody></div>
+      </div>
+    </div>
+    <div class="side" id="side"></div>
+    <div data-slot="rail"></div>
+  </div>
+</div>
+<div class="foot">Research tool · not SEBI-registered advice · subject to market risk · sample data</div>
+
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="tvkit.js"></script>
+<script>
+  const { fmt, icon } = TVK;
+  const $ = (s) => document.querySelector(`[data-slot="${s}"]`);
+  $('top').outerHTML = TVK.topbar({ layoutName: 'F&O intraday' });
+  $('tools').outerHTML = TVK.toolrail();
+  $('range').outerHTML = TVK.rangebar();
+  $('rail').outerHTML = TVK.siderail([['list', 'Watchlist', 'watch'], ['chain', 'Option chain', 'chain'], ['signal', 'Signals', 'sig'], ['alert', 'Alerts'], ['oi', 'OI analysis'], ['scan', 'Screener'], ['news', 'News']], 'chain');
+
+  // ----- paper trading state -----
+  const positions = [], orders = [];
+  let tab = 'pos';
+  const LOT = 75; // sample lot size; the app reads it from the F&O contract master
+
+  function ticket(side, inst, price) {
+    let s = side, product = 'MIS', type = 'Market';
+    const d = TVK.dialog(`<div class="dlg-h"><b>${inst}</b><button data-close>×</button></div>
+      <div class="ot">
+        <div class="ot-side"><button class="b" data-s="BUY">Buy</button><button class="s" data-s="SELL">Sell</button></div>
+        <label>Product<div class="seg" data-g="product"><span class="on">MIS</span><span>NRML</span></div></label>
+        <label>Order type<div class="seg" data-g="type"><span class="on">Market</span><span>Limit</span><span>SL</span></div></label>
+        <label>Lots<input type="number" value="1" min="1" data-lots></label>
+        <label>Price<input value="${fmt(price)}" data-price disabled></label>
+        <div class="ot-sum"><span>Qty <b data-qty>${LOT}</b></span><span>Approx. value <b data-val></b></span></div>
+        <button class="ot-go" data-go></button>
+        <div class="ot-mode">Paper trading · switch to a connected broker in Settings to place live orders</div>
+      </div>`);
+    const upd = () => {
+      d.querySelectorAll('[data-s]').forEach((b) => b.classList.toggle('on', b.dataset.s === s));
+      const lots = Math.max(1, +d.querySelector('[data-lots]').value || 1);
+      d.querySelector('[data-qty]').textContent = lots * LOT;
+      d.querySelector('[data-val]').textContent = '₹' + fmt(lots * LOT * price);
+      const go = d.querySelector('[data-go]'); go.textContent = `${s === 'BUY' ? 'Buy' : 'Sell'} ${lots * LOT} @ ${type === 'Market' ? 'Market' : fmt(price)}`; go.style.background = s === 'BUY' ? 'var(--blue)' : 'var(--down)';
+      d.querySelector('[data-price]').disabled = type === 'Market';
+    };
+    d.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => { s = b.dataset.s; upd(); }));
+    d.querySelectorAll('[data-g] span').forEach((sp) => (sp.onclick = () => { sp.parentElement.querySelectorAll('span').forEach((x) => x.classList.toggle('on', x === sp)); if (sp.parentElement.dataset.g === 'type') type = sp.textContent; else product = sp.textContent; upd(); }));
+    d.querySelector('[data-lots]').oninput = upd;
+    d.querySelector('[data-go]').onclick = () => {
+      const qty = Math.max(1, +d.querySelector('[data-lots]').value || 1) * LOT * (s === 'BUY' ? 1 : -1);
+      const t = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(11, 19);
+      orders.unshift({ t, inst, side: s, qty: Math.abs(qty), price, product, status: 'COMPLETE' });
+      const p = positions.find((x) => x.inst === inst);
+      if (p) { p.avg = (p.avg * p.qty + price * qty) / (p.qty + qty || 1); p.qty += qty; } else positions.push({ inst, qty, avg: price, ltp: price, product });
+      d.remove(); TVK.toast(`Paper order filled: ${s} ${Math.abs(qty)} ${inst} @ ${fmt(price)}`); tab = 'pos'; renderBP();
+    };
+    upd();
+  }
+
+  // ----- bottom panel -----
+  function renderBP() {
+    document.querySelectorAll('[data-bp]').forEach((b) => b.classList.toggle('on', b.dataset.bp === tab));
+    const body = document.querySelector('[data-bpbody]');
+    let pnl = 0; positions.forEach((p) => (pnl += (p.ltp - p.avg) * p.qty));
+    const pe = document.querySelector('[data-pnl]'); pe.textContent = (pnl >= 0 ? '+₹' : '−₹') + fmt(Math.abs(pnl)); pe.className = pnl >= 0 ? 'u' : 'd';
+    if (tab === 'pos') body.innerHTML = positions.length ? `<table><tr><th>Instrument</th><th>Product</th><th>Qty</th><th>Avg</th><th>LTP</th><th>P&amp;L</th><th>Chg%</th></tr>${positions.map((p) => { const v = (p.ltp - p.avg) * p.qty; return `<tr><td>${p.inst}</td><td>${p.product}</td><td class="${p.qty >= 0 ? 'u' : 'd'}">${p.qty}</td><td>${fmt(p.avg)}</td><td>${fmt(p.ltp)}</td><td class="${v >= 0 ? 'u' : 'd'}">${v >= 0 ? '+' : ''}${fmt(v)}</td><td>${fmt(((p.ltp - p.avg) / p.avg) * 100)}%</td></tr>`; }).join('')}</table>`
+      : `<div class="empty">No open positions. Hover an option LTP in the chain and press B / S, or use BUY / SELL on the chart.</div>`;
+    if (tab === 'ord') body.innerHTML = orders.length ? `<table><tr><th>Time</th><th>Type</th><th>Instrument</th><th>Product</th><th>Qty</th><th>Price</th><th>Status</th></tr>${orders.map((o) => `<tr><td>${o.t}</td><td class="${o.side === 'BUY' ? 'u' : 'd'}" style="text-align:right">${o.side}</td><td style="text-align:right">${o.inst}</td><td>${o.product}</td><td>${o.qty}</td><td>${fmt(o.price)}</td><td><span class="pill">${o.status}</span></td></tr>`).join('')}</table>` : `<div class="empty">No orders today.</div>`;
+    if (tab === 'sig') body.innerHTML = `<table><tr><th>Time</th><th>Signal</th><th>Instrument</th><th>Side</th><th>Trigger</th><th>Target</th><th>Stop</th><th>Result</th></tr>
+      <tr><td>14:05</td><td style="text-align:right">Supertrend + VWAP</td><td>NIFTY</td><td class="u">BUY</td><td>24,880.00</td><td>24,960.00</td><td>24,840.00</td><td><span class="pill">Open</span></td></tr>
+      <tr><td>11:20</td><td style="text-align:right">ORB 15m breakout</td><td>BANKNIFTY</td><td class="d">SELL</td><td>53,480.00</td><td>53,300.00</td><td>53,560.00</td><td class="u">Target hit</td></tr>
+      <tr><td>10:10</td><td style="text-align:right">RSI divergence</td><td>RELIANCE</td><td class="u">BUY</td><td>2,872.00</td><td>2,900.00</td><td>2,858.00</td><td class="u">Target hit</td></tr>
+      <tr><td>09:35</td><td style="text-align:right">CPR breakout</td><td>NIFTY</td><td class="d">SELL</td><td>24,700.00</td><td>24,640.00</td><td>24,735.00</td><td class="d">Stop hit</td></tr></table>`;
+    if (tab === 'pay') body.innerHTML = `<div class="empty">Strategy payoff: build multi-leg option strategies (straddle, iron condor…) with a payoff graph and Greeks. Coming in the Strategy Builder module.</div>`;
+  }
+  document.querySelectorAll('[data-bp]').forEach((b) => (b.onclick = () => { tab = b.dataset.bp; renderBP(); }));
+
+  // ----- side panels -----
+  const SPOT = 24872.35;
+  function chainPanel() {
+    const rows = TVK.chainRows(SPOT, 12), max = Math.max(...rows.flatMap((r) => [r.ceOI, r.peOI]));
+    const tce = rows.reduce((a, r) => a + r.ceOI, 0), tpe = rows.reduce((a, r) => a + r.peOI, 0);
+    const lakh = (n) => (n / 1e5).toFixed(1) + 'L';
+    return `<div class="oc"><div class="oc-h"><b>Option chain</b><span class="pill">NIFTY</span><select class="oc-sel"><option>28 Oct 2026</option><option>04 Nov 2026</option><option>25 Nov 2026</option></select></div>
+      <div class="oc-stats"><div><small>Spot</small><b>${fmt(SPOT)}</b></div><div><small>PCR</small><b>${(tpe / tce).toFixed(2)}</b></div><div><small>Max pain</small><b>24,850</b></div><div><small>ATM IV</small><b>11.8</b></div></div>
+      <div class="oc-cols"><span>CALL OI</span><span>CE LTP</span><span>STRIKE</span><span>PE LTP</span><span>PUT OI</span></div>
+      <div class="oc-body">${rows.map((r) => `<div class="oc-r${r.atm ? ' atm' : ''}">
+        <span class="oi ce ${r.k < SPOT ? 'itm' : ''}"><i style="width:${(r.ceOI / max) * 100}%"></i><span>${lakh(r.ceOI)}</span></span>
+        <span class="ltp ${r.k < SPOT ? 'itm' : ''}" data-inst="NIFTY 28OCT ${r.k} CE" data-px="${r.ce.toFixed(2)}">${fmt(r.ce)}<span class="bs"><button class="b" data-side="BUY">B</button><button class="s" data-side="SELL">S</button></span></span>
+        <span class="k">${r.k}</span>
+        <span class="ltp ${r.k > SPOT ? 'itm' : ''}" data-inst="NIFTY 28OCT ${r.k} PE" data-px="${r.pe.toFixed(2)}">${fmt(r.pe)}<span class="bs"><button class="b" data-side="BUY">B</button><button class="s" data-side="SELL">S</button></span></span>
+        <span class="oi pe ${r.k > SPOT ? 'itm' : ''}"><i style="width:${(r.peOI / max) * 100}%"></i><span>${lakh(r.peOI)}</span></span></div>`).join('')}</div></div>`;
+  }
+  function sigPanel() {
+    const c = (n, side, tf, why, hit, pf, dd) => `<div class="sig-c"><div class="t"><b>${n}</b><span class="tag ${side === 'BUY' ? 'b' : 's'}">${side}</span></div><p>${tf} · ${why}</p><div class="m"><span><small>Hit-rate 1y</small>${hit}</span><span><small>Profit factor</small>${pf}</span><span><small>Max DD</small>${dd}</span></div></div>`;
+    return `<div class="oc-h"><b>Signals</b><span class="pill">Rule-based</span></div><div class="sig">
+      ${c('Supertrend + VWAP · NIFTY', 'BUY', '5m', 'Close above Supertrend(10,3) and VWAP, RSI > 55', '54.2%', '1.41', '−6.8%')}
+      ${c('ORB 15m · BANKNIFTY', 'SELL', '15m', 'Break below opening-range low with volume > 1.5× avg', '51.7%', '1.33', '−8.1%')}
+      ${c('Short straddle · NIFTY weekly', 'SELL', 'Expiry day', 'Sell ATM straddle 09:20, 25% SL per leg', '63.0%', '1.22', '−11.4%')}
+      ${c('PCR + OI build-up · FINNIFTY', 'BUY', '15m', 'PCR rising > 1.1 with long build-up in futures', '49.8%', '1.29', '−7.2%')}
+      <p class="sig-note">Signals are generated from published rules and backtests. They are not investment advice; past performance does not guarantee future results.</p></div>`;
+  }
+  function showPanel(key) {
+    const side = document.getElementById('side');
+    side.innerHTML = key === 'watch' ? TVK.watchlist() : key === 'sig' ? sigPanel() : chainPanel();
+    document.querySelectorAll('.sr-b').forEach((b) => b.classList.toggle('on', b.dataset.panel === key));
+    side.querySelectorAll('.ltp').forEach((el) => el.querySelectorAll('[data-side]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); ticket(b.dataset.side, el.dataset.inst, +el.dataset.px); })));
+    TVK.wire(document.getElementById('side'), charts);
+  }
+  document.querySelectorAll('.sr-b').forEach((b) => (b.onclick = () => (b.dataset.panel ? showPanel(b.dataset.panel) : TVK.toast(`${b.title} panel`))));
+
+  const chart = TVK.mountChart(document.getElementById('chart'), {
+    symbol: 'NIFTY', onTrade: (side, sym, px) => ticket(side, sym, px),
+    onLoad: () => { chart.addIndicator('VWAP'); chart.addIndicator('Supertrend 10 3'); },
+  });
+  const charts = [chart];
+  TVK.wire(document.getElementById('app'), charts);
+  showPanel('chain');
+  renderBP();
+
+  // Paper P&L ticks: LTPs wander so the positions panel feels live.
+  setInterval(() => { positions.forEach((p) => (p.ltp = +(p.ltp * (1 + (Math.random() - 0.5) * 0.004)).toFixed(2))); if (tab === 'pos' && positions.length) renderBP(); }, 1000);
+</script>
+</body>
+</html>

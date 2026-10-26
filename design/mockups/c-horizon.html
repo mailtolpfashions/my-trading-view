@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C · Horizon — My Trading View</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --canvas: #e9e8e3; --panel: #ffffff; --raised: #f6f5f1; --ink: #111111; --ink-2: #44443f; --muted: #8d8c85;
+    --line: #ecebe6; --accent: #ffc21a; --accent-ink: #5c4300;
+    --up: #12936a; --up-soft: #e3f4ec; --down: #e0452d; --down-soft: #fde7e2;
+    --mono: 'DM Mono', ui-monospace, monospace;
+    --shadow: 0 1px 0 rgb(17 17 17 / .04), 0 10px 30px -12px rgb(17 17 17 / .18);
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { font: 13px/1.45 Manrope, system-ui, sans-serif; background: var(--canvas); color: var(--ink); height: 100dvh; overflow: hidden; display: grid; grid-template-rows: 64px 1fr; padding: 0 14px 92px; }
+  td, .num, .wl-px { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .panel { background: var(--panel); border-radius: 22px; box-shadow: var(--shadow); }
+
+  header { display: flex; align-items: center; gap: 14px; }
+  .brand { font-weight: 800; font-size: 16px; letter-spacing: -0.03em; display: flex; align-items: center; gap: 8px; }
+  .brand i { width: 22px; height: 22px; border-radius: 7px; background: var(--ink); position: relative; }
+  .brand i::after { content: ''; position: absolute; inset: 6px 5px 9px 5px; background: var(--accent); border-radius: 2px; }
+  .cmd { margin: 0 auto; width: min(520px, 46vw); height: 40px; border-radius: 999px; background: var(--panel); box-shadow: var(--shadow); display: flex; align-items: center; gap: 10px; padding: 0 8px 0 18px; color: var(--muted); }
+  .cmd kbd { margin-left: auto; font: 11px var(--mono); background: var(--raised); padding: 5px 10px; border-radius: 999px; color: var(--ink-2); }
+  .chip { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 14px; border-radius: 999px; background: var(--panel); box-shadow: var(--shadow); font-weight: 600; font-size: 12px; }
+  .chip.live i { width: 7px; height: 7px; border-radius: 50%; background: var(--up); box-shadow: 0 0 0 4px var(--up-soft); }
+  .chip.delay { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
+
+  main { display: grid; grid-template-columns: 290px 1fr 270px; gap: 14px; min-height: 0; }
+  .wl { overflow: auto; padding: 8px; }
+  .wl-title { display: flex; justify-content: space-between; align-items: center; padding: 12px 12px 8px; }
+  .wl-title b { font-weight: 800; font-size: 15px; letter-spacing: -0.02em; }
+  .tabs-mini { display: inline-flex; gap: 4px; } .tabs-mini span { padding: 3px 9px; border-radius: 999px; font-size: 11.5px; color: var(--muted); font-weight: 600; } .tabs-mini span.on { background: var(--ink); color: #fff; }
+  #watchlist { list-style: none; padding: 0; }
+  .wl-row { display: grid; grid-template-columns: 1fr 56px 92px; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 14px; }
+  .wl-row:hover { background: var(--raised); }
+  .wl-row.active { background: var(--ink); color: #fff; } .wl-row.active .wl-sym small { color: #a5a49c; }
+  .wl-sym { display: flex; flex-direction: column; } .wl-sym b { font-weight: 700; } .wl-sym small { color: var(--muted); font-size: 10.5px; font-weight: 600; }
+  .wl-px { display: flex; flex-direction: column; align-items: flex-end; font-size: 12px; }
+  .wl-px small { font-size: 11px; padding: 0 6px; border-radius: 999px; }
+  .wl-row.up .wl-px small { background: var(--up-soft); color: var(--up); } .wl-row.down .wl-px small { background: var(--down-soft); color: var(--down); }
+  .wl-row.up .spark { color: var(--up); } .wl-row.down .spark { color: var(--down); } .wl-row.active .spark { color: var(--accent); }
+  .spark { width: 56px; height: 22px; }
+
+  .stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 18px 18px 10px; }
+  .sym-row { display: flex; align-items: flex-end; gap: 16px; }
+  .sym-row h1 { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: 0.02em; }
+  .sym-row .big { font: 500 38px var(--mono); letter-spacing: -0.04em; line-height: 1; }
+  .delta { background: var(--up-soft); color: var(--up); font: 500 13px var(--mono); padding: 4px 10px; border-radius: 999px; }
+  .tfs { margin-left: auto; display: inline-flex; background: var(--raised); border-radius: 999px; padding: 4px; }
+  .tfs button { all: unset; cursor: pointer; padding: 5px 11px; border-radius: 999px; font: 500 12px var(--mono); color: var(--ink-2); }
+  .tfs button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px rgb(17 17 17 / .14); }
+  .inds { display: flex; gap: 6px; margin: 14px 0 6px; }
+  .ind { font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--raised); display: inline-flex; gap: 6px; align-items: center; }
+  .ind i { width: 8px; height: 8px; border-radius: 50%; }
+  .ind.add { background: transparent; border: 1px dashed #cfcdc4; color: var(--muted); }
+  #chart { flex: 1; min-height: 0; } #rsi { height: 100px; margin-top: 4px; border-top: 1px dashed var(--line); }
+
+  .insight { padding: 18px; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+  .insight h2 { font-size: 15px; font-weight: 800; letter-spacing: -0.02em; }
+  .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .kv div { background: var(--raised); border-radius: 14px; padding: 10px 12px; } .kv small { display: block; color: var(--muted); font-size: 11px; font-weight: 600; } .kv b { font: 500 14px var(--mono); }
+  .card-sig { border-radius: 18px; padding: 14px; background: var(--ink); color: #fff; }
+  .card-sig .top { display: flex; justify-content: space-between; align-items: center; }
+  .card-sig .buy { background: var(--accent); color: var(--ink); font: 500 11.5px var(--mono); padding: 3px 10px; border-radius: 999px; }
+  .card-sig p { color: #b9b8b0; font-size: 12px; margin: 6px 0 10px; }
+  .bar { height: 6px; border-radius: 999px; background: #2e2e2b; overflow: hidden; } .bar i { display: block; height: 100%; width: 54%; background: var(--accent); }
+  .card-sig .row { display: flex; justify-content: space-between; font: 12px var(--mono); margin-top: 8px; color: #dcdbd3; }
+  .buildup { border-radius: 14px; padding: 12px; background: var(--up-soft); } .buildup b { color: var(--up); display: block; }
+
+  /* option chain */
+  .oc { overflow: auto; padding: 16px; }
+  .oc-top { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .oc-top .ind b { font-family: var(--mono); font-weight: 500; }
+  table { width: 100%; border-collapse: separate; border-spacing: 0 3px; font-size: 12px; }
+  thead th { position: sticky; top: 0; background: var(--panel); text-align: right; padding: 6px 8px; font-size: 10.5px; color: var(--muted); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  td { padding: 7px 8px; text-align: right; background: var(--panel); }
+  td.itm { background: #fbf6e6; } td.dim { color: var(--muted); } td.up { color: var(--up); } td.down { color: var(--down); } td.ltp { font-weight: 500; color: var(--ink); }
+  tr td:first-child { border-radius: 10px 0 0 10px; } tr td:last-child { border-radius: 0 10px 10px 0; }
+  .strike { text-align: center !important; font-weight: 500; background: var(--raised) !important; }
+  tr.atm td { background: var(--accent) !important; color: var(--ink) !important; }
+  td.oi { position: relative; min-width: 110px; } td.oi i { position: absolute; top: 6px; bottom: 6px; border-radius: 999px; opacity: 0.3; }
+  td.oi.ce i { right: 8px; background: var(--down); } td.oi.pe i { left: 8px; background: var(--up); } td.oi span { position: relative; }
+
+  /* dock */
+  .dock { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; gap: 4px; padding: 6px; border-radius: 22px; background: var(--ink); box-shadow: 0 18px 40px -10px rgb(17 17 17 / .45); }
+  .dock button { all: unset; cursor: pointer; padding: 9px 16px; border-radius: 16px; color: #b9b8b0; font-weight: 600; font-size: 12.5px; }
+  .dock button.on { background: var(--accent); color: var(--ink); }
+  .legal { position: fixed; right: 18px; bottom: 30px; font-size: 10.5px; color: var(--muted); max-width: 300px; text-align: right; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand"><i></i>My Trading View</div>
+    <div class="cmd">⌕ Ask or search — “NIFTY 25000 CE”, “add RSI”, “RELIANCE 15m” <kbd>Ctrl K</kbd></div>
+    <span class="chip live"><i></i>Open · 11:42</span>
+    <span class="chip delay">Delayed 15m</span>
+  </header>
+
+  <main>
+    <section class="panel wl">
+      <div class="wl-title"><b>Watchlist</b><span class="tabs-mini"><span class="on">Core</span><span>F&amp;O</span><span>Swing</span></span></div>
+      <ul id="watchlist"></ul>
+    </section>
+
+    <section class="panel stage" data-view="chart">
+      <div class="sym-row">
+        <div><h1>NIFTY 50 · NSE INDEX</h1><span class="big" data-ltp></span></div>
+        <span class="delta">+153.40 · +0.62%</span>
+        <div class="tfs"><button>1m</button><button class="on">5m</button><button>15m</button><button>1h</button><button>1D</button><button>1W</button></div>
+      </div>
+      <div class="inds">
+        <span class="ind"><i style="background:#111"></i>EMA 20</span>
+        <span class="ind"><i style="background:#c4c2b8"></i>EMA 50</span>
+        <span class="ind"><i style="background:#d99b00"></i>RSI 14</span>
+        <span class="ind add">+ Indicator</span>
+      </div>
+      <div id="chart"></div>
+      <div id="rsi"></div>
+    </section>
+
+    <section class="panel oc" data-view="chain" hidden>
+      <div class="oc-top">
+        <span class="ind">NIFTY <b data-ltp></b></span><span class="ind">Expiry <b>28 Oct</b></span><span class="ind">PCR <b data-pcr></b></span><span class="ind">Max pain <b>24,850</b></span><span class="ind">ATM IV <b>11.8</b></span>
+      </div>
+      <table id="chain"></table>
+    </section>
+
+    <section class="panel insight">
+      <h2>Today</h2>
+      <div class="kv">
+        <div><small>Open</small><b>24,731</b></div><div><small>VWAP</small><b>24,806</b></div>
+        <div><small>High</small><b>24,904</b></div><div><small>Low</small><b>24,688</b></div>
+        <div><small>PCR</small><b data-pcr></b></div><div><small>India VIX</small><b>12.84</b></div>
+      </div>
+      <div class="buildup"><b>Long build-up</b><span style="font:12px var(--mono)">Fut ▲ 0.58% · OI ▲ 4.2%</span></div>
+      <div class="card-sig">
+        <div class="top"><b>Supertrend + VWAP</b><span class="buy">BUY</span></div>
+        <p>Rule-based signal · 5m · trigger above 24,880</p>
+        <div class="bar"><i></i></div>
+        <div class="row"><span>Hit-rate (1y backtest)</span><span>54.2%</span></div>
+        <div class="row"><span>Max drawdown</span><span>−6.8%</span></div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="dock" aria-label="Modules">
+    <button class="on" data-tab="chart">Chart</button>
+    <button data-tab="chain">Option chain</button>
+    <button>Futures</button><button>Signals</button><button>Backtest</button><button>Paper</button><button>Algo</button>
+  </nav>
+  <div class="legal">Research tool, not SEBI-registered advice. Subject to market risk. Mockup — illustrative numbers.</div>
+
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="shared.js"></script>
+<script>
+  MTV.mount({ bg: '#ffffff', text: '#44443f', grid: '#f3f2ee', cross: '#bdbbb2', ink: '#111111', font: 'DM Mono',
+    up: '#12936a', down: '#e0452d', upSoft: 'rgba(18,147,106,.2)', downSoft: 'rgba(224,69,45,.2)', accent: '#111111', accent2: '#d99b00', muted: '#c4c2b8' });
+</script>
+</body>
+</html>

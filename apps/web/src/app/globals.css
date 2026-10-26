@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+/* Horizon Pro design tokens (approved 2026-10-26, design/horizon-pro). Light theme only. */
+@theme {
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  /* Numbers: Plus Jakarta Sans with tabular figures (the `num` utility), matching the Kicko CRM. */
+  --font-mono: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+
+  --color-canvas: #e8e7e2;
+  --color-panel: #ffffff;
+  --color-raised: #f5f4f0;
+  --color-ink: #121212;
+  --color-ink-2: #45453f;
+  --color-muted: #8b8a83;
+  --color-line: #ecebe6;
+
+  --color-accent: #ffc21a;
+  --color-accent-ink: #3d2c00;
+  --color-accent-soft: #fff4cc;
+
+  /* Market colours match TradingView so charts and tables agree. */
+  --color-up: #089981;
+  --color-up-soft: #e0f2ef;
+  --color-down: #f23645;
+  --color-down-soft: #fde8ea;
+  --color-blue: #2962ff;
+
+  --radius-panel: 14px;
+  --shadow-panel: 0 1px 0 rgb(18 18 18 / 0.04), 0 8px 24px -12px rgb(18 18 18 / 0.16);
+  --shadow-pop: 0 1px 0 rgb(18 18 18 / 0.04), 0 24px 48px -16px rgb(18 18 18 / 0.28);
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+  ::selection {
+    background: var(--color-accent);
+    color: var(--color-accent-ink);
+  }
+}
+
+@utility panel {
+  background: var(--color-panel);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+@utility eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+@utility num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+@keyframes live-pulse {
+  0% { box-shadow: 0 0 0 0 rgb(8 153 129 / 0.5); }
+  70% { box-shadow: 0 0 0 7px rgb(8 153 129 / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(8 153 129 / 0); }
+}
+.live-dot { animation: live-pulse 2s infinite; }
+
+/* Watchlist tick flash */
+@keyframes flash-up { from { background: rgb(8 153 129 / 0.22); } to { background: transparent; } }
+@keyframes flash-down { from { background: rgb(242 54 69 / 0.22); } to { background: transparent; } }
+.flash-up { animation: flash-up 700ms ease-out; }
+.flash-down { animation: flash-down 700ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot, .flash-up, .flash-down { animation: none; }
+}
