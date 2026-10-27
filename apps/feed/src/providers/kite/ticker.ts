@@ -1,4 +1,4 @@
-// Kite WebSocket (KiteTicker) client: live ticks in "full" mode, parsed from Kite's binary format as documented at
+// Kite WebSocket (KiteTicker) client: live ticks in "quote" mode, parsed from Kite's binary format as documented at
 // kite.trade/docs/connect/v3/websocket. Prices arrive as integer paise.
 
 import WebSocket from 'ws';
@@ -76,7 +76,8 @@ export class KiteTicker {
   private send(tokens: number[]) {
     if (this.ws?.readyState !== WebSocket.OPEN || !tokens.length) return;
     this.ws.send(JSON.stringify({ a: 'subscribe', v: tokens }));
-    this.ws.send(JSON.stringify({ a: 'mode', v: ['full', tokens] }));
+    // "quote" mode: price, OHLC and volume (44 bytes) without order depth, light enough to stream the whole market.
+    this.ws.send(JSON.stringify({ a: 'mode', v: ['quote', tokens] }));
   }
 
   private connect() {

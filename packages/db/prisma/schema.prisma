@@ -157,6 +157,103 @@ model PaperOrder {
   @@index([accountId, status])
 }
 
+// NSE cash-market end-of-day data (official bhavcopy), every stock, as published: prices are NOT adjusted for
+// splits or bonuses. Adjustment factors are derived from NSE's own previous-close column (see apps/feed/src/eod).
+
+model EquityEod {
+  date           String // trading date, YYYY-MM-DD
+  symbol         String
+  isin           String
+  series         String // EQ | BE | BZ
+  openPaise      Int
+  highPaise      Int
+  lowPaise       Int
+  closePaise     Int
+  /// NSE's previous close for this day: differs from the prior day's close only after a corporate action.
+  prevClosePaise Int
+  volume         BigInt
+  trades         Int?
+
+  @@id([date, symbol])
+  @@index([symbol, date])
+  @@index([isin])
+}
+
+/// NSE index closes (ind_close_all), keyed by NSE's index name.
+model IndexEod {
+  date       String
+  name       String // e.g. NIFTY 50
+  openPaise  Int
+  highPaise  Int
+  lowPaise   Int
+  closePaise Int
+
+  @@id([date, name])
+}
+
+/// NSE's corporate-action file (Bc, in the daily PR bundle), as published. Used to adjust prices for splits and bonuses.
+model CorporateAction {
+  symbol     String
+  exDate     String // YYYY-MM-DD
+  purpose    String
+  series     String
+  recordDate String?
+  /// Trading day of the NSE file in which this row was first seen.
+  firstSeen  String
+
+  @@id([symbol, exDate, purpose])
+  @@index([exDate])
+}
+
+/// One row per date attempted for the cash-market history, so no file is downloaded twice.
+model EodFetch {
+  date      String   @id
+  /// saved | not-published | error
+  status    String
+  message   String?
+  attempts  Int      @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+// ---- Signals: published rule-based strategies and every signal they ever issued ----
+
+/// A published strategy version. Rules never change after publishing: a change is a new version.
+model SignalStrategy {
+  /// slug@version, e.g. breakout-52w@1
+  id          String        @id
+  slug        String
+  version     Int
+  name        String
+  description String
+  /// The exact rules (a backtest Strategy), as published.
+  rules       Json
+  /// SHA-256 of the rules JSON, to prove they never changed.
+  rulesHash   String
+  publishedAt DateTime      @default(now())
+  retiredAt   DateTime?
+  issues      SignalIssue[]
+
+  @@unique([slug, version])
+}
+
+/// One signal, recorded the evening it was issued. Append-only: rows are never edited or deleted.
+model SignalIssue {
+  id         String         @id @default(cuid())
+  strategyId String
+  strategy   SignalStrategy @relation(fields: [strategyId], references: [id])
+  /// The trading day whose close produced the signal (YYYY-MM-DD); it acts at the next session's open.
+  date       String
+  symbol     String
+  /// ENTER | EXIT
+  action     String
+  /// That day's official close, as traded (not adjusted).
+  closePaise Int
+  issuedAt   DateTime       @default(now())
+
+  @@unique([strategyId, date, symbol, action])
+  @@index([date])
+}
+
 // NSE F&O end-of-day data (official bhavcopy) for index derivatives. Prices in integer paise.
 
 model FnoEod {

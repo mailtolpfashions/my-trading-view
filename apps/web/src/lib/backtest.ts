@@ -14,10 +14,13 @@ export async function runBacktestApi(symbol: string, tf: Timeframe, strategy: St
 export const PARAM_LABELS: Record<IndicatorName, string[]> = {
   SMA: ['Length'], EMA: ['Length'], RSI: ['Length'], MACD: ['Fast', 'Slow', 'Signal'], MACD_SIGNAL: ['Fast', 'Slow', 'Signal'], MACD_HIST: ['Fast', 'Slow', 'Signal'],
   BB_UPPER: ['Length', 'StdDev'], BB_MIDDLE: ['Length', 'StdDev'], BB_LOWER: ['Length', 'StdDev'], SUPERTREND: ['ATR length', 'Factor'], VWAP: [], ATR: ['Length'],
+  HIGHEST: ['Bars'], LOWEST: ['Bars'], VOL_SMA: ['Length'], CHANGE_PCT: [], VALUE_SMA: ['Length'],
 };
 export const INDICATOR_LABELS: Record<IndicatorName, string> = {
   SMA: 'SMA', EMA: 'EMA', RSI: 'RSI', MACD: 'MACD line', MACD_SIGNAL: 'MACD signal', MACD_HIST: 'MACD histogram',
   BB_UPPER: 'Bollinger upper', BB_MIDDLE: 'Bollinger basis', BB_LOWER: 'Bollinger lower', SUPERTREND: 'Supertrend', VWAP: 'VWAP', ATR: 'ATR',
+  HIGHEST: 'Highest high (previous bars)', LOWEST: 'Lowest low (previous bars)', VOL_SMA: 'Average volume', CHANGE_PCT: 'Change % (from previous close)',
+  VALUE_SMA: 'Average traded value (₹ crore)',
 };
 
 const ind = (name: IndicatorName, ...params: number[]): Operand => ({ kind: 'indicator', name, params });

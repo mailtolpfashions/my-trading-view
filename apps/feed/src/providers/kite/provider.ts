@@ -173,6 +173,11 @@ export class KiteProvider implements MarketDataProvider {
     });
   }
 
+  /** Streams these symbols continuously (up to Kite's 3,000 per connection), whether or not anyone is watching. */
+  streamAlways(symbols: string[]) {
+    this.ticker.subscribe(symbols.filter((s) => this.tokens.has(s)).map((s) => this.tokens.get(s)!));
+  }
+
   async quotes(symbols: string[]): Promise<Quote[]> {
     const known = symbols.filter((s) => this.tokens.has(s));
     this.ticker.subscribe(known.map((s) => this.tokens.get(s)!));

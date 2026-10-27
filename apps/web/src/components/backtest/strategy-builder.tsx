@@ -31,7 +31,7 @@ function OperandInput({ value, onChange }: { value: Operand; onChange: (o: Opera
         <input className={`${input} w-20`} type="number" step="any" value={value.value} aria-label="Number" onChange={(e) => onChange({ kind: 'number', value: Number(e.target.value) })} />
       )}
       {value.kind === 'indicator' && PARAM_LABELS[value.name].map((label, i) => (
-        <input key={label} className={`${input} w-14`} type="number" step="any" min="0" title={label} aria-label={label} value={value.params[i]}
+        <input key={label} className={`${input} w-16`} type="number" step="any" min="0" title={label} aria-label={label} value={value.params[i]}
           onChange={(e) => { const params = [...value.params]; params[i] = Number(e.target.value); onChange({ ...value, params }); }} />
       ))}
     </div>

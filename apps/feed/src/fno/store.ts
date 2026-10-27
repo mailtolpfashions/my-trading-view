@@ -3,6 +3,7 @@
 // is ever downloaded twice.
 
 import { prisma } from '@mtv/db';
+import { NotPublished, nseGet as download } from '../nse-http';
 import { unzipFirstCsv, indexCloseUrl, parseIndexClose } from '../official/nse-files';
 import { FNO_UNDERLYINGS, UDIFF_FROM, fnoBhavcopyUrl, parseOldFo, parseUdiffFo, type FnoDay, type FnoUnderlying } from './bhavcopy';
 
@@ -12,15 +13,6 @@ const PUBLISH_AFTER = (18 * 60 + 30) * 60; // seconds after IST midnight
 const INDEX_NAMES: Record<FnoUnderlying, string> = { NIFTY: 'NIFTY 50', BANKNIFTY: 'NIFTY BANK' };
 const toPaise = (rupees: number) => Math.round(rupees * 100);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-class NotPublished extends Error {}
-
-async function download(url: string): Promise<Response> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
-  if (res.status === 404) throw new NotPublished(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-  return res;
-}
 
 /** Downloads and parses one trading day. Old-layout days also fetch NSE's index-close file for the underlying price. */
 export async function fetchFnoDay(date: string): Promise<FnoDay> {

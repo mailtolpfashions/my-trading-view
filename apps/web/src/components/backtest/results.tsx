@@ -16,7 +16,7 @@ const istDateTime = (t: number, intraday: boolean) => {
 };
 const pct = (v: number | null, digits = 2) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(digits)}%`);
 const tone = (v: number | null) => (v == null || v === 0 ? '' : v > 0 ? 'text-up' : 'text-down');
-const REASON: Record<string, string> = { stop: 'Stop loss', target: 'Target', signal: 'Exit rule', 'square-off': 'Square-off', 'end-of-data': 'End of data' };
+const REASON: Record<string, string> = { stop: 'Stop loss', target: 'Target', signal: 'Exit rule', time: 'Max bars held', 'square-off': 'Square-off', 'end-of-data': 'End of data' };
 
 function chartBase(el: HTMLElement): IChartApi {
   const font = getComputedStyle(document.documentElement).getPropertyValue('--font-jakarta').trim() || 'system-ui';

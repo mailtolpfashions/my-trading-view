@@ -48,6 +48,9 @@ export async function loadEquities(log: (msg: string) => void): Promise<void> {
   log(`Loaded ${equities.length} NSE equities`);
 }
 
+/** Every NSE equity symbol in the current list. */
+export const allEquitySymbols = () => equities.map((e) => e.symbol);
+
 export function findInstrument(symbol: string): Instrument | undefined {
   const s = symbol.toUpperCase();
   return INDICES.find((i) => i.symbol === s) ?? equities.find((e) => e.symbol === s);

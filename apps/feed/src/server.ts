@@ -2,12 +2,12 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import Fastify, { type FastifyRequest } from 'fastify';
 import type { WebSocket } from 'ws';
-import { BacktestError, OptionsBacktestError, runBacktest, runOptionsBacktest, type OptionsStrategy, type Strategy } from '@mtv/backtest';
+import { BacktestError, OptionsBacktestError, runBacktest, runOptionsBacktest, type OptionsStrategy, type RuleSet, type Strategy } from '@mtv/backtest';
 import { prisma } from '@mtv/db';
 import { toPaise, type PlaceOrderInput } from '@mtv/paper';
 import { NEEDS_BROKER, TIMEFRAMES, marketSession, type Candle, type ClientMessage, type DataStatus, type Quote, type ServerMessage, type Timeframe } from '@mtv/shared';
 import { verifyFeedToken, type FeedClaims, type Plan } from '@mtv/shared/feed-token';
-import { DelayBuffer, LiveUsageRecorder, delayCandles } from './access';
+import { DelayBuffer, LiveUsageRecorder, delayCandles, delayCandlesWithPartial, delayedQuoteFromBars } from './access';
 import { PaperEngine } from './paper/engine';
 import { PrismaPaperRepo } from './paper/repo';
 import { FreeProvider } from './providers/free';
@@ -22,7 +22,10 @@ import { getChain, latestFnoDate } from './fno/chain';
 import { prismaOptionsData } from './fno/data';
 import { fnoStatus, startFnoSync } from './fno/store';
 import { auditCandles } from './quality';
-import { findInstrument, loadEquities, searchInstruments } from './symbols';
+import { dailyHistory, eodStatus, onEodReady, startEodSync } from './eod/store';
+import { publishStrategies, latestSignals, runSignals, signalDetail, signalsOverview } from './signals/runner';
+import { ScanError, runScan } from './signals/scanner';
+import { INDICES, allEquitySymbols, findInstrument, loadEquities, searchInstruments } from './symbols';
 
 const PORT = Number(process.env.FEED_PORT ?? 4001);
 const WEB_ORIGIN = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
@@ -66,10 +69,46 @@ const liveUsage = new LiveUsageRecorder(
   (m) => app.log.warn(m),
 );
 
+// 1-minute bars per symbol, refreshed at most once a minute, for Free users' delayed prices on a live source
+// (the tick buffer only has data once the feed has been live for 15 minutes).
+const oneMinute = new Map<string, { bars: Candle[]; at: number; loading: boolean }>();
+function oneMinuteBars(symbol: string): Candle[] {
+  const e = oneMinute.get(symbol);
+  if (!e || (!e.loading && Date.now() - e.at > 60_000)) {
+    const entry = e ?? { bars: [], at: 0, loading: false };
+    entry.loading = true;
+    oneMinute.set(symbol, entry);
+    provider.candles(symbol, '1').then(
+      (bars) => { entry.bars = bars; entry.at = Date.now(); },
+      (err) => app.log.warn(`1-minute bars for ${symbol} failed: ${(err as Error).message}`),
+    ).finally(() => { entry.loading = false; });
+  }
+  return e?.bars ?? [];
+}
+async function oneMinuteBarsNow(symbol: string): Promise<Candle[]> {
+  const e = oneMinute.get(symbol);
+  if (e && Date.now() - e.at <= 60_000) return e.bars;
+  const bars = await provider.candles(symbol, '1');
+  oneMinute.set(symbol, { bars, at: Date.now(), loading: false });
+  return bars;
+}
+
 /** The quote a user may see: live for the Live plan; 15 minutes old for Free when the source is live. */
-const quoteFor = (q: Quote, plan: Plan | undefined): Quote | null => (!liveSource() || isLive(plan) ? q : delayBuffer.delayed(q.symbol, now()));
-/** Bars a user may see: Free users on a live source get only bars that closed 15+ minutes ago. */
-const candlesFor = (candles: Candle[], tf: Timeframe, plan: Plan | undefined) => (liveSource() && !isLive(plan) ? delayCandles(candles, tf, now()) : candles);
+const quoteFor = (q: Quote, plan: Plan | undefined): Quote | null => {
+  if (!liveSource() || isLive(plan)) return q;
+  return delayBuffer.delayed(q.symbol, now()) ?? delayedQuoteFromBars(q, oneMinuteBars(q.symbol), now());
+};
+/** Bars a user may see: Free users on a live source get data 15+ minutes old, including the bar in progress then. */
+async function candlesFor(symbol: string, candles: Candle[], tf: Timeframe, plan: Plan | undefined): Promise<Candle[]> {
+  if (!liveSource() || isLive(plan)) return candles;
+  try {
+    const [minutes, daily] = await Promise.all([oneMinuteBarsNow(symbol), tf === 'W' ? provider.candles(symbol, 'D') : Promise.resolve([])]);
+    return delayCandlesWithPartial(candles, tf, now(), minutes, daily);
+  } catch (e) {
+    app.log.warn(`Delayed partial bar for ${symbol} unavailable: ${(e as Error).message}`);
+    return delayCandles(candles, tf, now()); // still never newer than the cutoff
+  }
+}
 /** Every live quote from the provider passes through here so the delay buffer stays complete. */
 const remember = (quotes: Quote[]) => {
   for (const q of quotes) {
@@ -101,7 +140,7 @@ async function history(symbol: string, tf: Timeframe, deep: boolean, plan: Plan 
   if (tf === 'D') ({ candles: raw, official } = applyOfficial(symbol, raw)); // NSE's official record wins
   const audited = auditCandles(raw, tf);
   if (official) audited.quality.official = official;
-  return { candles: candlesFor(audited.candles, tf, plan), quality: audited.quality };
+  return { candles: await candlesFor(symbol, audited.candles, tf, plan), quality: audited.quality };
 }
 
 app.get<{ Querystring: { symbol?: string; tf?: string } }>('/api/candles', async (req, reply) => {
@@ -206,6 +245,8 @@ app.post('/api/kite/logout', async (req, reply) => {
 async function startKite() {
   await kite.loadInstruments();
   kite.ticker.start();
+  // Record the whole market, not just what someone is watching, so Free users' delayed replay is complete.
+  kite.streamAlways([...INDICES.map((i) => i.symbol), ...allEquitySymbols()]);
   broadcastStatus();
 }
 
@@ -220,6 +261,24 @@ app.get<{ Querystring: { underlying?: string; date?: string; expiry?: string } }
   return chain ?? reply.code(404).send({ error: 'no_data', message: `No options for ${u} on ${date}` });
 });
 app.get('/api/official/status', async () => ({ days: storedDays(), attempts: officialAttempts() }));
+
+// ---- NSE end-of-day history, scanner and signals (all from NSE's official files) ----
+app.get('/api/eod/status', async () => eodStatus());
+app.get<{ Querystring: { symbol?: string } }>('/api/eod/history', async (req, reply) => {
+  const h = dailyHistory(String(req.query.symbol ?? '').toUpperCase());
+  return h ?? reply.code(404).send({ error: 'no_data', message: 'No NSE history for this symbol yet' });
+});
+app.post<{ Body: { rules?: RuleSet } }>('/api/scan', async (req, reply) => {
+  try {
+    return await runScan(req.body?.rules as RuleSet);
+  } catch (e) {
+    if (e instanceof ScanError) return reply.code(400).send({ error: 'bad_rules', message: e.message });
+    req.log.error(e);
+    return reply.code(500).send({ error: 'scan_failed', message: 'Scan failed' });
+  }
+});
+app.get('/api/signals', async () => ({ strategies: signalsOverview(), ...(await latestSignals()) }));
+app.get<{ Params: { id: string } }>('/api/signals/:id', async (req, reply) => (await signalDetail(req.params.id)) ?? reply.code(404).send({ error: 'not_found' }));
 // Live option chain and futures need a broker or vendor feed.
 app.get('/api/option-chain', async (_req, reply) => reply.code(501).send({ error: NEEDS_BROKER }));
 
@@ -276,7 +335,8 @@ app.post<{ Body: { startingCash: string | number } }>('/api/paper/reset', async 
 });
 
 // ---- live quotes over WebSocket ----
-type Client = { subs: Set<string>; claims: FeedClaims };
+/** `sent`: last delayed price sent per symbol (Free users on a live source), so the replay only sends changes. */
+type Client = { subs: Set<string>; claims: FeedClaims; sent: Map<string, string> };
 const clients = new Map<WebSocket, Client>();
 const send = (ws: WebSocket, msg: ServerMessage) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
 
@@ -284,7 +344,7 @@ app.get('/ws', { websocket: true }, (socket, req) => {
   const claims = verifyFeedToken((req.query as { token?: string }).token, TOKEN_SECRET);
   if (!claims) { socket.close(4401, 'unauthorised'); return; }
   plans.set(claims.uid, claims.plan);
-  clients.set(socket, { subs: new Set(), claims });
+  clients.set(socket, { subs: new Set(), claims, sent: new Map() });
   // Close when the token expires: the browser reconnects with a fresh token, so plan changes take effect.
   const expiry = setTimeout(() => socket.close(4001, 'token expired'), Math.max(1, claims.exp - now()) * 1000);
   send(socket, { type: 'status', status: statusFor(claims.plan), session: marketSession(now()) });
@@ -312,6 +372,7 @@ function deliver(quotes: Quote[], targets: WebSocket[]) {
   for (const ws of targets) {
     const c = clients.get(ws);
     if (!c) continue;
+    if (liveSource() && !isLive(c.claims.plan)) continue; // Free users on a live source get the replay below
     const mine = quotes.filter((q) => c.subs.has(q.symbol)).map((q) => quoteFor(q, c.claims.plan)).filter((q): q is Quote => !!q);
     if (!mine.length) continue;
     send(ws, { type: 'quotes', quotes: mine });
@@ -364,6 +425,25 @@ setInterval(async () => {
   }
 }, 500);
 
+// Delayed broadcast for Free users on a live source: every second, the market exactly as it stood 15 minutes ago.
+setInterval(() => {
+  if (!liveSource()) return;
+  for (const [ws, c] of clients) {
+    if (isLive(c.claims.plan) || !c.subs.size) continue;
+    const changed: Quote[] = [];
+    for (const symbol of c.subs) {
+      const live = lastQuotes.get(symbol);
+      const q = live ? quoteFor(live, c.claims.plan) : delayBuffer.delayed(symbol, now());
+      if (!q) continue;
+      const key = `${q.ltp}|${q.time}`;
+      if (c.sent.get(symbol) === key) continue;
+      c.sent.set(symbol, key);
+      changed.push(q);
+    }
+    if (changed.length) send(ws, { type: 'quotes', quotes: changed });
+  }
+}, 1000);
+
 // Poll fast while the market is open, slowly otherwise, and keep clients' session and data-source status current.
 let lastSession = marketSession(now());
 let lastProvider = provider.status.provider;
@@ -390,5 +470,9 @@ app.log.info(`Loaded ${await loadOfficialStore()} days of NSE official data`);
 startOfficialJob((m) => app.log.info(m));
 // Three years of NSE F&O end-of-day history for index options, downloaded politely in the background.
 startFnoSync(process.env.FNO_BACKFILL_FROM ?? '2023-11-01', (m) => app.log.info(m));
+// Every NSE stock's official daily history (for the scanner and signals), then that evening's signals.
+await publishStrategies((m) => app.log.info(m)).catch((e) => app.log.error(e, 'Publishing signal strategies failed'));
+onEodReady(() => runSignals((m) => app.log.info(m)));
+startEodSync(process.env.EOD_BACKFILL_FROM ?? '2022-01-03', (m) => app.log.info(m));
 await app.listen({ port: PORT, host: '127.0.0.1' });
 void loop();

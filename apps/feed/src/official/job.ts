@@ -1,6 +1,7 @@
 // Downloads NSE's official end-of-day files once per trading day, politely:
 // at most 3 attempts per date, at least an hour apart, and a backfill that stops at the first network failure.
 
+import { NotPublished, nseGet } from '../nse-http';
 import { INDICES } from '../symbols';
 import { bhavcopyUrl, indexCloseUrl, parseBhavcopy, parseIndexClose, recentWeekdays, unzipFirstCsv, type OfficialBar, type TradeDate } from './nse-files';
 import { hasDay, saveDay } from './store';
@@ -14,14 +15,7 @@ type Attempt = { count: number; last: number; result: string };
 const attempts = new Map<TradeDate, Attempt>();
 export const officialAttempts = () => Object.fromEntries(attempts);
 
-class NotPublished extends Error {}
-
-async function get(url: string): Promise<Response> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-  if (res.status === 404) throw new NotPublished(`not published: ${url}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-  return res;
-}
+const get = (url: string) => nseGet(url, 30_000);
 
 /** Fetches and stores one trading day. Returns 'saved', 'not-published' (holiday or too early) or throws on network errors. */
 export async function fetchDay(date: TradeDate): Promise<'saved' | 'not-published'> {

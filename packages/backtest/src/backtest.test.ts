@@ -29,6 +29,31 @@ describe('conditions', () => {
   });
 });
 
+describe('daily signals', () => {
+  // Daily bars on consecutive dates.
+  const days = (ohlc: number[][]): Candle[] => ohlc.map(([o, h, l, c], i) => ({ time: ist(1 + i, 9, 15), open: o, high: h, low: l, close: c, volume: 1000 }));
+  const cnc = (over: Partial<Strategy> = {}) => strat({ product: 'CNC', ...over });
+
+  it('reports an entry decided at the last close as the next action, without inventing a fill', () => {
+    const r = runBacktest(days([flat(99), flat(99), [99, 101, 99, 101]]), 'D', cnc());
+    expect(r.nextAction).toBe('enter');
+    expect(r.trades).toEqual([]);
+  });
+  it('time exit leaves at the next open after the position is held N bars', () => {
+    // signal on day 2 close -> enter day 3 open 102; held 2 bars by day 4 close -> exit day 5 open 110
+    const r = runBacktest(days([flat(99), [99, 101, 99, 101], flat(102), flat(105), flat(110), flat(111)]), 'D', cnc({ maxBars: 2 }));
+    expect(r.trades[0]).toMatchObject({ entryPricePaise: 102_00, exitPricePaise: 110_00, exitReason: 'time', bars: 3 });
+  });
+  it('a time exit due at the last close is the next action; the open position is marked end-of-data', () => {
+    const r = runBacktest(days([flat(99), [99, 101, 99, 101], flat(102), flat(105)]), 'D', cnc({ maxBars: 2 }));
+    expect(r.nextAction).toBe('exit');
+    expect(r.trades[0].exitReason).toBe('end-of-data');
+  });
+  it('intraday strategies never carry a next action overnight', () => {
+    expect(runBacktest(bars([flat(99), [99, 101, 99, 101]]), '5', strat()).nextAction).toBeNull();
+  });
+});
+
 describe('execution model', () => {
   it('has no look-ahead: a signal at a bar close fills at the NEXT bar open', () => {
     // bar1 closes at 101 (cross above 100) -> entry at bar2 open 102

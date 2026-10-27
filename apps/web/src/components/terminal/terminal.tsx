@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AreaChart, BarChart3, CandlestickChart, Check, ChevronDown, LineChart, PlugZap, Search, Sparkles, TrendingUp } from 'lucide-react';
+import { AreaChart, BarChart3, CandlestickChart, Check, ChevronDown, LineChart, PlugZap, Search, TrendingUp } from 'lucide-react';
 import { mergeTick } from '@mtv/indicators';
 import { marketSession, type Candle, type DataQuality, type Instrument, type MarketSession, type Timeframe } from '@mtv/shared';
 import { LogoMark } from '@/components/logo';
@@ -11,6 +11,8 @@ import { FEED_URL, feedFetch, fetchCandles, useQuotes } from '@/lib/feed';
 import { fmt, tfLabel } from '@/lib/format';
 import { BacktestModule } from '@/components/backtest/backtest-module';
 import { OptionsView } from '@/components/options/options-view';
+import { ScannerView } from '@/components/signals/scanner-view';
+import { SignalsSide, SignalsView } from '@/components/signals/signals-view';
 import { ChartView, type ChartType } from './chart-view';
 import { DataCheck } from './data-check';
 import { OrderTicket, type TicketRequest } from './order-ticket';
@@ -27,7 +29,7 @@ const PULSE_NAMES: Record<string, string> = { NIFTY: 'NIFTY 50', MIDCPNIFTY: 'MI
 const DEFAULT_WATCH = ['NIFTY', 'BANKNIFTY', 'SENSEX', 'FINNIFTY', 'INDIAVIX', 'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 'SBIN', 'BHARTIARTL', 'ITC', 'LT', 'AXISBANK', 'KOTAKBANK', 'BAJFINANCE', 'MARUTI'];
 const TFS: Timeframe[] = ['1', '5', '15', '30', '60', 'D', 'W'];
 const MODULES = ['Chart', 'Option chain', 'Futures', 'Signals', 'Backtest', 'Paper', 'Algo', 'Research'];
-const LIVE_MODULES = ['Chart', 'Option chain', 'Backtest'];
+const LIVE_MODULES = ['Chart', 'Option chain', 'Signals', 'Backtest', 'Research'];
 const DAY = 86400;
 const RANGES: [label: string, tf: Timeframe, seconds: number | (() => number)][] = [
   ['1D', '1', DAY], ['5D', '5', 7 * DAY], ['1M', '30', 31 * DAY], ['3M', '60', 92 * DAY], ['6M', '60', 183 * DAY],
@@ -103,10 +105,33 @@ export function Terminal({ user }: { user: TerminalUser }) {
     window.history.replaceState(null, '', window.location.pathname);
   }, []);
 
-  // ---- live bar from streamed quotes ----
+  // ---- Free users on a live source get a second-by-second replay 15 minutes behind. Until the server has
+  // recorded 15 minutes of ticks (just after it starts) prices come once a minute; meanwhile reload the server's
+  // complete candles (real OHLC from 1-minute data) so bars are never drawn flat. ----
+  const delayedLive = delayed && status?.provider === 'kite';
+  const quotesRef = useRef(quotes);
+  quotesRef.current = quotes;
+  useEffect(() => {
+    if (!delayedLive) return;
+    const want = `${sym.symbol}:${tf}`;
+    const id = setInterval(() => {
+      const last = quotesRef.current[sym.symbol];
+      const replaying = last && Date.now() / 1000 - last.time < 905; // replay prices are ~900 s old
+      if (replaying) return;
+      fetchCandles(sym.symbol, tf).then(
+        (r) => setData((d) => (d.for === want ? { ...d, candles: r.candles, quality: r.quality } : d)), // same key keeps the zoom
+        () => {},
+      );
+    }, 20_000);
+    return () => clearInterval(id);
+  }, [delayedLive, sym.symbol, tf]);
+
+  // ---- live bar from streamed quotes (for Free users on a live source, the 15-minute-delayed replay) ----
   const q = quotes[sym.symbol];
   useEffect(() => {
     if (!q?.time || data.for !== `${sym.symbol}:${tf}`) return;
+    // A once-a-minute delayed price (before the replay has started) would draw a flat bar: the 20 s reload covers it.
+    if (delayedLive && Date.now() / 1000 - q.time >= 905) return;
     setData((d) => {
       const next = mergeTick(d.candles, tf, q.ltp, q.time);
       return next === d.candles ? d : { ...d, candles: next };
@@ -131,6 +156,12 @@ export function Terminal({ user }: { user: TerminalUser }) {
 
   const loadSymbol = (s: Sym) => { setVisibleSeconds(undefined); setSym({ symbol: s.symbol, name: s.name, exchange: s.exchange }); };
   const changeTf = (t: Timeframe) => { setVisibleSeconds(undefined); setTf(t); };
+  /** Signals and scans are end-of-day: open the stock's daily chart. */
+  const openDailyChart = (symbol: string) => {
+    loadSymbol({ symbol, name: symbol, exchange: 'NSE' });
+    setTf('D');
+    setModule('Chart');
+  };
   const applyRange = (rtf: Timeframe, secs: number) => {
     setVisibleSeconds(secs);
     if (rtf === tf) setData((d) => ({ ...d, key: d.key + 'r' }));
@@ -215,7 +246,9 @@ export function Terminal({ user }: { user: TerminalUser }) {
       </div>
 
       {/* workspace */}
-      {module === 'Backtest' ? <BacktestModule /> : module === 'Option chain' ? <OptionsView /> : (
+      {module === 'Backtest' ? <BacktestModule /> : module === 'Option chain' ? <OptionsView />
+        : module === 'Signals' ? <SignalsView onOpenChart={openDailyChart} />
+        : module === 'Research' ? <ScannerView onOpenChart={openDailyChart} /> : (
       <main className="grid min-h-0 grid-cols-[1fr_380px] grid-rows-[1fr_210px] gap-2">
         <section className="panel grid min-h-0 min-w-0 grid-rows-[44px_1fr_34px] overflow-hidden">
           {/* chart toolbar */}
@@ -339,8 +372,8 @@ export function Terminal({ user }: { user: TerminalUser }) {
               Zerodha Kite Connect, or Upstox and Dhan, which offer free APIs.
             </EmptyState>
           )}
-          {side === 'signals' && <EmptyState icon={Sparkles} title="Signals are coming">Rule-based signals with published rules and backtest stats arrive in a later build step.</EmptyState>}
-          {side === 'scanner' && <EmptyState icon={TrendingUp} title="Scanner is coming">OI build-up, breakout and volume scanners arrive in a later build step.</EmptyState>}
+          {side === 'signals' && <SignalsSide onOpenChart={openDailyChart} onOpenModule={() => setModule('Signals')} />}
+          {side === 'scanner' && <ScannerView compact onOpenChart={openDailyChart} />}
         </section>
 
         <PaperPanel snapshot={paper} unavailable={connected && !paper} onTicket={setTicket} onNotice={setNotice} />

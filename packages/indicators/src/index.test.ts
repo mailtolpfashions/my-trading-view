@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Candle } from '@mtv/shared';
-import { atr, barStart, bollinger, ema, heikinAshi, macd, mergeTick, rsi, sma, supertrend, vwap, wma } from './index';
+import { atr, barStart, bollinger, changePct, ema, heikinAshi, highestBefore, lowestBefore, macd, mergeTick, rsi, sma, supertrend, vwap, wma } from './index';
 
 const bar = (time: number, open: number, high: number, low: number, close: number, volume = 100): Candle => ({ time, open, high, low, close, volume });
 const line = (closes: number[]) => closes.map((c, i) => bar(i * 300, c, c + 1, c - 1, c));
@@ -12,6 +12,25 @@ describe('moving averages', () => {
     expect(ema([1, 2, 3, 4, 10], 3)).toEqual([null, null, 2, 3, 6.5]);
   });
   it('wma weights recent values most', () => expect(wma([1, 2, 3], 3)).toEqual([null, null, (1 + 4 + 9) / 6]));
+});
+
+describe('highest / lowest of the previous bars', () => {
+  const v = [5, 3, 8, 1, 7, 2, 9];
+  // Brute force reference: extreme of v[i-n .. i-1].
+  const ref = (n: number, pick: (...x: number[]) => number) => v.map((_, i) => (i < n ? null : pick(...v.slice(i - n, i))));
+  it('excludes the current bar, so a breakout can be detected', () => {
+    expect(highestBefore(v, 3)).toEqual(ref(3, Math.max));
+    expect(lowestBefore(v, 3)).toEqual(ref(3, Math.min));
+    expect(highestBefore(v, 1)).toEqual(ref(1, Math.max));
+  });
+  it('matches brute force on long random data', () => {
+    const r = Array.from({ length: 600 }, (_, i) => Math.round(Math.sin(i * 1.7) * 100 + (i % 13) * 7));
+    for (const n of [1, 5, 20, 252]) {
+      expect(highestBefore(r, n)).toEqual(r.map((_, i) => (i < n ? null : Math.max(...r.slice(i - n, i)))));
+      expect(lowestBefore(r, n)).toEqual(r.map((_, i) => (i < n ? null : Math.min(...r.slice(i - n, i)))));
+    }
+  });
+  it('change % from the previous close', () => expect(changePct([100, 110, 99])).toEqual([null, 10, -10]));
 });
 
 describe('rsi (Wilder)', () => {

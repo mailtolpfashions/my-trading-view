@@ -33,6 +33,39 @@ export function smaOfSeries(values: Series, period: number): Series {
   return out;
 }
 
+/**
+ * Highest value over the `period` bars BEFORE each bar (TradingView: ta.highest(src[1], period)), so
+ * "close > highestBefore(high, 252)" means a new 52-week high. Null until `period` earlier bars exist.
+ */
+export function highestBefore(values: number[], period: number): Series {
+  return extremeBefore(values, period, (a, b) => a >= b);
+}
+
+/** Lowest value over the `period` bars before each bar (TradingView: ta.lowest(src[1], period)). */
+export function lowestBefore(values: number[], period: number): Series {
+  return extremeBefore(values, period, (a, b) => a <= b);
+}
+
+// Sliding-window extreme with a monotonic queue of indices: O(n) for any period.
+function extremeBefore(values: number[], period: number, better: (a: number, b: number) => boolean): Series {
+  const out: Series = new Array(values.length).fill(null);
+  const q: number[] = [];
+  for (let i = 0; i < values.length; i++) {
+    if (i >= period) {
+      while (q[0] < i - period) q.shift();
+      out[i] = values[q[0]];
+    }
+    while (q.length && better(values[i], values[q[q.length - 1]])) q.pop();
+    q.push(i);
+  }
+  return out;
+}
+
+/** Percentage change of each close from the previous close; null on the first bar. */
+export function changePct(closes: number[]): Series {
+  return closes.map((c, i) => (i === 0 || closes[i - 1] === 0 ? null : ((c - closes[i - 1]) / closes[i - 1]) * 100));
+}
+
 /** EMA seeded with the SMA of the first `period` values (TradingView's ta.ema). */
 export function ema(values: number[], period: number): Series {
   const out: Series = new Array(values.length).fill(null);

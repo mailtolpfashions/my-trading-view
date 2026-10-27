@@ -11,7 +11,7 @@ import { computeCharges } from '@mtv/paper';
 import type { Candle, Timeframe } from '@mtv/shared';
 import { evalCondition, operandKey, operandSeries, validateStrategy, type Operand, type RuleSet, type Strategy } from './strategy';
 
-export type ExitReason = 'stop' | 'target' | 'signal' | 'square-off' | 'end-of-data';
+export type ExitReason = 'stop' | 'target' | 'signal' | 'time' | 'square-off' | 'end-of-data';
 
 export type BacktestTrade = {
   side: 'LONG' | 'SHORT';
@@ -29,6 +29,11 @@ export type BacktestTrade = {
 
 export type BacktestResult = {
   trades: BacktestTrade[];
+  /**
+   * What the strategy does at the open after the last bar, decided at that bar's close: a fresh signal. A position
+   * still open at the end appears in `trades` with exitReason 'end-of-data' (marked at the last close).
+   */
+  nextAction: 'enter' | 'exit' | null;
   equity: { time: number; equityPaise: number }[];
   metrics: {
     initialCapitalPaise: number;
@@ -92,7 +97,8 @@ export function runBacktest(candles: Candle[], tf: Timeframe, s: Strategy): Back
   let cash = s.initialCapitalPaise;
   type OpenPosition = { qty: number; entryPrice: number; entryTime: number; entryIndex: number; entryCharges: number; stop: number | null; target: number | null };
   let pos = null as OpenPosition | null;
-  let pendingEntry = false, pendingExit = false, skipped = 0, barsInMarket = 0;
+  let pendingEntry = false, pendingExit: ExitReason | null = null, skipped = 0, barsInMarket = 0;
+  let nextAction: BacktestResult['nextAction'] = null;
 
   const charges = (side: 'BUY' | 'SELL', qty: number, price: number) =>
     computeCharges({ side, product: s.product, qty, pricePaise: price, firstDeliverySellToday: s.product === 'CNC' && side === 'SELL' }).total;
@@ -145,8 +151,8 @@ export function runBacktest(candles: Candle[], tf: Timeframe, s: Strategy): Back
 
   for (let i = 0; i < n; i++) {
     const bar = candles[i];
-    if (pendingExit && pos) exit(i, toPaise(bar.open), 'signal');
-    pendingExit = false;
+    if (pendingExit && pos) exit(i, toPaise(bar.open), pendingExit);
+    pendingExit = null;
     if (pendingEntry && !pos) enter(i, toPaise(bar.open));
     pendingEntry = false;
 
@@ -156,12 +162,20 @@ export function runBacktest(candles: Candle[], tf: Timeframe, s: Strategy): Back
 
     // Decide at this bar's close; act at the next bar's open.
     const next = candles[i + 1];
+    const held = pos ? i - pos.entryIndex + 1 : 0;
+    const exitNow: ExitReason | null = !pos ? null
+      : s.exit?.conditions.length && rulesHold(s.exit, i) ? 'signal'
+      : s.maxBars != null && held >= s.maxBars ? 'time'
+      : null;
     if (next) {
-      if (pos && s.exit?.conditions.length && rulesHold(s.exit, i)) pendingExit = true;
+      if (exitNow) pendingExit = exitNow;
       else if (!pos && rulesHold(s.entry, i)) {
         const entryAllowed = s.product !== 'MIS' || (dayOf(next.time) === dayOf(bar.time) && minuteOfDay(next.time) < NO_ENTRY_FROM);
         if (entryAllowed) pendingEntry = true;
       }
+    } else if (s.product !== 'MIS') {
+      // Last bar: the decision for the next session's open (intraday strategies cannot carry one overnight).
+      nextAction = exitNow ? 'exit' : !pos && rulesHold(s.entry, i) ? 'enter' : null;
     }
 
     const p = pos as OpenPosition | null; // the helpers above reassign `pos`, which TypeScript's narrowing can't see
@@ -171,7 +185,7 @@ export function runBacktest(candles: Candle[], tf: Timeframe, s: Strategy): Back
   if (pos) exit(n - 1, toPaise(candles[n - 1].close), 'end-of-data');
   if (equity.length) equity[equity.length - 1].equityPaise = cash;
 
-  return { trades, equity, metrics: metrics(trades, equity, s.initialCapitalPaise, candles, barsInMarket, skipped) };
+  return { trades, nextAction, equity, metrics: metrics(trades, equity, s.initialCapitalPaise, candles, barsInMarket, skipped) };
 }
 
 function metrics(trades: BacktestTrade[], equity: BacktestResult['equity'], initial: number, candles: Candle[], barsInMarket: number, skipped: number): BacktestResult['metrics'] {
