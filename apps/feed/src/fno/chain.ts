@@ -40,6 +40,24 @@ export function impliedForward(rows: ChainRow[], spotPaise: number, T: number, r
   return atm.strikePaise + (atm.CE!.closePaise - atm.PE!.closePaise) * Math.exp(r * T);
 }
 
+/**
+ * Fills IV and Greeks on traded legs from the market-implied forward; returns that forward (paise) or null.
+ * Shared by the end-of-day and live chains so both are computed identically.
+ */
+export function applyGreeks(rows: ChainRow[], spotPaise: number | null, T: number): number | null {
+  const F = spotPaise != null && T > 0 ? impliedForward(rows, spotPaise, T) : null;
+  if (F == null) return null;
+  for (const row of rows) for (const right of ['CE', 'PE'] as const) {
+    const side = row[right];
+    if (!side?.traded) continue; // IV/Greeks only from real traded premiums
+    const iv = impliedVol(right, side.closePaise / 100, F / 100, row.strikePaise / 100, T, RISK_FREE);
+    if (iv == null) continue;
+    const g = black76(right, F / 100, row.strikePaise / 100, T, RISK_FREE, iv);
+    Object.assign(side, { iv, delta: g.delta, theta: g.theta, vega: g.vega, gamma: g.gamma });
+  }
+  return F;
+}
+
 export async function getChain(underlying: FnoUnderlying, date: string, expiry?: string): Promise<Chain | null> {
   const expiries = await expiriesOn(underlying, date);
   const exp = expiry && expiries.includes(expiry) ? expiry : expiries[0];
@@ -57,18 +75,7 @@ export async function getChain(underlying: FnoUnderlying, date: string, expiry?:
   const spot = meta?.spotPaise ?? null;
   // Model estimates are "as of" the close of `date` (15:30 IST).
   const asOf = Date.parse(`${date}T15:30:00Z`) / 1000 - 5.5 * 3600;
-  const T = yearsToExpiry(asOf, exp);
-  const F = spot != null && T > 0 ? impliedForward(rows, spot, T) : null;
-  if (F != null) {
-    for (const row of rows) for (const right of ['CE', 'PE'] as const) {
-      const side = row[right];
-      if (!side?.traded) continue; // IV/Greeks only from real traded premiums
-      const iv = impliedVol(right, side.closePaise / 100, F / 100, row.strikePaise / 100, T, RISK_FREE);
-      if (iv == null) continue;
-      const g = black76(right, F / 100, row.strikePaise / 100, T, RISK_FREE, iv);
-      Object.assign(side, { iv, delta: g.delta, theta: g.theta, vega: g.vega, gamma: g.gamma });
-    }
-  }
+  const F = applyGreeks(rows, spot, yearsToExpiry(asOf, exp));
   const step = STRIKE_STEP[underlying] * 100;
   const atm = spot != null ? Math.round(spot / step) * step : null;
   return { underlying, date, expiry: exp, expiries, lotSize: meta?.lotSize ?? null, spotPaise: spot, forwardPaise: F == null ? null : Math.round(F), atmStrikePaise: atm, rows };

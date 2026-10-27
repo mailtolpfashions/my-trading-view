@@ -10,6 +10,7 @@ import { STUDIES } from '@/lib/chart/studies';
 import { FEED_URL, feedFetch, fetchCandles, useQuotes } from '@/lib/feed';
 import { fmt, tfLabel } from '@/lib/format';
 import { BacktestModule } from '@/components/backtest/backtest-module';
+import { LiveChain } from '@/components/options/live-chain';
 import { OptionsView } from '@/components/options/options-view';
 import { ScannerView } from '@/components/signals/scanner-view';
 import { SignalsSide, SignalsView } from '@/components/signals/signals-view';
@@ -381,12 +382,7 @@ export function Terminal({ user }: { user: TerminalUser | null }) {
               onRemove={(s) => setWatch(watch.filter((w) => w !== s))}
             />
           )}
-          {side === 'chain' && (
-            <EmptyState icon={PlugZap} title="Option chain needs a live broker feed">
-              Free data sources don&rsquo;t provide NSE option chains or futures OI. This panel comes alive when a broker API is connected:
-              Zerodha Kite Connect, or Upstox and Dhan, which offer free APIs.
-            </EmptyState>
-          )}
+          {side === 'chain' && (user ? <LiveChain onOpenModule={() => setModule('Option chain')} /> : <GuestPrompt feature="Option chain" inline />)}
           {side === 'signals' && (user ? <SignalsSide onOpenChart={openDailyChart} onOpenModule={() => setModule('Signals')} /> : <GuestPrompt feature="Signals" inline />)}
           {side === 'scanner' && (user ? <ScannerView compact onOpenChart={openDailyChart} /> : <GuestPrompt feature="Scanner" inline />)}
         </section>

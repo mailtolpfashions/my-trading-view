@@ -13,6 +13,8 @@ export type Tick = {
   lowPaise: number;
   /** Day volume (equities only). */
   volume: number | null;
+  /** Open interest (F&O in full mode only). */
+  oi?: number;
   /** Last trade / exchange time, UTC epoch seconds (0 when the packet has none). */
   time: number;
 };
@@ -41,8 +43,10 @@ export function parsePacket(p: Buffer): Tick | null {
     return { token: i32(0), ltpPaise: i32(4), highPaise: i32(8), lowPaise: i32(12), openPaise: i32(16), closePaise: i32(20), volume: null, time: p.length === 32 ? i32(28) : 0 };
   }
   if (p.length === 44 || p.length === 184) {
-    // Equity/F&O: token, ltp, last qty, avg price, volume, buy qty, sell qty, open, high, low, close, [last trade time …]
-    return { token: i32(0), ltpPaise: i32(4), volume: i32(16), openPaise: i32(28), highPaise: i32(32), lowPaise: i32(36), closePaise: i32(40), time: p.length === 184 ? i32(44) : 0 };
+    // Equity/F&O: token, ltp, last qty, avg price, volume, buy qty, sell qty, open, high, low, close, [last trade time, OI …]
+    const t: Tick = { token: i32(0), ltpPaise: i32(4), volume: i32(16), openPaise: i32(28), highPaise: i32(32), lowPaise: i32(36), closePaise: i32(40), time: p.length === 184 ? i32(44) : 0 };
+    if (p.length === 184) t.oi = i32(48);
+    return t;
   }
   return null; // unknown packet size: ignore rather than misread
 }
@@ -50,7 +54,8 @@ export function parsePacket(p: Buffer): Tick | null {
 /** Maintains one connection, re-subscribing after reconnects. Never more than 3000 tokens (Kite's per-connection cap). */
 export class KiteTicker {
   private ws: WebSocket | null = null;
-  private tokens = new Set<number>();
+  /** Token → mode: "quote" (price, OHLC, volume) for the market; "full" adds OI, needed for option chains. */
+  private tokens = new Map<number, 'quote' | 'full'>();
   private retry = 0;
   private closed = false;
   connected = false;
@@ -67,17 +72,26 @@ export class KiteTicker {
     this.ws?.close();
   }
 
-  subscribe(tokens: number[]) {
+  /** Subscribes new tokens (never more than Kite's 3,000), and upgrades already-subscribed ones to "full" when asked. */
+  subscribe(tokens: number[], mode: 'quote' | 'full' = 'quote') {
     const fresh = tokens.filter((t) => !this.tokens.has(t)).slice(0, 3000 - this.tokens.size);
-    fresh.forEach((t) => this.tokens.add(t));
-    if (fresh.length) this.send(fresh);
+    const upgrade = mode === 'full' ? tokens.filter((t) => this.tokens.get(t) === 'quote') : [];
+    fresh.forEach((t) => this.tokens.set(t, mode));
+    upgrade.forEach((t) => this.tokens.set(t, 'full'));
+    if (fresh.length) this.send(fresh, mode);
+    if (upgrade.length) this.setMode(upgrade, 'full');
   }
 
-  private send(tokens: number[]) {
+  private send(tokens: number[], mode: 'quote' | 'full') {
     if (this.ws?.readyState !== WebSocket.OPEN || !tokens.length) return;
     this.ws.send(JSON.stringify({ a: 'subscribe', v: tokens }));
-    // "quote" mode: price, OHLC and volume (44 bytes) without order depth, light enough to stream the whole market.
-    this.ws.send(JSON.stringify({ a: 'mode', v: ['quote', tokens] }));
+    this.setMode(tokens, mode);
+  }
+
+  private setMode(tokens: number[], mode: 'quote' | 'full') {
+    if (this.ws?.readyState !== WebSocket.OPEN || !tokens.length) return;
+    // "quote" mode: price, OHLC and volume (44 bytes), light enough to stream the whole market; "full" adds OI and depth.
+    this.ws.send(JSON.stringify({ a: 'mode', v: [mode, tokens] }));
   }
 
   private connect() {
@@ -89,7 +103,7 @@ export class KiteTicker {
       this.retry = 0;
       this.connected = true;
       this.log('Kite live feed connected');
-      this.send([...this.tokens]);
+      for (const mode of ['quote', 'full'] as const) this.send([...this.tokens].filter(([, m]) => m === mode).map(([t]) => t), mode);
     });
     ws.on('message', (data: Buffer, isBinary: boolean) => {
       if (isBinary) {

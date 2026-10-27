@@ -21,6 +21,18 @@ export async function fetchChain(underlying: string, expiry?: string): Promise<C
   return body as Chain;
 }
 
+export class ChainAccessError extends Error {
+  constructor(message: string, public code: string) { super(message); }
+}
+
+/** Live chain (price = last traded, settlePaise = previous close). Throws ChainAccessError when the plan or source can't have it. */
+export async function fetchLiveChain(underlying: string, expiry?: string): Promise<Chain & { live: true; asOf: number }> {
+  const res = await feedFetch(`${FEED_URL}/api/option-chain?underlying=${underlying}${expiry ? `&expiry=${expiry}` : ''}`);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ChainAccessError(body.message ?? 'Live option chain unavailable', body.error ?? 'failed');
+  return body;
+}
+
 /** A leg in the builder. Price defaults to the official close but can be edited (what-if). */
 export type BuilderLeg = { id: string; kind: 'CE' | 'PE'; side: 'BUY' | 'SELL'; strikePaise: number; expiry: string; lots: number; pricePaise: number; iv: number | null };
 

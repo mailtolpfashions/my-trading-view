@@ -1,13 +1,20 @@
 // Live NSE data from Zerodha Kite Connect: historical candles (paced at Kite's documented 3 req/s limit, fetched in
 // chunks well under the per-request date limits) and real-time ticks over the Kite WebSocket.
 
+import { yearsToExpiry } from '@mtv/options';
 import type { Candle, Quote, Timeframe } from '@mtv/shared';
 import { TtlCache } from '../../cache';
+import { applyGreeks, type Chain, type ChainRow, type ChainSide } from '../../fno/chain';
 import { splitCsvLine } from '../../official/nse-files';
 import { INDICES } from '../../symbols';
 import { NotFoundError, type MarketDataProvider } from '../types';
 import { activeSession, authHeader, clearSession, kiteApiKey } from './session';
 import { KiteTicker, type Tick } from './ticker';
+
+/** Underlyings with a live option chain. */
+export const LIVE_CHAIN_UNDERLYINGS = ['NIFTY', 'BANKNIFTY'] as const;
+export type LiveChainUnderlying = (typeof LIVE_CHAIN_UNDERLYINGS)[number];
+type OptionContract = { token: number; tradingsymbol: string; expiry: string; strike: number; right: 'CE' | 'PE'; lot: number };
 
 const API = 'https://api.kite.trade';
 const IST = 5.5 * 3600;
@@ -73,6 +80,8 @@ export class KiteProvider implements MarketDataProvider {
   private tokens = new Map<string, number>(); // our symbol -> instrument token
   private symbolsByToken = new Map<number, string>();
   private ticks = new Map<number, Tick>();
+  /** NFO option contracts per underlying, from Kite's instrument list. */
+  private options = new Map<string, OptionContract[]>();
   private candleCache = new TtlCache<Candle[]>();
   private nextHistorical = 0;
   ticker: KiteTicker;
@@ -116,14 +125,19 @@ export class KiteProvider implements MarketDataProvider {
     const lines = csv.split(/\r?\n/).filter(Boolean);
     const header = splitCsvLine(lines[0]);
     const col = (n: string) => { const i = header.indexOf(n); if (i < 0) throw new Error(`Kite instruments format changed: no ${n}`); return i; };
-    const [cTok, cSym, cSeg, cExch, cType] = ['instrument_token', 'tradingsymbol', 'segment', 'exchange', 'instrument_type'].map(col);
+    const [cTok, cSym, cSeg, cExch, cType, cName, cExp, cStrike, cLot] = ['instrument_token', 'tradingsymbol', 'segment', 'exchange', 'instrument_type', 'name', 'expiry', 'strike', 'lot_size'].map(col);
     const indexWanted = new Map(Object.entries(KITE_INDEX_SYMBOLS).map(([ours, k]) => [`${k.exchange}|${k.tradingsymbol}`, ours]));
     this.tokens.clear();
     this.symbolsByToken.clear();
+    this.options.clear();
     for (const line of lines.slice(1)) {
       const c = splitCsvLine(line);
       const token = Number(c[cTok]);
-      if (c[cSeg] === 'INDICES') {
+      if (c[cSeg] === 'NFO-OPT' && (LIVE_CHAIN_UNDERLYINGS as readonly string[]).includes(c[cName]) && (c[cType] === 'CE' || c[cType] === 'PE')) {
+        const list = this.options.get(c[cName]) ?? [];
+        list.push({ token, tradingsymbol: c[cSym], expiry: c[cExp], strike: Number(c[cStrike]), right: c[cType], lot: Number(c[cLot]) });
+        this.options.set(c[cName], list);
+      } else if (c[cSeg] === 'INDICES') {
         const ours = indexWanted.get(`${c[cExch]}|${c[cSym]}`);
         if (ours) { this.tokens.set(ours, token); this.symbolsByToken.set(token, ours); }
       } else if (c[cSeg] === 'NSE' && c[cType] === 'EQ') {
@@ -132,7 +146,8 @@ export class KiteProvider implements MarketDataProvider {
       }
     }
     const missing = INDICES.map((i) => i.symbol).filter((s) => !this.tokens.has(s));
-    this.log(`Kite instruments loaded: ${this.tokens.size} symbols${missing.length ? `; indices not found: ${missing.join(', ')}` : ''}`);
+    const opts = [...this.options].map(([u, l]) => `${u} ${l.length}`).join(', ');
+    this.log(`Kite instruments loaded: ${this.tokens.size} symbols, options: ${opts || 'none'}${missing.length ? `; indices not found: ${missing.join(', ')}` : ''}`);
   }
 
   private token(symbol: string): number {
@@ -171,6 +186,61 @@ export class KiteProvider implements MarketDataProvider {
       if (!candles.length) throw new NotFoundError(symbol);
       return candles;
     });
+  }
+
+  /**
+   * Live option chain for one expiry: the strikes around the index, streamed in full mode (price, volume, OI).
+   * Contracts with no tick yet are filled from one REST quote call. IV and Greeks use the same model as the
+   * end-of-day chain. Returns null if Kite has no contracts for the underlying.
+   */
+  async liveChain(underlying: LiveChainUnderlying, expiry?: string, width = 15): Promise<Chain | null> {
+    const today = new Date(Date.now() + IST * 1000).toISOString().slice(0, 10);
+    const all = (this.options.get(underlying) ?? []).filter((o) => o.expiry >= today);
+    const expiries = [...new Set(all.map((o) => o.expiry))].sort();
+    const exp = expiry && expiries.includes(expiry) ? expiry : expiries[0];
+    if (!exp) return null;
+    const [spotQuote] = await this.quotes([underlying]);
+    const spot = spotQuote ? Math.round(spotQuote.ltp * 100) : null;
+    const contracts = all.filter((o) => o.expiry === exp);
+    const strikes = [...new Set(contracts.map((o) => o.strike))].sort((a, b) => a - b);
+    const atmIndex = spot == null ? Math.floor(strikes.length / 2) : strikes.reduce((best, k, i) => (Math.abs(k * 100 - spot) < Math.abs(strikes[best] * 100 - spot) ? i : best), 0);
+    const window = new Set(strikes.slice(Math.max(0, atmIndex - width), atmIndex + width + 1));
+    const chosen = contracts.filter((o) => window.has(o.strike));
+    this.ticker.subscribe(chosen.map((o) => o.token), 'full');
+
+    // Contracts without a full-mode tick yet (just subscribed): one REST quote call fills them (Kite: 1 call/second).
+    const missing = chosen.filter((o) => this.ticks.get(o.token)?.oi == null);
+    const rest = new Map<number, { ltp: number; close: number; oi: number; volume: number }>();
+    if (missing.length) {
+      const json = await this.get<{ data: Record<string, { instrument_token: number; last_price: number; volume?: number; oi?: number; ohlc: { close: number } }> }>(
+        `/quote?${missing.map((o) => `i=${encodeURIComponent(`NFO:${o.tradingsymbol}`)}`).join('&')}`,
+      );
+      for (const q of Object.values(json.data ?? {})) rest.set(q.instrument_token, { ltp: q.last_price, close: q.ohlc.close, oi: q.oi ?? 0, volume: q.volume ?? 0 });
+    }
+
+    const byStrike = new Map<number, ChainRow>();
+    for (const o of chosen) {
+      const t = this.ticks.get(o.token), r = rest.get(o.token);
+      const ltpPaise = t?.oi != null ? t.ltpPaise : r ? Math.round(r.ltp * 100) : 0;
+      const side: ChainSide = {
+        closePaise: ltpPaise, // the latest traded price (live)
+        settlePaise: t?.oi != null ? t.closePaise : r ? Math.round(r.close * 100) : 0, // previous day's close
+        oi: t?.oi ?? r?.oi ?? 0,
+        volume: (t?.oi != null ? t.volume : r?.volume) ?? 0,
+        traded: ltpPaise > 0 && ((t?.oi != null ? t.volume : r?.volume) ?? 0) > 0,
+        iv: null, delta: null, theta: null, vega: null, gamma: null,
+      };
+      const strikePaise = Math.round(o.strike * 100);
+      const row = byStrike.get(strikePaise) ?? { strikePaise, CE: null, PE: null };
+      row[o.right] = side;
+      byStrike.set(strikePaise, row);
+    }
+    const rows = [...byStrike.values()].sort((a, b) => a.strikePaise - b.strikePaise);
+    const F = applyGreeks(rows, spot, yearsToExpiry(Date.now() / 1000, exp));
+    return {
+      underlying, date: today, expiry: exp, expiries, lotSize: contracts[0]?.lot ?? null, spotPaise: spot,
+      forwardPaise: F == null ? null : Math.round(F), atmStrikePaise: strikes[atmIndex] != null ? Math.round(strikes[atmIndex] * 100) : null, rows,
+    };
   }
 
   /** Streams these symbols continuously (up to Kite's 3,000 per connection), whether or not anyone is watching. */

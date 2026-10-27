@@ -11,7 +11,7 @@ import { DelayBuffer, LiveUsageRecorder, delayCandles, delayCandlesWithPartial, 
 import { PaperEngine } from './paper/engine';
 import { PrismaPaperRepo } from './paper/repo';
 import { FreeProvider } from './providers/free';
-import { KiteProvider } from './providers/kite/provider';
+import { KiteProvider, LIVE_CHAIN_UNDERLYINGS, type LiveChainUnderlying } from './providers/kite/provider';
 import { activeSession, clearSession, createSession, kiteConfigured, loadSession, loginUrl } from './providers/kite/session';
 import { SwitchProvider } from './providers/switch';
 import { NotFoundError, type MarketDataProvider } from './providers/types';
@@ -282,8 +282,21 @@ app.post<{ Body: { rules?: RuleSet } }>('/api/scan', async (req, reply) => {
 });
 app.get('/api/signals', async () => ({ strategies: signalsOverview(), ...(await latestSignals()) }));
 app.get<{ Params: { id: string } }>('/api/signals/:id', async (req, reply) => (await signalDetail(req.params.id)) ?? reply.code(404).send({ error: 'not_found' }));
-// Live option chain and futures need a broker or vendor feed.
-app.get('/api/option-chain', async (_req, reply) => reply.code(501).send({ error: NEEDS_BROKER }));
+// Live option chain from the live source. With the owner's personal Kite connection it is for the owner (admin) and
+// Live-plan testing only: Kite's data is licensed for personal use. Subscribers get it from the licensed vendor.
+app.get<{ Querystring: { underlying?: string; expiry?: string } }>('/api/option-chain', async (req, reply) => {
+  const u = String(req.query.underlying ?? 'NIFTY').toUpperCase() as LiveChainUnderlying;
+  if (!(LIVE_CHAIN_UNDERLYINGS as readonly string[]).includes(u)) return reply.code(400).send({ error: 'bad_underlying', message: 'Live option chain covers NIFTY and BANKNIFTY' });
+  if (!liveSource() || !kite.ready) return reply.code(503).send({ error: NEEDS_BROKER, message: 'The live option chain needs a live data connection' });
+  if (!isLive(req.user!.plan) && !req.user!.admin) return reply.code(403).send({ error: 'live_plan_required', message: 'The live option chain is on the Live plan. The end-of-day chain is in the Option chain module.' });
+  try {
+    const chain = await kite.liveChain(u, req.query.expiry);
+    return chain ? { ...chain, live: true, asOf: now() } : reply.code(404).send({ error: 'no_data', message: `No ${u} options found` });
+  } catch (e) {
+    req.log.error(e);
+    return reply.code(502).send({ error: 'upstream_failed', message: 'Live option chain is unavailable right now' });
+  }
+});
 
 // ---- paper trading (one account per user) ----
 const lastQuotes = new Map<string, Quote>();
