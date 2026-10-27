@@ -120,13 +120,16 @@ const remember = (quotes: Quote[]) => {
 // Public: health, and the Kite login redirects (a browser navigation cannot carry the token; Zerodha only accepts the
 // app owner's own Kite account). Everything else under /api needs a valid feed token.
 const PUBLIC = new Set(['/api/kite/status', '/api/kite/login', '/api/kite/callback']);
+/** What a visitor without an account (public chart page) may read: delayed chart data, nothing else. */
+const VISITOR = new Set(['/api/search', '/api/candles', '/api/quotes']);
 app.addHook('onRequest', async (req, reply) => {
   const path = req.url.split('?')[0];
   if (!path.startsWith('/api/') || PUBLIC.has(path)) return;
   const claims = verifyFeedToken(tokenFrom(req), TOKEN_SECRET);
   if (!claims) return reply.code(401).send({ error: 'unauthorised', message: 'Please sign in again' });
+  if (claims.anon && !VISITOR.has(path)) return reply.code(403).send({ error: 'sign_up_required', message: 'Create a free account to use this feature' });
   req.user = claims;
-  plans.set(claims.uid, claims.plan);
+  if (!claims.anon) plans.set(claims.uid, claims.plan); // visitors are always Free (the default); don't accumulate their ids
 });
 
 app.get('/health', async () => ({ ok: true, status: provider.status, session: marketSession(now()) }));
@@ -343,12 +346,12 @@ const send = (ws: WebSocket, msg: ServerMessage) => ws.readyState === ws.OPEN &&
 app.get('/ws', { websocket: true }, (socket, req) => {
   const claims = verifyFeedToken((req.query as { token?: string }).token, TOKEN_SECRET);
   if (!claims) { socket.close(4401, 'unauthorised'); return; }
-  plans.set(claims.uid, claims.plan);
+  if (!claims.anon) plans.set(claims.uid, claims.plan);
   clients.set(socket, { subs: new Set(), claims, sent: new Map() });
   // Close when the token expires: the browser reconnects with a fresh token, so plan changes take effect.
   const expiry = setTimeout(() => socket.close(4001, 'token expired'), Math.max(1, claims.exp - now()) * 1000);
   send(socket, { type: 'status', status: statusFor(claims.plan), session: marketSession(now()) });
-  paper.snapshot(claims.uid).then((snapshot) => send(socket, { type: 'paper', snapshot }), () => {});
+  if (!claims.anon) paper.snapshot(claims.uid).then((snapshot) => send(socket, { type: 'paper', snapshot }), () => {});
   socket.on('message', (raw) => {
     let msg: ClientMessage;
     try {
@@ -398,7 +401,7 @@ function broadcastStatus() {
 
 /** Sends a user's paper snapshot to their open sockets (all connected users when `uid` is omitted). */
 async function broadcastPaper(uid?: string) {
-  const users = uid ? [uid] : [...new Set([...clients.values()].map((c) => c.claims.uid))];
+  const users = uid ? [uid] : [...new Set([...clients.values()].filter((c) => !c.claims.anon).map((c) => c.claims.uid))];
   for (const u of users) {
     const sockets = [...clients].filter(([, c]) => c.claims.uid === u).map(([ws]) => ws);
     if (!sockets.length) continue;

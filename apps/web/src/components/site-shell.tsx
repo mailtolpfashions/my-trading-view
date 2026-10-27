@@ -12,6 +12,7 @@ export async function SiteShell({ children }: { children: React.ReactNode }) {
         <Link href="/" aria-label="My Trading View home" className="mr-auto">
           <Logo />
         </Link>
+        <Link href="/chart" className="rounded-full px-4 py-2 text-[13.5px] font-semibold text-ink-2 hover:bg-panel hover:text-ink">Free charts</Link>
         <Link href="/pricing" className="rounded-full px-4 py-2 text-[13.5px] font-semibold text-ink-2 hover:bg-panel hover:text-ink">Pricing</Link>
         {session ? (
           <>

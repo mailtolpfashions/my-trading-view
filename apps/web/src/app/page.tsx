@@ -59,7 +59,7 @@ export default function Home() {
             ['#modules', 'Modules'],
             ['#why', 'Why us'],
             ['#faq', 'FAQ'],
-            ...(LANDING ? [] : [['/pricing', 'Pricing']]),
+            ...(LANDING ? [] : [['/chart', 'Free charts'], ['/pricing', 'Pricing']]),
           ].map(([href, label]) => (
             <a key={href} href={href} className="rounded-full px-4 py-1.5 text-[13.5px] font-semibold text-ink-2 hover:bg-raised hover:text-ink">
               {label}

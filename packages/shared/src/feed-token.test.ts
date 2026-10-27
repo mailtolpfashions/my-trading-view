@@ -3,6 +3,15 @@ import { signFeedToken, verifyFeedToken } from './feed-token';
 
 const SECRET = 'x'.repeat(64);
 
+describe('visitor (anonymous) claim', () => {
+  const secret = 'x'.repeat(32);
+  it('is accepted only on the Free plan, never with admin', () => {
+    expect(verifyFeedToken(signFeedToken({ uid: 'anon:1', plan: 'FREE', exp: 2e9, anon: true }, secret), secret, 1e9)?.anon).toBe(true);
+    expect(verifyFeedToken(signFeedToken({ uid: 'anon:1', plan: 'LIVE', exp: 2e9, anon: true }, secret), secret, 1e9)).toBeNull();
+    expect(verifyFeedToken(signFeedToken({ uid: 'anon:1', plan: 'FREE', exp: 2e9, anon: true, admin: true }, secret), secret, 1e9)).toBeNull();
+  });
+});
+
 describe('admin claim', () => {
   const secret = 'x'.repeat(32);
   it('round-trips, and is absent for ordinary users', () => {

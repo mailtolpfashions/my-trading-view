@@ -55,7 +55,8 @@ function usePersisted<T>(key: string, initial: T): [T, (v: T) => void] {
   return [v, set];
 }
 
-export function Terminal({ user }: { user: TerminalUser }) {
+/** `user` is null on the public chart page: a visitor without an account sees delayed charts only. */
+export function Terminal({ user }: { user: TerminalUser | null }) {
   const [sym, setSym] = usePersisted<Sym>('mtv.symbol', { symbol: 'NIFTY', name: 'NIFTY 50', exchange: 'NSE' });
   const [tf, setTf] = usePersisted<Timeframe>('mtv.tf', '5');
   const [chartType, setChartType] = usePersisted<ChartType>('mtv.chartType', 'candles');
@@ -70,12 +71,15 @@ export function Terminal({ user }: { user: TerminalUser }) {
   const [side, setSide] = useState<'watch' | 'chain' | 'signals' | 'scanner'>('watch');
   const [notice, setNotice] = useState<string | null>(null);
   const [module, setModule] = useState('Chart');
+  /** Feature a visitor tried to use (shows the "create a free account" prompt). */
+  const [guestPrompt, setGuestPrompt] = useState<string | null>(null);
 
   const subscribed = useMemo(() => [...new Set([...PULSE, ...watch, sym.symbol])], [watch, sym.symbol]);
   const { quotes, status, session: feedSession, connected, paper } = useQuotes(subscribed);
   const delayed = status?.delayed ?? true;
   const [ticket, setTicket] = useState<TicketRequest | null>(null);
   const openTicket = (side: 'BUY' | 'SELL') => {
+    if (!user) return setGuestPrompt('Paper trading');
     if (INDICES.has(sym.symbol)) return setNotice(`${sym.symbol} is an index and can't be traded directly. Pick a stock to paper trade.`);
     setTicket({ symbol: sym.symbol, side, ltp: quotes[sym.symbol]?.ltp ?? data.candles.at(-1)?.close });
   };
@@ -187,14 +191,15 @@ export function Terminal({ user }: { user: TerminalUser }) {
         <nav className="hidden gap-0.5 rounded-full bg-panel p-1 shadow-[var(--shadow-panel)] lg:flex" aria-label="Modules">
           {MODULES.map((m) => {
             const live = LIVE_MODULES.includes(m), on = m === module;
+            const locked = !user && m !== 'Chart'; // visitors: charts only
             return (
               <button
                 key={m}
                 type="button"
                 disabled={!live}
-                onClick={() => live && setModule(m)}
+                onClick={() => (locked ? setGuestPrompt(m) : live && setModule(m))}
                 aria-current={on ? 'page' : undefined}
-                title={live ? undefined : `${m}: coming in a later build step`}
+                title={!live ? `${m}: coming in a later build step` : locked ? `${m}: create a free account to use it` : undefined}
                 className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold whitespace-nowrap ${on ? 'bg-ink text-white' : 'text-ink-2 hover:bg-raised disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent'}`}
               >
                 {on && <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-accent align-[2px]" />}
@@ -211,23 +216,33 @@ export function Terminal({ user }: { user: TerminalUser }) {
           <span className={`h-2 w-2 rounded-full ${session === 'open' ? 'live-dot bg-up' : session === 'pre-open' ? 'bg-accent' : 'bg-muted'}`} />
           {session === 'open' ? 'Market open' : session === 'pre-open' ? 'Pre-open' : 'Market closed'}
         </span>
-        {status?.provider === 'kite' && (
+        {user?.admin && status?.provider === 'kite' && (
           <span className="flex h-8 items-center gap-1.5 rounded-full bg-up-soft px-3 text-[12px] font-bold whitespace-nowrap text-up" title={kite?.userName ? `Zerodha Kite · ${kite.userName}. Session ends 06:00 IST.` : 'Zerodha Kite'}>
-            <span className="live-dot h-2 w-2 rounded-full bg-up" /> Live · Kite
+            <span className="live-dot h-2 w-2 rounded-full bg-up" /> Kite connected
           </span>
         )}
-        {user.admin && delayed && kite?.selected && kite.configured && !kite.loggedIn && (
+        {!delayed && (
+          <span className="flex h-8 items-center gap-1.5 rounded-full bg-up-soft px-3 text-[12px] font-bold whitespace-nowrap text-up" title="Real-time prices">
+            <span className="live-dot h-2 w-2 rounded-full bg-up" /> Real-time
+          </span>
+        )}
+        {user?.admin && delayed && kite?.selected && kite.configured && !kite.loggedIn && (
           <a href={`${FEED_URL}/api/kite/login`} className="flex h-8 items-center rounded-full bg-ink px-3 text-[12px] font-bold whitespace-nowrap text-white hover:bg-black" title="Log in to Zerodha once a day for live prices">
             Connect Kite
           </a>
         )}
         {delayed && (
-          <span className="flex h-8 items-center rounded-full bg-accent px-3 text-[12px] font-bold whitespace-nowrap text-accent-ink" title={user.plan === 'LIVE' ? 'The live data source is unavailable right now; showing delayed prices.' : 'Free plan: prices are 15 minutes delayed. Upgrade to Live for real-time data.'}>
-            Delayed
+          <span className="flex h-8 items-center rounded-full bg-accent px-3 text-[12px] font-bold whitespace-nowrap text-accent-ink" title={user?.plan === 'LIVE' ? 'The live data source is unavailable right now; showing delayed prices.' : 'Prices are 15 minutes delayed. The Live plan has real-time data.'}>
+            Delayed 15 min
           </span>
         )}
         {!connected && <span className="flex h-8 items-center rounded-full bg-down-soft px-3 text-[12px] font-bold whitespace-nowrap text-down">Feed offline</span>}
-        <UserMenu user={user} />
+        {user ? <UserMenu user={user} /> : (
+          <>
+            <Link href="/login?next=/terminal" className="flex h-8 items-center rounded-full bg-panel px-3 text-[12px] font-bold whitespace-nowrap shadow-[var(--shadow-panel)] hover:bg-raised">Sign in</Link>
+            <Link href="/signup?next=/terminal" className="flex h-8 items-center rounded-full bg-ink px-3.5 text-[12px] font-bold whitespace-nowrap text-white hover:bg-black">Start free</Link>
+          </>
+        )}
       </header>
 
       {/* market pulse */}
@@ -372,15 +387,24 @@ export function Terminal({ user }: { user: TerminalUser }) {
               Zerodha Kite Connect, or Upstox and Dhan, which offer free APIs.
             </EmptyState>
           )}
-          {side === 'signals' && <SignalsSide onOpenChart={openDailyChart} onOpenModule={() => setModule('Signals')} />}
-          {side === 'scanner' && <ScannerView compact onOpenChart={openDailyChart} />}
+          {side === 'signals' && (user ? <SignalsSide onOpenChart={openDailyChart} onOpenModule={() => setModule('Signals')} /> : <GuestPrompt feature="Signals" inline />)}
+          {side === 'scanner' && (user ? <ScannerView compact onOpenChart={openDailyChart} /> : <GuestPrompt feature="Scanner" inline />)}
         </section>
 
-        <PaperPanel snapshot={paper} unavailable={connected && !paper} onTicket={setTicket} onNotice={setNotice} />
+        {user ? <PaperPanel snapshot={paper} unavailable={connected && !paper} onTicket={setTicket} onNotice={setNotice} /> : (
+          <section className="panel grid place-items-center p-6 text-center">
+            <div>
+              <p className="text-[15px] font-extrabold tracking-[-0.02em]">Practise with ₹10 lakh of virtual money</p>
+              <p className="mt-1 text-[13px] text-ink-2">Paper trading, backtesting, scanners and rule-based signals are free with an account.</p>
+              <Link href="/signup?next=/terminal" className="mt-3 inline-flex rounded-full bg-ink px-5 py-2 text-[13px] font-bold text-white hover:bg-black">Create a free account</Link>
+            </div>
+          </section>
+        )}
       </main>
       )}
 
-      <OrderTicket req={ticket} snapshot={paper} delayed={delayed} onClose={() => setTicket(null)} onDone={setNotice} />
+      {user && <OrderTicket req={ticket} snapshot={paper} delayed={delayed} onClose={() => setTicket(null)} onDone={setNotice} />}
+      {guestPrompt && <GuestPrompt feature={guestPrompt} onClose={() => setGuestPrompt(null)} />}
 
       <SymbolSearch
         open={search !== null}
@@ -389,6 +413,26 @@ export function Terminal({ user }: { user: TerminalUser }) {
         onPick={(i) => (search === 'watch' ? !watch.includes(i.symbol) && setWatch([...watch, i.symbol]) : loadSymbol(i))}
       />
       {notice && <div role="status" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink px-5 py-2.5 text-[13px] font-semibold text-white shadow-[var(--shadow-pop)]">{notice}</div>}
+    </div>
+  );
+}
+
+/** "Create a free account" prompt for visitors: inline in a panel, or as a dialog. */
+function GuestPrompt({ feature, inline, onClose }: { feature: string; inline?: boolean; onClose?: () => void }) {
+  const body = (
+    <div className="max-w-[320px] px-4 text-center">
+      <h3 className="text-[15px] font-extrabold tracking-[-0.02em]">{feature} needs a free account</h3>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-ink-2">Charts are open to everyone. Sign up free for paper trading, backtesting, scanners and signals.</p>
+      <div className="mt-3 flex justify-center gap-2">
+        <Link href="/signup?next=/terminal" className="rounded-full bg-ink px-4 py-2 text-[13px] font-bold text-white hover:bg-black">Create a free account</Link>
+        <Link href="/login?next=/terminal" className="rounded-full bg-raised px-4 py-2 text-[13px] font-bold hover:bg-line">Sign in</Link>
+      </div>
+    </div>
+  );
+  if (inline) return <div className="m-auto">{body}</div>;
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/30" onClick={onClose} role="dialog" aria-modal="true" aria-label={`${feature} needs an account`}>
+      <div className="panel py-6" onClick={(e) => e.stopPropagation()}>{body}</div>
     </div>
   );
 }

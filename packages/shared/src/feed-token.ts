@@ -4,8 +4,11 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export type Plan = 'FREE' | 'LIVE';
-/** `admin` (site owner, from ADMIN_EMAILS) may manage the server's broker connection. */
-export type FeedClaims = { uid: string; plan: Plan; exp: number; admin?: boolean };
+/**
+ * `admin` (site owner, from ADMIN_EMAILS) may manage the server's broker connection. `anon` marks a visitor without
+ * an account (public chart page): delayed chart data only.
+ */
+export type FeedClaims = { uid: string; plan: Plan; exp: number; admin?: boolean; anon?: boolean };
 
 const b64u = (b: Buffer | string) => Buffer.from(b).toString('base64url');
 const sign = (payload: string, secret: string) => createHmac('sha256', secret).update(payload).digest('base64url');
@@ -28,6 +31,7 @@ export function verifyFeedToken(token: string | null | undefined, secret: string
     const c = JSON.parse(Buffer.from(payload, 'base64url').toString()) as FeedClaims;
     if (typeof c.uid !== 'string' || (c.plan !== 'FREE' && c.plan !== 'LIVE') || typeof c.exp !== 'number' || c.exp <= nowSec) return null;
     if (c.admin !== undefined && typeof c.admin !== 'boolean') return null;
+    if (c.anon !== undefined && (c.anon !== true || c.plan !== 'FREE' || c.admin)) return null; // a visitor is never Live or admin
     return c;
   } catch {
     return null;
