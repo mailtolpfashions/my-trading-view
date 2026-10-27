@@ -7,7 +7,7 @@
 //   starts before 15:20 IST, so nothing is carried overnight.
 // - Every fill pays the same itemised charges as paper trading. All money is integer paise.
 
-import { computeCharges } from '@mtv/paper';
+import { computeCharges, istToday } from '@mtv/paper';
 import type { Candle, Timeframe } from '@mtv/shared';
 import { evalCondition, operandKey, operandSeries, validateStrategy, type Operand, type RuleSet, type Strategy } from './strategy';
 
@@ -100,13 +100,14 @@ export function runBacktest(candles: Candle[], tf: Timeframe, s: Strategy): Back
   let pendingEntry = false, pendingExit: ExitReason | null = null, skipped = 0, barsInMarket = 0;
   let nextAction: BacktestResult['nextAction'] = null;
 
-  const charges = (side: 'BUY' | 'SELL', qty: number, price: number) =>
-    computeCharges({ side, product: s.product, qty, pricePaise: price, firstDeliverySellToday: s.product === 'CNC' && side === 'SELL' }).total;
+  /** Charges at the rates in force on the bar's date. */
+  const charges = (side: 'BUY' | 'SELL', qty: number, price: number, time: number) =>
+    computeCharges({ side, product: s.product, qty, pricePaise: price, firstDeliverySellToday: s.product === 'CNC' && side === 'SELL', date: istToday(time * 1000) }).total;
 
   const enter = (i: number, price: number) => {
     const qty = s.sizing.mode === 'qty' ? s.sizing.qty : Math.floor((cash * s.sizing.pct) / 100 / price);
     if (qty <= 0) { skipped++; return; }
-    const ch = charges(long ? 'BUY' : 'SELL', qty, price);
+    const ch = charges(long ? 'BUY' : 'SELL', qty, price, candles[i].time);
     cash += long ? -qty * price - ch : qty * price - ch;
     const sl = s.stopLossPct, tp = s.targetPct;
     pos = {
@@ -118,7 +119,7 @@ export function runBacktest(candles: Candle[], tf: Timeframe, s: Strategy): Back
 
   const exit = (i: number, price: number, reason: ExitReason) => {
     const p = pos!;
-    const ch = charges(long ? 'SELL' : 'BUY', p.qty, price);
+    const ch = charges(long ? 'SELL' : 'BUY', p.qty, price, candles[i].time);
     cash += long ? p.qty * price - ch : -p.qty * price - ch;
     const gross = (long ? price - p.entryPrice : p.entryPrice - price) * p.qty;
     trades.push({

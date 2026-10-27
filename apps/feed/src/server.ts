@@ -19,10 +19,13 @@ import { officialAttempts, startOfficialJob } from './official/job';
 import { applyOfficial, loadOfficialStore, storedDays } from './official/store';
 import { FNO_UNDERLYINGS, type FnoUnderlying } from './fno/bhavcopy';
 import { getChain, latestFnoDate } from './fno/chain';
+import { SPAN_UNDERLYINGS, spanToday } from './fno/span';
+import { positionMargin } from '@mtv/options';
 import { prismaOptionsData } from './fno/data';
 import { fnoStatus, startFnoSync } from './fno/store';
 import { classifyBuildUp, futuresHistory, previousOi } from './fno/futures';
 import { ALERT_LIMITS, AlertEngine, planOf } from './alerts/engine';
+import { StudyError, catalog as studyCatalog, computeStudy, encodeNonFinite } from './studies/library';
 import { ALERT_TIMEFRAMES, type PriceParams, type RulesParams } from './alerts/logic';
 import { auditCandles } from './quality';
 import { dailyHistory, eodStatus, onEodReady, startEodSync } from './eod/store';
@@ -131,7 +134,7 @@ const remember = (quotes: Quote[]) => {
 // app owner's own Kite account). Everything else under /api needs a valid feed token.
 const PUBLIC = new Set(['/api/kite/status', '/api/kite/login', '/api/kite/callback']);
 /** What a visitor without an account (public chart page) may read: delayed chart data, nothing else. */
-const VISITOR = new Set(['/api/search', '/api/candles', '/api/quotes']);
+const VISITOR = new Set(['/api/search', '/api/candles', '/api/quotes', '/api/studies/catalog', '/api/studies/compute']);
 app.addHook('onRequest', async (req, reply) => {
   const path = req.url.split('?')[0];
   if (!path.startsWith('/api/') || PUBLIC.has(path)) return;
@@ -224,6 +227,27 @@ app.post<{ Body: { strategy?: OptionsStrategy } }>('/api/options-backtest', asyn
   }
 });
 
+// Margin for an F&O position: SPAN from NSE Clearing's start-of-day file + exposure margin (packages/options/margin.ts).
+type MarginBody = { underlying?: string; spotPaise?: number; legs?: { kind: 'FUT' | 'CE' | 'PE'; expiry: string; strikePaise: number; qty: number; pricePaise?: number }[] };
+app.post<{ Body: MarginBody }>('/api/margin', async (req, reply) => {
+  const { underlying, legs, spotPaise } = req.body ?? {};
+  if (!underlying || !(SPAN_UNDERLYINGS as readonly string[]).includes(underlying)) return reply.code(400).send({ error: 'bad_underlying', message: `Margin covers ${SPAN_UNDERLYINGS.join(', ')}` });
+  const valid = Array.isArray(legs) && legs.length > 0 && legs.length <= 20 && legs.every((l) =>
+    ['FUT', 'CE', 'PE'].includes(l.kind) && /^\d{4}-\d{2}-\d{2}$/.test(l.expiry) && Number.isSafeInteger(l.qty) && l.qty !== 0 && Number.isSafeInteger(l.strikePaise) && (l.pricePaise == null || Number.isSafeInteger(l.pricePaise)));
+  if (!valid) return reply.code(400).send({ error: 'bad_legs', message: 'Send 1–20 legs with kind, expiry, strike, signed quantity' });
+  try {
+    const span = await spanToday();
+    const d = span?.data[underlying];
+    if (!span || !d) return reply.code(503).send({ error: 'no_span', message: 'NSE margin file is not available right now' });
+    const marginLegs = legs!.map((l) => ({ kind: l.kind, expiry: l.expiry, strike: l.strikePaise / 100, qty: l.qty, pricePaise: l.pricePaise }));
+    const spot = Number.isSafeInteger(spotPaise) && spotPaise! > 0 ? spotPaise! : Math.round(d.spot * 100);
+    return { ...positionMargin(d, marginLegs, spot, span.tradeDate), file: d.file, created: d.created, tradeDate: span.tradeDate };
+  } catch (e) {
+    req.log.error(e);
+    return reply.code(502).send({ error: 'failed', message: 'Margin calculation failed' });
+  }
+});
+
 // ---- Kite Connect login (owner's personal app, local development only; Zerodha expires the session at 6 AM IST) ----
 const kiteStatus = () => {
   const s = activeSession();
@@ -273,6 +297,29 @@ app.get<{ Querystring: { underlying?: string; date?: string; expiry?: string } }
   const chain = await getChain(u as FnoUnderlying, date, req.query.expiry);
   return chain ?? reply.code(404).send({ error: 'no_data', message: `No options for ${u} on ${date}` });
 });
+// ---- TradingView-equivalent indicator library: calculated here, drawn in the browser ----
+app.get('/api/studies/catalog', async (_req, reply) => {
+  reply.header('Cache-Control', 'private, max-age=3600');
+  return { indicators: await studyCatalog() };
+});
+app.post<{ Body: { symbol?: string; tf?: string; id?: string; inputs?: Record<string, unknown> } }>('/api/studies/compute', async (req, reply) => {
+  const symbol = String(req.body?.symbol ?? '').toUpperCase();
+  const tf = String(req.body?.tf ?? '') as Timeframe;
+  if (!findInstrument(symbol)) return reply.code(404).send({ error: 'unknown_symbol', message: `Unknown symbol ${symbol}` });
+  if (!TIMEFRAMES.includes(tf)) return reply.code(400).send({ error: 'bad_timeframe', message: 'Unknown timeframe' });
+  try {
+    const { candles } = await history(symbol, tf, false, req.user!.plan); // the same (entitled) candles the chart shows
+    const result = await computeStudy(String(req.body?.id ?? ''), candles, req.body?.inputs ?? {});
+    reply.header('Content-Type', 'application/json');
+    return JSON.stringify({ result }, encodeNonFinite);
+  } catch (e) {
+    if (e instanceof StudyError) return reply.code(400).send({ error: 'bad_study', message: e.message });
+    if (e instanceof NotFoundError) return reply.code(404).send({ error: 'no_data', message: `No data for ${symbol}` });
+    req.log.error(e);
+    return reply.code(502).send({ error: 'failed', message: 'Indicator could not be calculated' });
+  }
+});
+
 // ---- index futures: history from NSE's files for every signed-in user; live (Kite) for admin / Live plan ----
 app.get<{ Querystring: { underlying?: string; days?: string } }>('/api/futures/history', async (req, reply) => {
   const u = String(req.query.underlying ?? 'NIFTY').toUpperCase();

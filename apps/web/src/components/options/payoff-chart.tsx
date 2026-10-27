@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { black76, payoff, type Leg } from '@mtv/options';
+import { payoff, pnlAt, type ModelLeg } from '@mtv/options';
 import { formatRupees } from '@mtv/paper';
 import { fmt } from '@/lib/format';
 
@@ -18,16 +18,20 @@ function niceTicks(min: number, max: number, target: number): number[] {
 }
 
 /**
- * Payoff diagram: exact P&L at expiry (solid) and a model estimate for today (dashed, Black-76 with each leg's IV).
- * x = underlying price, y = P&L in rupees.
+ * Payoff diagram: P&L at the first expiry (solid; exact when every leg expires then, otherwise later legs are valued
+ * with Black-76) and a model estimate for today (dashed). x = underlying price, y = P&L in rupees.
  */
-export function PayoffChart({ legs, ivs, spotPaise, forwardPaise, yearsLeft, rate, breakevens }: {
-  legs: Leg[];
-  ivs: (number | null)[];
+export function PayoffChart({ legs, spotPaise, rate, carry, atYears, exact, atLabel, breakevens }: {
+  legs: ModelLeg[];
   spotPaise: number;
-  forwardPaise: number | null;
-  yearsLeft: number;
   rate: number;
+  /** Annual rate at which the forward exceeds spot (from the market's forward). */
+  carry: number;
+  /** Years from now to the first expiry. */
+  atYears: number;
+  /** Every leg expires at the first expiry, so the solid curve is the exact payoff. */
+  exact: boolean;
+  atLabel: string;
   breakevens: number[];
 }) {
   const [hoverX, setHoverX] = useState<number | null>(null);
@@ -38,21 +42,19 @@ export function PayoffChart({ legs, ivs, spotPaise, forwardPaise, yearsLeft, rat
     const lo = Math.max(1, spotPaise - span), hi = spotPaise + span;
     const xs = Array.from({ length: 241 }, (_, i) => lo + ((hi - lo) * i) / 240);
     const pts = [...new Set([...xs, ...strikes.filter((k) => k > lo && k < hi)])].sort((a, b) => a - b);
-    const expiry = pts.map((S) => payoff(legs, S) / 100);
-    const canModel = yearsLeft > 0 && ivs.every((v) => v != null) && forwardPaise != null;
-    const basis = forwardPaise != null ? forwardPaise / spotPaise : 1; // keep the market's forward premium as spot moves
-    const today = canModel
-      ? pts.map((S) => legs.reduce((sum, l, i) => {
-          const value = black76(l.kind as 'CE' | 'PE', (S * basis) / 100, l.strikePaise / 100, yearsLeft, rate, ivs[i]!).price * 100;
-          return sum + (l.side === 'BUY' ? 1 : -1) * l.qty * (value - l.pricePaise);
-        }, 0) / 100)
-      : null;
+    const curve = (t: number) => {
+      const out: number[] = [];
+      for (const S of pts) { const v = pnlAt(legs, S, t, rate, carry); if (v == null) return null; out.push(v / 100); }
+      return out;
+    };
+    const expiry = exact ? pts.map((S) => payoff(legs, S) / 100) : curve(atYears) ?? pts.map(() => 0);
+    const today = atYears > 0 ? curve(0) : null;
     const all = [...expiry, ...(today ?? [])];
     let yMin = Math.min(0, ...all), yMax = Math.max(0, ...all);
     const padY = (yMax - yMin) * 0.08 || 1;
     yMin -= padY; yMax += padY;
     return { lo, hi, pts, expiry, today, yMin, yMax };
-  }, [legs, ivs, spotPaise, forwardPaise, yearsLeft, rate, breakevens]);
+  }, [legs, spotPaise, rate, carry, atYears, exact, breakevens]);
 
   const { lo, hi, pts, expiry, today, yMin, yMax } = data;
   const x = (S: number) => PAD.l + ((S - lo) / (hi - lo)) * (W - PAD.l - PAD.r);
@@ -103,12 +105,12 @@ export function PayoffChart({ legs, ivs, spotPaise, forwardPaise, yearsLeft, rat
       {hoverIdx >= 0 && (
         <div className="pointer-events-none absolute top-2 right-3 rounded-[10px] bg-ink px-3 py-1.5 text-[11.5px] text-white shadow-[var(--shadow-pop)]">
           <p className="num">At {fmt(pts[hoverIdx] / 100)} ({(((pts[hoverIdx] - spotPaise) / spotPaise) * 100).toFixed(2)}%)</p>
-          <p className="num">Expiry: <b className={expiry[hoverIdx] >= 0 ? 'text-[#4ade80]' : 'text-[#ff8a8a]'}>{formatRupees(Math.round(expiry[hoverIdx] * 100))}</b></p>
+          <p className="num">{exact ? 'Expiry' : `At ${atLabel} (est.)`}: <b className={expiry[hoverIdx] >= 0 ? 'text-[#4ade80]' : 'text-[#ff8a8a]'}>{formatRupees(Math.round(expiry[hoverIdx] * 100))}</b></p>
           {today && <p className="num">Today (est.): <b>{formatRupees(Math.round(today[hoverIdx] * 100))}</b></p>}
         </div>
       )}
       <div className="mt-1 flex gap-4 text-[11px] text-muted">
-        <span><span className="mr-1 inline-block h-0.5 w-4 bg-ink align-middle" />At expiry (exact)</span>
+        <span><span className="mr-1 inline-block h-0.5 w-4 bg-ink align-middle" />{exact ? 'At expiry (exact)' : `At first expiry, ${atLabel} (later legs: Black-76 estimate)`}</span>
         {today ? <span><span className="mr-1 inline-block h-0 w-4 border-t-2 border-dashed border-blue align-middle" />Today (model estimate, Black-76)</span> : <span>Today&rsquo;s curve needs IV for every leg</span>}
       </div>
     </div>

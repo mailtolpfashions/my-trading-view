@@ -63,7 +63,12 @@ export function findAdjustments(bars: RawBar[], actions: CorporateAction[]): { a
   }
   for (const a of adjustments) a.check = Math.abs(a.impliedRatio / a.factor - 1) > 0.3;
   adjustments.sort((x, y) => (x.date < y.date ? -1 : 1));
-  return { adjustments, unhandled };
+  // NSE sometimes lists one action twice with ex-dates a few days apart (e.g. HAL's 2023 split). Applying both would
+  // double the adjustment, so keep only the copy whose actual price gap matches the factor best.
+  const miss = (a: Adjustment) => Math.abs(a.impliedRatio / a.factor - 1);
+  const days = (x: string, y: string) => Math.abs(Date.parse(y) - Date.parse(x)) / 86400_000;
+  const kept = adjustments.filter((a) => !adjustments.some((o) => o !== a && o.purpose === a.purpose && days(o.exDate, a.exDate) <= 10 && (miss(o) < miss(a) || (miss(o) === miss(a) && o.date < a.date))));
+  return { adjustments: kept, unhandled };
 }
 
 /**

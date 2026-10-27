@@ -50,15 +50,19 @@ export async function saveFnoDay(day: FnoDay) {
 const recordFetch = (date: string, status: string, message?: string) =>
   prisma.fnoFetch.upsert({ where: { date }, create: { date, status, message }, update: { status, message, attempts: { increment: 1 } } });
 
-/** Weekdays from `from` up to the latest date whose files should be published (today only after 18:30 IST). */
-export function datesToFetch(from: string, nowSec: number): string[] {
+/**
+ * Dates from `from` up to the latest date whose files should be published (today only after 18:30 IST). Weekdays
+ * by default; with `weekends`, every day, because NSE also trades in special weekend sessions (Diwali Muhurat
+ * trading, Budget-day and Saturday sessions) and a weekend with no session simply has no file.
+ */
+export function datesToFetch(from: string, nowSec: number, weekends = false): string[] {
   const local = new Date((nowSec + 5.5 * 3600) * 1000);
   const end = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()));
   if ((nowSec + 5.5 * 3600) % 86400 < PUBLISH_AFTER) end.setUTCDate(end.getUTCDate() - 1);
   const out: string[] = [];
   for (const d = new Date(from + 'T00:00:00Z'); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
     const wd = d.getUTCDay();
-    if (wd !== 0 && wd !== 6) out.push(d.toISOString().slice(0, 10));
+    if (weekends || (wd !== 0 && wd !== 6)) out.push(d.toISOString().slice(0, 10));
   }
   return out;
 }
@@ -71,7 +75,7 @@ export async function syncFno(from: string, log: (m: string) => void): Promise<v
   running = true;
   try {
     const done = new Set((await prisma.fnoFetch.findMany({ where: { status: { in: ['saved', 'not-published'] } }, select: { date: true } })).map((f) => f.date));
-    const todo = datesToFetch(from, Date.now() / 1000).filter((d) => !done.has(d)).reverse();
+    const todo = datesToFetch(from, Date.now() / 1000, true).filter((d) => !done.has(d)).reverse(); // incl. weekend special sessions
     if (todo.length) log(`F&O history: ${todo.length} trading days to download`);
     let saved = 0;
     for (const date of todo) {

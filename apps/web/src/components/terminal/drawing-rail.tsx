@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { BellPlus, Minus, MousePointer2, MoveUpRight, Ruler, Slash, Square, SeparatorVertical, Trash2, Type } from 'lucide-react';
+import { AlignJustify, BellPlus, Equal, Minus, MousePointer2, MoveUpRight, Ruler, Slash, Square, SeparatorVertical, Trash2, Type } from 'lucide-react';
 import type { Tool } from '@/lib/chart/drawings/model';
 
 const TOOLS: { tool: Tool; label: string; key: string; Icon: typeof Slash }[] = [
@@ -11,6 +11,8 @@ const TOOLS: { tool: Tool; label: string; key: string; Icon: typeof Slash }[] = 
   { tool: 'hline', label: 'Horizontal line', key: 'H', Icon: Minus },
   { tool: 'vline', label: 'Vertical line', key: 'L', Icon: SeparatorVertical },
   { tool: 'rect', label: 'Rectangle (zone)', key: 'B', Icon: Square },
+  { tool: 'fib', label: 'Fibonacci retracement', key: 'F', Icon: AlignJustify },
+  { tool: 'channel', label: 'Parallel channel (3 clicks)', key: 'C', Icon: Equal },
   { tool: 'text', label: 'Text note', key: 'N', Icon: Type },
   { tool: 'measure', label: 'Measure (price, %, bars, time)', key: 'M', Icon: Ruler },
   { tool: 'alert', label: 'Alert at a price: click the chart', key: 'A', Icon: BellPlus },

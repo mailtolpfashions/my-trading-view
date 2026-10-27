@@ -59,6 +59,14 @@ describe('corporate-action adjustment from NSE corporate action file', () => {
     const b = [bar('2024-01-01', 100000, 100000), bar('2024-01-05', 50000, 50000)];
     expect(findAdjustments(b, [{ symbol: 'RELIANCE', exDate: '2024-01-03', purpose: 'BONUS 1:1' }]).adjustments[0].date).toBe('2024-01-05');
   });
+  it('applies an action NSE lists twice with different ex-dates only once, on the day the price gap confirms (HAL, Sep 2023)', () => {
+    // HAL 1:2 split: listed with ex-date 28 Sep and again 29 Sep 2023; the price halved on 28 Sep.
+    const b = [bar('2023-09-27', 400000, 400000, 1000, 'HAL'), bar('2023-09-28', 200500, 201000, 2000, 'HAL'), bar('2023-09-29', 201000, 202000, 2000, 'HAL')];
+    const acts = [{ symbol: 'HAL', exDate: '2023-09-28', purpose: 'FV SPLT FRM RS 10 TO RS 5' }, { symbol: 'HAL', exDate: '2023-09-29', purpose: 'FV SPLT FRM RS 10 TO RS 5' }];
+    const { adjustments } = findAdjustments(b, acts);
+    expect(adjustments.map((a) => a.date)).toEqual(['2023-09-28']);
+    expect(adjustedCandles(b, adjustments).map((c) => c.close)).toEqual([2000, 2010, 2020]);
+  });
   it('flags a factor the actual price gap does not support', () => {
     const b = [bar('2024-01-01', 100000, 100000), bar('2024-01-02', 99000, 99000)];
     expect(findAdjustments(b, [{ symbol: 'RELIANCE', exDate: '2024-01-02', purpose: 'BONUS 1:1' }]).adjustments[0].check).toBe(true);

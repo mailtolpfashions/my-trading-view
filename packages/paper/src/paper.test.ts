@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyRate, buildLedger, computeCharges, computeOptionCharges, evaluate, exerciseStt, formatRupees, funds, toPaise, unrealisedPaise, validateOrder, type Trade } from './index';
+import { applyRate, brokerById, buildLedger, computeCharges, computeFuturesCharges, computeOptionCharges, evaluate, exerciseStt, expirySettlementCharges, formatRupees, funds, toPaise, unrealisedPaise, validateOrder, type Trade } from './index';
 
 describe('money', () => {
   it('parses rupees to integer paise without float error', () => {
@@ -25,49 +25,101 @@ describe('money', () => {
   });
 });
 
-describe('charges (hand-calculated)', () => {
+describe('charges (hand-calculated, 2025 schedule: IPFT ₹10/crore, old exchange rates)', () => {
+  const date = '2025-06-02';
   it('delivery buy: 100 × ₹1,000', () => {
-    // turnover ₹1,00,000 · STT 0.1% ₹100 · exch 0.00297% ₹2.97 · SEBI ₹0.10 · stamp 0.015% ₹15
-    // GST 18% × (0 + 2.97 + 0.10) = ₹0.5526 -> ₹0.55 · total ₹118.62
-    expect(computeCharges({ side: 'BUY', product: 'CNC', qty: 100, pricePaise: 1000_00 })).toEqual({
-      brokerage: 0, stt: 100_00, exchangeTxn: 297, sebiFee: 10, stampDuty: 15_00, gst: 55, dpCharge: 0, total: 118_62,
+    // turnover ₹1,00,000 · STT 0.1% ₹100 · exch 0.00297% ₹2.97 · IPFT ₹0.10 · SEBI ₹0.10 · stamp 0.015% ₹15
+    // GST 18% × (0 + 2.97 + 0.10 + 0.10) = ₹0.5706 -> ₹0.57 · total ₹118.74
+    expect(computeCharges({ side: 'BUY', product: 'CNC', qty: 100, pricePaise: 1000_00, date })).toEqual({
+      brokerage: 0, stt: 100_00, exchangeTxn: 297, ipft: 10, sebiFee: 10, stampDuty: 15_00, gst: 57, dpCharge: 0, total: 118_74,
     });
   });
   it('intraday sell: 100 × ₹1,000 (brokerage capped at ₹20)', () => {
-    // brokerage min(0.03% = ₹30, ₹20) = ₹20 · STT 0.025% ₹25 · exch ₹2.97 · SEBI ₹0.10 · no stamp on sell
-    // GST 18% × (20 + 2.97 + 0.10) = ₹4.1526 -> ₹4.15 · total ₹52.22
-    expect(computeCharges({ side: 'SELL', product: 'MIS', qty: 100, pricePaise: 1000_00 })).toEqual({
-      brokerage: 20_00, stt: 25_00, exchangeTxn: 297, sebiFee: 10, stampDuty: 0, gst: 415, dpCharge: 0, total: 52_22,
+    // brokerage min(0.03% = ₹30, ₹20) = ₹20 · STT 0.025% ₹25 · exch ₹2.97 · IPFT ₹0.10 · SEBI ₹0.10 · no stamp on sell
+    // GST 18% × (20 + 2.97 + 0.10 + 0.10) = ₹4.1706 -> ₹4.17 · total ₹52.34
+    expect(computeCharges({ side: 'SELL', product: 'MIS', qty: 100, pricePaise: 1000_00, date })).toEqual({
+      brokerage: 20_00, stt: 25_00, exchangeTxn: 297, ipft: 10, sebiFee: 10, stampDuty: 0, gst: 417, dpCharge: 0, total: 52_34,
     });
   });
   it('small intraday buy: 10 × ₹100 (percentage brokerage below the cap)', () => {
-    // turnover ₹1,000 · brokerage 0.03% ₹0.30 · exch ₹0.0297 -> ₹0.03 · SEBI ₹0.001 -> ₹0.00 · stamp 0.003% ₹0.03
-    // GST 18% × (0.30 + 0.03 + 0) = ₹0.0594 -> ₹0.06 · total ₹0.42
-    expect(computeCharges({ side: 'BUY', product: 'MIS', qty: 10, pricePaise: 100_00 }).total).toBe(42);
+    // turnover ₹1,000 · brokerage 0.03% ₹0.30 · exch ₹0.0297 -> ₹0.03 · IPFT, SEBI round to 0 · stamp 0.003% ₹0.03
+    // GST 18% × (0.30 + 0.03) = ₹0.0594 -> ₹0.06 · total ₹0.42
+    expect(computeCharges({ side: 'BUY', product: 'MIS', qty: 10, pricePaise: 100_00, date }).total).toBe(42);
   });
   it('adds the DP charge only on the first delivery sell of a scrip in a day', () => {
-    const base = { side: 'SELL', product: 'CNC', qty: 10, pricePaise: 100_00 } as const;
+    const base = { side: 'SELL', product: 'CNC', qty: 10, pricePaise: 100_00, date } as const;
     expect(computeCharges({ ...base, firstDeliverySellToday: true }).dpCharge).toBe(15_34);
     expect(computeCharges(base).dpCharge).toBe(0);
   });
 });
 
-describe('option charges (hand-calculated)', () => {
+describe('option charges (hand-calculated, 2025 schedule)', () => {
+  const date = '2025-06-02';
   it('sell 65 NIFTY PE @ ₹121.35', () => {
     // turnover ₹7,887.75 · brokerage ₹20 · STT 0.1% ₹7.88775 -> ₹7.89 · exch 0.03503% ₹2.7631 -> ₹2.76
-    // SEBI ₹0.0079 -> ₹0.01 · no stamp on sell · GST 18% × (20 + 2.76 + 0.01) = ₹4.0986 -> ₹4.10 · total ₹34.76
-    expect(computeOptionCharges({ side: 'SELL', qty: 65, premiumPaise: 121_35 })).toEqual({
-      brokerage: 20_00, stt: 789, exchangeTxn: 276, sebiFee: 1, stampDuty: 0, gst: 410, dpCharge: 0, total: 34_76,
+    // IPFT ₹0.0079 -> ₹0.01 · SEBI ₹0.01 · GST 18% × (20 + 2.76 + 0.01 + 0.01) = ₹4.1004 -> ₹4.10 · total ₹34.77
+    expect(computeOptionCharges({ side: 'SELL', qty: 65, premiumPaise: 121_35, date })).toEqual({
+      brokerage: 20_00, stt: 789, exchangeTxn: 276, ipft: 1, sebiFee: 1, stampDuty: 0, gst: 410, dpCharge: 0, total: 34_77,
     });
   });
   it('buy 65 NIFTY CE @ ₹120.50', () => {
-    // turnover ₹7,832.50 · brokerage ₹20 · no STT on buy · exch ₹2.7437 -> ₹2.74 · SEBI ₹0.01 · stamp 0.003% ₹0.2350 -> ₹0.23
-    // GST 18% × (20 + 2.74 + 0.01) = ₹4.095 -> ₹4.10 (half-up) · total ₹27.08
-    expect(computeOptionCharges({ side: 'BUY', qty: 65, premiumPaise: 120_50 }).total).toBe(27_08);
+    // turnover ₹7,832.50 · brokerage ₹20 · exch ₹2.7437 -> ₹2.74 · IPFT ₹0.01 · SEBI ₹0.01 · stamp 0.003% ₹0.2350 -> ₹0.23
+    // GST 18% × (20 + 2.74 + 0.01 + 0.01) = ₹4.0968 -> ₹4.10 · total ₹27.09
+    expect(computeOptionCharges({ side: 'BUY', qty: 65, premiumPaise: 120_50, date }).total).toBe(27_09);
   });
   it('STT on exercise: 0.125% of intrinsic value, nothing when out of the money', () => {
-    expect(exerciseStt(65, 150_00)).toBe(1219); // 65 × ₹150 = ₹9,750 × 0.125% = ₹12.1875 -> ₹12.19
-    expect(exerciseStt(65, 0)).toBe(0);
+    expect(exerciseStt(65, 150_00, date)).toBe(1219); // 65 × ₹150 = ₹9,750 × 0.125% = ₹12.1875 -> ₹12.19
+    expect(exerciseStt(65, 0, date)).toBe(0);
+  });
+});
+
+describe('charges from 1 Apr 2026 (Finance Act 2026 STT; NSE rates from 1 Mar 2026)', () => {
+  const date = '2026-10-27';
+  it('sell 65 NIFTY PE @ ₹121.35: STT 0.15% of premium', () => {
+    // turnover ₹7,887.75 · brokerage ₹20 · STT 0.15% ₹11.8316 -> ₹11.83 · exch 0.03553% ₹2.8025 -> ₹2.80
+    // IPFT ₹0.01/crore -> ₹0.00 · SEBI ₹0.01 · GST 18% × (20 + 2.80 + 0 + 0.01) = ₹4.1058 -> ₹4.11 · total ₹38.75
+    expect(computeOptionCharges({ side: 'SELL', qty: 65, premiumPaise: 121_35, date })).toEqual({
+      brokerage: 20_00, stt: 11_83, exchangeTxn: 280, ipft: 0, sebiFee: 1, stampDuty: 0, gst: 411, dpCharge: 0, total: 38_75,
+    });
+  });
+  it('sell 65 NIFTY futures @ ₹25,000: STT 0.05%, and the rate switches exactly on 1 Apr 2026', () => {
+    // turnover ₹16,25,000 · brokerage min(0.03% = ₹487.50, ₹20) = ₹20 · STT 0.05% ₹812.50 · exch 0.00183% ₹29.7375 -> ₹29.74
+    // SEBI ₹1.625 -> ₹1.63 · GST 18% × (20 + 29.74 + 1.63) = ₹9.2466 -> ₹9.25 · total ₹873.12
+    const o = { side: 'SELL', qty: 65, pricePaise: 25_000_00 } as const;
+    expect(computeFuturesCharges({ ...o, date: '2026-04-01' })).toEqual({
+      brokerage: 20_00, stt: 812_50, exchangeTxn: 29_74, ipft: 0, sebiFee: 163, stampDuty: 0, gst: 925, dpCharge: 0, total: 873_12,
+    });
+    expect(computeFuturesCharges({ ...o, date: '2026-03-31' }).stt).toBe(325_00); // 0.02% the day before
+  });
+  it('buy futures pays 0.002% stamp duty and no STT', () => {
+    const c = computeFuturesCharges({ side: 'BUY', qty: 65, pricePaise: 25_000_00, date });
+    expect(c.stt).toBe(0);
+    expect(c.stampDuty).toBe(32_50);
+  });
+  it('exercise STT is 0.15% of intrinsic value', () => {
+    expect(exerciseStt(65, 150_00, date)).toBe(14_63); // ₹9,750 × 0.15% = ₹14.625 -> ₹14.63
+  });
+});
+
+describe('broker profiles', () => {
+  it('Angel One delivery: lower of ₹20 or 0.1%, at least ₹5', () => {
+    const angel = brokerById('angelone');
+    expect(computeCharges({ side: 'BUY', product: 'CNC', qty: 1, pricePaise: 100_00, broker: angel }).brokerage).toBe(5_00);
+    expect(computeCharges({ side: 'BUY', product: 'CNC', qty: 100, pricePaise: 100_00, broker: angel }).brokerage).toBe(10_00);
+    expect(computeCharges({ side: 'BUY', product: 'CNC', qty: 100, pricePaise: 1000_00, broker: angel }).brokerage).toBe(20_00);
+  });
+  it('Upstox futures: lower of ₹20 or 0.05%', () => {
+    expect(computeFuturesCharges({ side: 'BUY', qty: 1, pricePaise: 100_00, broker: brokerById('upstox') }).brokerage).toBe(5);
+  });
+  it('expiry settlement: exercise STT for a long ITM option, plus brokerage + GST where the broker charges it', () => {
+    const date = '2026-10-27';
+    expect(expirySettlementCharges({ side: 'BUY', qty: 65, intrinsicPaise: 150_00, date })).toBe(14_63); // Zerodha: STT only
+    expect(expirySettlementCharges({ side: 'BUY', qty: 65, intrinsicPaise: 150_00, date, broker: brokerById('dhan') })).toBe(14_63 + 20_00 + 3_60);
+    expect(expirySettlementCharges({ side: 'SELL', qty: 65, intrinsicPaise: 150_00, date, broker: brokerById('dhan') })).toBe(23_60); // assigned: no STT
+    expect(expirySettlementCharges({ side: 'BUY', qty: 65, intrinsicPaise: 0, date, broker: brokerById('dhan') })).toBe(0);
+  });
+  it('unknown broker ids fall back to the default profile', () => {
+    expect(brokerById('nope').id).toBe('zerodha');
   });
 });
 

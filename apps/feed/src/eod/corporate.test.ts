@@ -17,6 +17,10 @@ describe('NSE corporate action file', () => {
     ]);
   });
   it('fails loudly on a format change', () => expect(() => parseBc('SYMBOL,PURPOSE\nX,BONUS 1:1')).toThrow(/format changed/));
+  it('an empty file (a day with no actions, e.g. Bc100122.csv) means no actions', () => {
+    expect(parseBc('')).toEqual([]);
+    expect(parseBc('\r\n')).toEqual([]);
+  });
   it('uses the PR bundle for the date', () => expect(prBundleUrl('2024-10-28')).toBe('https://nsearchives.nseindia.com/archives/equities/bhavcopy/pr/PR281024.zip'));
   it('finds the corporate action file under both of NSE\'s file names', () => {
     expect(findBcFile(['An281024.txt', 'Bc281024.csv', 'bh281024.csv'])).toBe('Bc281024.csv');

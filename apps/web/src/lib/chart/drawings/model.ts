@@ -4,13 +4,25 @@
 // by interpolating between the bars around it, so a line drawn on a 5-minute chart lands on the same moment on a
 // daily chart, and points beyond the last bar extend at the chart's bar interval.
 
-export type Tool = 'cursor' | 'trend' | 'ray' | 'hline' | 'vline' | 'rect' | 'text' | 'measure' | 'alert';
-export type DrawingKind = 'trend' | 'ray' | 'hline' | 'vline' | 'rect' | 'text';
+export type Tool = 'cursor' | 'trend' | 'ray' | 'hline' | 'vline' | 'rect' | 'fib' | 'channel' | 'text' | 'measure' | 'alert';
+export type DrawingKind = 'trend' | 'ray' | 'hline' | 'vline' | 'rect' | 'fib' | 'channel' | 'text';
 export type Point = { time: number; price: number };
-export type Drawing = { id: string; kind: DrawingKind; p1: Point; p2?: Point; text?: string; color: string };
+/** `p3` (parallel channel only): a point on the parallel line, setting the channel's width. */
+export type Drawing = { id: string; kind: DrawingKind; p1: Point; p2?: Point; p3?: Point; text?: string; color: string };
 
-/** Tools that need two clicks (start and end). */
-export const TWO_POINT: Tool[] = ['trend', 'ray', 'rect', 'measure'];
+/** Tools that need two clicks (start and end). The parallel channel takes a third click for its width. */
+export const TWO_POINT: Tool[] = ['trend', 'ray', 'rect', 'fib', 'measure'];
+
+/** TradingView's default Fibonacci retracement levels: 1 at the first point, 0 at the second. */
+export const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618, 2.618, 3.618, 4.236];
+export const fibPrice = (p1: Point, p2: Point, level: number) => p2.price + (p1.price - p2.price) * level;
+
+/** Price offset of a channel's parallel line: p3's distance in price from the base line p1→p2 at p3's time. */
+export function channelOffset(p1: Point, p2: Point, p3: Point): number {
+  if (p2.time === p1.time) return p3.price - p1.price;
+  const base = p1.price + ((p2.price - p1.price) * (p3.time - p1.time)) / (p2.time - p1.time);
+  return p3.price - base;
+}
 export const COLORS = ['#2962ff', '#f23645', '#089981', '#ff9800', '#121212'];
 
 /** Fractional bar index of `t` given ascending bar times. Before the first bar or past the last, extends at the edge interval. */
@@ -46,17 +58,25 @@ export function distanceToSegment(p: XY, a: XY, b: XY, ray = false): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
-/** Screen geometry of a drawing (null coordinates when off the chart's data). */
-export type Placed = { d: Drawing; a: XY; b?: XY };
+/**
+ * Screen geometry of a drawing (null coordinates when off the chart's data). Fibonacci: `levels` are the y of each
+ * level. Channel: `a2`/`b2` are the parallel line's ends and `c` the width handle.
+ */
+export type Placed = { d: Drawing; a: XY; b?: XY; levels?: { level: number; y: number }[]; a2?: XY; b2?: XY; c?: XY };
 
 /** The drawing under the pointer (within `tol` pixels), topmost first. Rectangles are hit on their edges or inside. */
-export function hitTest(placed: Placed[], p: XY, width: number, tol = 6): { id: string; handle: 'p1' | 'p2' | 'body' } | null {
+export function hitTest(placed: Placed[], p: XY, width: number, tol = 6): { id: string; handle: 'p1' | 'p2' | 'p3' | 'body' } | null {
   for (let i = placed.length - 1; i >= 0; i--) {
-    const { d, a, b } = placed[i];
+    const { d, a, b, levels, a2, b2, c } = placed[i];
     if (Math.hypot(p.x - a.x, p.y - a.y) <= tol + 2 && d.kind !== 'hline' && d.kind !== 'vline') return { id: d.id, handle: 'p1' };
     if (b && Math.hypot(p.x - b.x, p.y - b.y) <= tol + 2) return { id: d.id, handle: 'p2' };
+    if (c && Math.hypot(p.x - c.x, p.y - c.y) <= tol + 2) return { id: d.id, handle: 'p3' };
+    const xIn = (u: XY, v: XY) => p.x >= Math.min(u.x, v.x) - tol && p.x <= Math.max(u.x, v.x) + tol;
     const near =
-      d.kind === 'hline' ? Math.abs(p.y - a.y) <= tol && p.x <= width
+      d.kind === 'fib' && b && levels ? xIn(a, b) && levels.some((l) => Math.abs(p.y - l.y) <= tol)
+      : d.kind === 'channel' && b && a2 && b2 ? distanceToSegment(p, a, b) <= tol || distanceToSegment(p, a2, b2) <= tol
+        || (xIn(a, b) && (() => { const t = (p.x - a.x) / (b.x - a.x || 1); const y1 = a.y + t * (b.y - a.y), y2 = a2.y + t * (b2.y - a2.y); return p.y >= Math.min(y1, y2) && p.y <= Math.max(y1, y2); })())
+      : d.kind === 'hline' ? Math.abs(p.y - a.y) <= tol && p.x <= width
       : d.kind === 'vline' ? Math.abs(p.x - a.x) <= tol
       : d.kind === 'text' ? p.x >= a.x - tol && p.x <= a.x + Math.max(40, (d.text?.length ?? 0) * 7.5) && Math.abs(p.y - a.y) <= 12
       : d.kind === 'rect' && b ? p.x >= Math.min(a.x, b.x) - tol && p.x <= Math.max(a.x, b.x) + tol && p.y >= Math.min(a.y, b.y) - tol && p.y <= Math.max(a.y, b.y) + tol

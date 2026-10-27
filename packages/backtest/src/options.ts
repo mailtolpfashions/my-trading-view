@@ -143,10 +143,10 @@ export async function runOptionsBacktest(s: OptionsStrategy, data: OptionsData, 
       if (settleAtExpiry) {
         const intrinsic = Math.max(0, l.kind === 'CE' ? spot - l.strikePaise : l.strikePaise - spot);
         l.exitPaise = intrinsic;
-        if (l.side === 'BUY') exitCharges += exerciseStt(l.qty, intrinsic);
+        if (l.side === 'BUY') exitCharges += exerciseStt(l.qty, intrinsic, date);
       } else {
         l.exitPaise = p.last.get(contractId(l)) ?? l.entryPaise;
-        exitCharges += computeOptionCharges({ side: l.side === 'BUY' ? 'SELL' : 'BUY', qty: l.qty, premiumPaise: l.exitPaise }).total;
+        exitCharges += computeOptionCharges({ side: l.side === 'BUY' ? 'SELL' : 'BUY', qty: l.qty, premiumPaise: l.exitPaise, date }).total;
       }
     }
     const gross = p.legs.reduce((sum, l) => sum + (l.side === 'BUY' ? 1 : -1) * l.qty * (l.exitPaise - l.entryPaise), 0);
@@ -234,7 +234,7 @@ export async function runOptionsBacktest(s: OptionsStrategy, data: OptionsData, 
       }
       legs.push({ expiry, strikePaise: pick.strikePaise, kind: spec.kind, side: spec.side, qty: spec.lots * meta.lotSize, entryPaise: pick.closePaise, exitPaise: 0, settledDays: 0 });
     }
-    const entryCharges = legs.reduce((sum, l) => sum + computeOptionCharges({ side: l.side, qty: l.qty, premiumPaise: l.entryPaise }).total, 0);
+    const entryCharges = legs.reduce((sum, l) => sum + computeOptionCharges({ side: l.side, qty: l.qty, premiumPaise: l.entryPaise, date }).total, 0);
     const basis = Math.abs(legs.reduce((sum, l) => sum + (l.side === 'SELL' ? 1 : -1) * l.qty * l.entryPaise, 0));
     pos = { entryDate: date, entryIndex: di, spotEntry: meta.spotPaise, expiry: legs.map((l) => l.expiry).sort()[0], legs, entryCharges, last: new Map(legs.map((l) => [contractId(l), l.entryPaise])), basis };
   }

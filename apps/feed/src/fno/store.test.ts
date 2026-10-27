@@ -7,4 +7,7 @@ describe('datesToFetch', () => {
     expect(datesToFetch('2026-10-22', ist(26, 18, 0))).toEqual(['2026-10-22', '2026-10-23']); // Mon before publish
     expect(datesToFetch('2026-10-22', ist(26, 18, 31))).toEqual(['2026-10-22', '2026-10-23', '2026-10-26']);
   });
+  it('with weekends, includes Saturday and Sunday (special sessions such as Muhurat trading)', () => {
+    expect(datesToFetch('2026-10-23', ist(26, 18, 31), true)).toEqual(['2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26']);
+  });
 });

@@ -14,6 +14,9 @@ import { AlertBell } from '@/components/alerts/alert-bell';
 import { AlertDialog } from '@/components/alerts/alert-dialog';
 import { AlertsView } from '@/components/alerts/alerts-view';
 import { fetchAlerts } from '@/lib/alerts';
+import { fetchCatalog, newUid, type LibIndicator, type LibStudy } from '@/lib/chart/library';
+import { IndicatorPicker } from './indicator-picker';
+import { LibSettings } from './lib-settings';
 import type { AlertLine } from '@/lib/chart/drawings/layer';
 import { FuturesView } from '@/components/futures/futures-view';
 import { LiveChain } from '@/components/options/live-chain';
@@ -68,6 +71,12 @@ export function Terminal({ user }: { user: TerminalUser | null }) {
   const [tf, setTf] = usePersisted<Timeframe>('mtv.tf', '5');
   const [chartType, setChartType] = usePersisted<ChartType>('mtv.chartType', 'candles');
   const [studies, setStudies] = usePersisted<string[]>('mtv.studies', ['vwap', 'st', 'rsi']);
+  /** TradingView-library indicators (calculated by the feed service), and the picker / settings dialogs. */
+  const [libStudies, setLibStudies] = usePersisted<LibStudy[]>('mtv.libStudies', []);
+  const [picker, setPicker] = useState(false);
+  const [editLib, setEditLib] = useState<string | null>(null);
+  const [libCatalog, setLibCatalog] = useState<LibIndicator[]>([]);
+  useEffect(() => { if (picker || editLib) fetchCatalog().then(setLibCatalog, () => {}); }, [picker, editLib]);
   const [watch, setWatch] = usePersisted<string[]>('mtv.watchlist', DEFAULT_WATCH);
   const [data, setData] = useState<{ candles: Candle[]; key: string; for: string; quality: DataQuality | null }>({ candles: [], key: '', for: '', quality: null });
   const [visibleSeconds, setVisibleSeconds] = useState<number | undefined>();
@@ -331,27 +340,9 @@ export function Terminal({ user }: { user: TerminalUser | null }) {
                 </div>
               )}
             </div>
-            <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <button type="button" onClick={() => setMenu(menu === 'ind' ? null : 'ind')} className="flex h-[30px] items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-semibold hover:bg-raised" aria-expanded={menu === 'ind'}>
-                <TrendingUp size={16} /> Indicators
-              </button>
-              {menu === 'ind' && (
-                <div className="absolute top-9 left-0 z-30 w-64 rounded-[12px] bg-panel py-1.5 shadow-[var(--shadow-pop)]">
-                  <p className="eyebrow px-3.5 pt-1 pb-1.5">On the chart</p>
-                  {STUDIES.filter((s) => s.place === 'main').map((s) => (
-                    <button key={s.id} type="button" onClick={() => toggleStudy(s.id)} className="flex w-full items-center px-3.5 py-1.5 text-left text-[13px] hover:bg-raised">
-                      {s.name} {studies.includes(s.id) && <Check size={14} className="ml-auto" />}
-                    </button>
-                  ))}
-                  <p className="eyebrow px-3.5 pt-2.5 pb-1.5">In a separate pane</p>
-                  {STUDIES.filter((s) => s.place === 'pane').map((s) => (
-                    <button key={s.id} type="button" onClick={() => toggleStudy(s.id)} className="flex w-full items-center px-3.5 py-1.5 text-left text-[13px] hover:bg-raised">
-                      {s.name} {studies.includes(s.id) && <Check size={14} className="ml-auto" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <button type="button" onClick={() => setPicker(true)} className="flex h-[30px] items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-semibold hover:bg-raised">
+              <TrendingUp size={16} /> Indicators
+            </button>
             <button type="button" onClick={() => (user ? setAlertDialog({}) : setGuestPrompt('Alerts'))} className="flex h-[30px] items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-semibold hover:bg-raised" title={`Set an alert on ${sym.symbol}`}>
               <Bell size={15} /> Alert
             </button>
@@ -378,6 +369,9 @@ export function Terminal({ user }: { user: TerminalUser | null }) {
               positions={chartPositions}
               alertLines={alertLines}
               onAlertAt={alertAt}
+              libStudies={libStudies}
+              onRemoveLib={(uid) => setLibStudies(libStudies.filter((s) => s.uid !== uid))}
+              onEditLib={setEditLib}
             />
             {error && (
               <div className="absolute inset-0 z-20 grid place-items-center bg-white/80">
@@ -443,6 +437,18 @@ export function Terminal({ user }: { user: TerminalUser | null }) {
 
       {user && <OrderTicket req={ticket} snapshot={paper} delayed={delayed} onClose={() => setTicket(null)} onDone={setNotice} />}
       {guestPrompt && <GuestPrompt feature={guestPrompt} onClose={() => setGuestPrompt(null)} />}
+      {picker && (
+        <IndicatorPicker quick={studies} onToggleQuick={toggleStudy} onClose={() => setPicker(false)}
+          onAdd={(ind) => { setLibStudies([...libStudies, { uid: newUid(), id: ind.id, inputs: {} }]); setPicker(false); setNotice(`${ind.name} added`); }} />
+      )}
+      {(() => {
+        const s = editLib ? libStudies.find((x) => x.uid === editLib) : undefined;
+        const ind = s && libCatalog.find((c) => c.id === s.id);
+        return s && ind ? (
+          <LibSettings ind={ind} inputs={s.inputs} onClose={() => setEditLib(null)}
+            onSave={(inputs) => setLibStudies(libStudies.map((x) => (x.uid === s.uid ? { ...x, inputs } : x)))} />
+        ) : null;
+      })()}
       {alertDialog && user && (
         <AlertDialog symbol={sym.symbol} price={alertDialog.price ?? quotes[sym.symbol]?.ltp ?? data.candles.at(-1)?.close} initialOp={alertDialog.op} delayed={delayed}
           onClose={() => setAlertDialog(false)} onCreated={(m) => { setNotice(m); setAlertsVersion((v) => v + 1); }} />

@@ -19,6 +19,8 @@
     "@mtv/shared": "*",
     "fastify": "^5.12.7",
     "fflate": "^0.8.2",
+    "lightweight-charts-indicators": "0.16.8",
+    "oakscriptjs": "0.12.3",
     "ws": "^8.22.0"
   },
   "devDependencies": {

@@ -22,8 +22,11 @@ import {
 import { Trash2, X } from 'lucide-react';
 import { heikinAshi, type Series } from '@mtv/indicators';
 import type { Candle, Timeframe } from '@mtv/shared';
+import { IndicatorRenderer } from 'lightweight-charts-indicators/render';
+import { Settings2 } from 'lucide-react';
 import { DrawingLayer, type AlertLine } from '@/lib/chart/drawings/layer';
-import { COLORS, TWO_POINT, hitTest, loadDrawings, logicalToTime, measureText, newId, saveDrawings, timeToLogical, type Drawing, type Point, type Tool } from '@/lib/chart/drawings/model';
+import { computeLib, fetchCatalog, type LibIndicator, type LibStudy } from '@/lib/chart/library';
+import { COLORS, TWO_POINT, channelOffset, hitTest, loadDrawings, logicalToTime, measureText, newId, saveDrawings, timeToLogical, type Drawing, type Point, type Tool } from '@/lib/chart/drawings/model';
 import { DOWN, UP, studyById, type PointColors } from '@/lib/chart/studies';
 import { fmt, tfLabel } from '@/lib/format';
 import { DrawingRail } from './drawing-rail';
@@ -56,7 +59,13 @@ type Props = {
   alertLines?: AlertLine[];
   /** The alert tool was clicked at this price. */
   onAlertAt?: (price: number) => void;
+  /** TradingView-library indicators on the chart (calculated by the feed service). */
+  libStudies?: LibStudy[];
+  onRemoveLib?: (uid: string) => void;
+  onEditLib?: (uid: string) => void;
 };
+
+type LibResult = { plots: Record<string, { time: number; value: number; color?: string }[]> };
 
 type Built = { id: string; pane: number; series: ISeriesApi<SeriesType>[] };
 
@@ -72,6 +81,15 @@ export function ChartView(p: Props) {
   const computed = useRef(new Map<string, { values: Record<string, Series>; colors?: PointColors }>());
   const indexByTime = useRef(new Map<number, number>());
   const layer = useRef(new DrawingLayer());
+  // TradingView-library indicators: one renderer each, keyed by the study's uid.
+  const libRenderers = useRef(new Map<string, IndicatorRenderer>());
+  const libResults = useRef(new Map<string, LibResult>());
+  const [catalog, setCatalog] = useState<LibIndicator[]>([]);
+  const clearLib = () => {
+    for (const r of libRenderers.current.values()) { try { r.clear(); } catch { /* its pane may already be gone */ } }
+    libRenderers.current.clear();
+    libResults.current.clear();
+  };
   const [hover, setHover] = useState<number | null>(null);
   const [paneTops, setPaneTops] = useState<number[]>([]);
   const [, setVersion] = useState(0);
@@ -124,6 +142,7 @@ export function ChartView(p: Props) {
   // ---- main series follows the chart type ----
   useEffect(() => {
     const chart = chartRef.current!;
+    clearLib(); // library renderers hold the old main series; they are rebuilt below
     if (mainRef.current) chart.removeSeries(mainRef.current);
     const ohlc = { upColor: UP, downColor: DOWN, wickUpColor: UP, wickDownColor: DOWN, borderVisible: false };
     mainRef.current =
@@ -156,6 +175,7 @@ export function ChartView(p: Props) {
     // Rebuild indicator series only when the selection changes; otherwise just refresh their data.
     const key = p.studies.join(',');
     if (key !== builtKey.current) {
+      clearLib(); // pane numbers change: library indicators are drawn again after this rebuild
       builtRef.current.forEach((b) => b.series.forEach((s) => chart.removeSeries(s)));
       for (let i = chart.panes().length - 1; i > 0; i--) chart.removePane(i);
       let nextPane = 1;
@@ -213,6 +233,56 @@ export function ChartView(p: Props) {
     setVersion((v) => v + 1);
   }, [p.candles, p.chartType, p.studies, p.loadKey, p.visibleSeconds]);
 
+  // ---- TradingView-library indicators: calculated by the feed service on the chart's own data, drawn by the
+  // library's renderer. Runs after the data effect above (effects run in order), so our panes are already laid out. ----
+  const libKey = JSON.stringify(p.libStudies ?? []);
+  useEffect(() => { if (p.libStudies?.length && !catalog.length) fetchCatalog().then(setCatalog, () => {}); }, [p.libStudies?.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lastBarTime = p.candles.at(-1)?.time ?? 0;
+  const [libTick, setLibTick] = useState(0);
+  useEffect(() => {
+    if (!p.libStudies?.length) return;
+    const id = setInterval(() => setLibTick((t) => t + 1), 15_000); // the forming bar
+    return () => clearInterval(id);
+  }, [p.libStudies?.length]);
+  const libGen = useRef(0);
+  const structureKey = `${p.symbol}|${p.tf}|${p.chartType}|${p.studies.join(',')}|${libKey}|${catalog.length}`;
+  const builtFor = useRef('');
+  useEffect(() => {
+    const chart = chartRef.current, main = mainRef.current;
+    const studies = p.libStudies ?? [];
+    if (!chart || !main) return;
+    if (builtFor.current !== structureKey) { clearLib(); builtFor.current = structureKey; } // add/remove/reorder: draw all again
+    if (!studies.length || !catalog.length || !p.candles.length) return;
+    const gen = ++libGen.current;
+    const ctrl = new AbortController();
+    const bars = p.candles.map((b) => ({ time: toChart(b.time) as number, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume }));
+    let nextPane = 1 + new Set(builtRef.current.filter((b) => b.pane > 0).map((b) => b.pane)).size;
+    const plan = studies.map((s) => {
+      const entry = catalog.find((c) => c.id === s.id);
+      return entry ? { s, entry, pane: entry.overlay ? 0 : nextPane++ } : null;
+    }).filter((x): x is NonNullable<typeof x> => !!x);
+    void (async () => {
+      for (const { s, entry, pane } of plan) {
+        let result;
+        try { result = await computeLib(p.symbol, p.tf, s.id, s.inputs, ctrl.signal); } catch { continue; }
+        if (gen !== libGen.current) return; // a newer symbol/timeframe/indicator set replaced this run
+        let r = libRenderers.current.get(s.uid);
+        const fresh = !r;
+        if (!r) { r = new IndicatorRenderer(chart, { paneIndex: pane, mainSeries: main }); libRenderers.current.set(s.uid, r); }
+        try {
+          r.render(entry as never, result as never, bars as never, { inputs: s.inputs, reuseSeries: !fresh, lastValueVisible: !entry.overlay });
+          libResults.current.set(s.uid, result as LibResult);
+        } catch { /* a bad result must not break the chart */ }
+      }
+      requestAnimationFrame(() => {
+        let top = 0;
+        setPaneTops(chart.panes().map((pane) => { const t = top; top += pane.getHeight() + 1; return t; }));
+        setVersion((v) => v + 1);
+      });
+    })();
+    return () => ctrl.abort();
+  }, [structureKey, lastBarTime, libTick, p.loadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Position lines follow the main series, which is recreated when the chart type changes.
   const posKey = (p.positions ?? []).map((x) => `${x.product}:${x.qty}:${x.avgPricePaise}`).join('|');
   useEffect(() => {
@@ -245,7 +315,7 @@ export function ChartView(p: Props) {
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [textAt, setTextAt] = useState<{ x: number; y: number; point: Point } | null>(null);
-  const live = useRef({ tool, drawings, selected, start: null as Point | null, measureDone: false });
+  const live = useRef({ tool, drawings, selected, start: null as Point | null, end: null as Point | null, measureDone: false });
   live.current.tool = tool; live.current.drawings = drawings; live.current.selected = selected;
   const loadedFor = useRef('');
 
@@ -254,7 +324,7 @@ export function ChartView(p: Props) {
     loadedFor.current = p.symbol;
     setDrawings(loadDrawings(p.symbol));
     setSelected(null);
-    live.current.start = null;
+    live.current.start = live.current.end = null;
     layer.current.set({ preview: null, measure: null });
   }, [p.symbol]);
   useEffect(() => { if (loadedFor.current === p.symbol) saveDrawings(p.symbol, drawings); }, [drawings]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -263,7 +333,7 @@ export function ChartView(p: Props) {
 
   const pickTool = (t: Tool) => {
     setTool(t);
-    live.current.start = null;
+    live.current.start = live.current.end = null;
     live.current.measureDone = false;
     layer.current.set({ preview: null, measure: null });
     if (t !== 'cursor') setSelected(null);
@@ -301,6 +371,12 @@ export function ChartView(p: Props) {
         else { L.measureDone = true; layer.current.set({ measure: { from: L.start, to: pt, text: measureText(L.start, pt, bars(L.start, pt)) } }); }
         return;
       }
+      if (L.tool === 'channel') { // base line start, base line end, then a third click for the width
+        if (!L.start) { L.start = pt; layer.current.set({ preview: { id: 'preview', kind: 'channel', p1: pt, p2: pt, color } }); }
+        else if (!L.end) { L.end = pt; layer.current.set({ preview: { id: 'preview', kind: 'channel', p1: L.start, p2: pt, p3: pt, color } }); }
+        else { add({ id: newId(), kind: 'channel', p1: L.start, p2: L.end, p3: pt, color }); L.start = L.end = null; layer.current.set({ preview: null }); pickTool('cursor'); }
+        return;
+      }
       if (TWO_POINT.includes(L.tool)) {
         if (!L.start) { L.start = pt; layer.current.set({ preview: { id: 'preview', kind: L.tool as Drawing['kind'], p1: pt, p2: pt, color } }); }
         else { add({ id: newId(), kind: L.tool as Drawing['kind'], p1: L.start, p2: pt, color }); L.start = null; layer.current.set({ preview: null }); pickTool('cursor'); }
@@ -312,7 +388,7 @@ export function ChartView(p: Props) {
       const pt = pointAt(e.point.x, e.point.y);
       if (!pt) return;
       if (L.tool === 'measure' && !L.measureDone) layer.current.set({ measure: { from: L.start, to: pt, text: measureText(L.start, pt, bars(L.start, pt)) } });
-      else if (layer.current.state.preview) layer.current.set({ preview: { ...layer.current.state.preview, p2: pt } });
+      else if (layer.current.state.preview) layer.current.set({ preview: { ...layer.current.state.preview, ...(L.end ? { p3: pt } : { p2: pt }) } });
     };
     chart.subscribeCrosshairMove(onMove);
 
@@ -320,7 +396,7 @@ export function ChartView(p: Props) {
     // click (the chart's own click event can be swallowed right after another interaction). Cursor tool: select and
     // drag drawings, without also panning the chart.
     const el = host.current!;
-    let drag: { id: string; handle: 'p1' | 'p2' | 'body'; from: Point; orig: Drawing } | null = null;
+    let drag: { id: string; handle: 'p1' | 'p2' | 'p3' | 'body'; from: Point; orig: Drawing } | null = null;
     let press: { x: number; y: number } | null = null;
     const local = (e: PointerEvent) => { const r = el.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
     const inMainPane = (xy: { x: number; y: number }) => xy.y >= 0 && xy.y <= (chart.panes()[0]?.getHeight() ?? 0) && xy.x >= 0 && xy.x <= chart.timeScale().width();
@@ -344,7 +420,12 @@ export function ChartView(p: Props) {
       if (!pt) return;
       const { orig, handle, from } = drag;
       const shift = (q: Point): Point => ({ time: q.time + (pt.time - from.time), price: q.price + (pt.price - from.price) });
-      const next: Drawing = handle === 'p1' ? { ...orig, p1: pt } : handle === 'p2' ? { ...orig, p2: pt } : { ...orig, p1: shift(orig.p1), p2: orig.p2 && shift(orig.p2) };
+      let next: Drawing = handle === 'p1' ? { ...orig, p1: pt } : handle === 'p2' ? { ...orig, p2: pt } : handle === 'p3' ? { ...orig, p3: pt }
+        : { ...orig, p1: shift(orig.p1), p2: orig.p2 && shift(orig.p2), p3: orig.p3 && shift(orig.p3) };
+      // Moving a channel's base line keeps its width.
+      if (orig.kind === 'channel' && orig.p2 && orig.p3 && next.p2 && (handle === 'p1' || handle === 'p2')) {
+        next = { ...next, p3: { time: orig.p3.time, price: orig.p3.price - channelOffset(next.p1, next.p2, orig.p3) + channelOffset(orig.p1, orig.p2, orig.p3) } };
+      }
       setDrawings((list) => list.map((d) => (d.id === next.id ? next : d)));
     };
     const onUp = (e: PointerEvent) => {
@@ -392,6 +473,28 @@ export function ChartView(p: Props) {
   const tone = ch >= 0 ? 'text-up' : 'text-down';
   // Read after the data effect rebuilds the series; its setVersion call re-renders with the new list.
   const studyRows = builtRef.current;
+
+  // Library indicators in the legend: name, values at the crosshair (or the last bar), settings and remove.
+  let libPane = 1 + new Set(studyRows.filter((b) => b.pane > 0).map((b) => b.pane)).size;
+  const libRows = (p.libStudies ?? []).flatMap((s) => {
+    const entry = catalog.find((c) => c.id === s.id);
+    return entry ? [{ s, entry, pane: entry.overlay ? 0 : libPane++ }] : [];
+  });
+  const libRow = ({ s, entry }: (typeof libRows)[number]) => {
+    const res = libResults.current.get(s.uid);
+    const lens = entry.inputConfig.filter((x) => x.type === 'int' || x.type === 'float').slice(0, 3).map((x) => s.inputs[x.id] ?? x.defval);
+    return (
+      <div key={s.uid} className="pointer-events-auto flex w-fit items-center gap-1.5 text-[12px] text-ink-2">
+        <span>{entry.shortName}{lens.length ? ` ${lens.join(' ')}` : ''}</span>
+        {entry.plotConfig.slice(0, 4).map((pc) => {
+          const v = res?.plots[pc.id]?.[i]?.value;
+          return <span key={pc.id} className="num" style={{ color: pc.color }}>{v == null || !Number.isFinite(v) ? '—' : fmt(v)}</span>;
+        })}
+        <button type="button" onClick={() => p.onEditLib?.(s.uid)} className="rounded px-1 text-muted hover:bg-raised hover:text-ink" aria-label={`${entry.name} settings`}><Settings2 size={12} /></button>
+        <button type="button" onClick={() => p.onRemoveLib?.(s.uid)} className="rounded px-1 text-muted hover:bg-raised hover:text-ink" aria-label={`Remove ${entry.name}`}><X size={12} /></button>
+      </div>
+    );
+  };
 
   const row = (id: string) => {
     const st = studyById(id)!;
@@ -462,8 +565,14 @@ export function ChartView(p: Props) {
             </div>
           )}
           {studyRows.filter((b) => b.pane === 0).map((b) => row(b.id))}
+          {libRows.filter((x) => x.pane === 0).map(libRow)}
         </div>
       )}
+      {libRows.filter((x) => x.pane > 0).map((x) => (
+        <div key={x.s.uid} className="pointer-events-none absolute left-2.5 z-10" style={{ top: (paneTops[x.pane] ?? 0) + 4 }}>
+          {libRow(x)}
+        </div>
+      ))}
       {studyRows.filter((b) => b.pane > 0).map((b) => (
         <div key={b.id} className="pointer-events-none absolute left-2.5 z-10" style={{ top: (paneTops[b.pane] ?? 0) + 4 }}>
           {row(b.id)}

@@ -21,3 +21,21 @@ applicable law or agreed to in writing, software distributed under the License i
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 The charts display TradingView's attribution, as the library requires.
+
+## lightweight-charts-indicators and oakscriptjs
+
+- `lightweight-charts-indicators` 0.16.8 (https://github.com/deepentropy/lightweight-charts-indicators): used unmodified.
+  Only its standard indicators and candlestick patterns are offered; its community ports are not used.
+- `oakscriptjs` 0.12.3 (https://github.com/deepentropy/oakscriptJS): used unmodified (dependency of the above).
+
+```
+Copyright (c) 2025 Odyssée (lightweight-charts-indicators)
+Copyright (c) 2025-2026 Odyssée (oakscriptjs)
+```
+
+Both licensed under the MIT License: Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following
+conditions: The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.

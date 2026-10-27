@@ -27,7 +27,8 @@ const isoDate = (s: string): string | null => {
 /** Parses Bc{DDMMYY}.csv. Rows without an ex-date (e.g. AGM notices) are skipped. */
 export function parseBc(csv: string): CorporateActionRow[] {
   const lines = csv.replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim());
-  const header = splitCsvLine(lines[0] ?? '').map((h) => h.trim().toUpperCase());
+  if (!lines.length) return []; // NSE publishes an empty file on days with no actions
+  const header = splitCsvLine(lines[0]).map((h) => h.trim().toUpperCase());
   const col = (name: string) => {
     const i = header.indexOf(name);
     if (i < 0) throw new Error(`NSE corporate action file format changed: column "${name}" not found`);

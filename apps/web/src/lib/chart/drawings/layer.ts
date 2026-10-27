@@ -12,7 +12,7 @@ import type {
   Coordinate, IChartApi, IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesApi, ISeriesPrimitive, ISeriesPrimitiveAxisView,
   Logical, PrimitivePaneViewZOrder, SeriesAttachedParameter, SeriesType, Time,
 } from 'lightweight-charts';
-import { timeToLogical, type Drawing, type Placed, type Point, type XY } from './model';
+import { FIB_LEVELS, channelOffset, fibPrice, timeToLogical, type Drawing, type Placed, type Point, type XY } from './model';
 
 export type AlertLine = { price: number; label: string };
 export type Measure = { from: Point; to: Point; text: string };
@@ -31,10 +31,17 @@ const AMBER = '#ff9800';
 const FONT = '600 11.5px "Plus Jakarta Sans", system-ui, sans-serif';
 const fmtPrice = (p: number) => p.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const IST = 5.5 * 3600;
-const fmtTime = (t: number) => {
+/** Axis label for a drawing's time; date only on daily and longer bars. */
+const fmtTime = (t: number, daily = false) => {
   const d = new Date((t + IST) * 1000);
   const two = (n: number) => String(n).padStart(2, '0');
-  return `${two(d.getUTCDate())} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`;
+  const date = `${two(d.getUTCDate())} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]} ${String(d.getUTCFullYear()).slice(2)}`;
+  return daily ? date : `${date} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`;
+};
+/** TradingView's default colour for each Fibonacci level. */
+const FIB_COLORS: Record<number, string> = {
+  0: '#787b86', 0.236: '#f23645', 0.382: '#ff9800', 0.5: '#4caf50', 0.618: '#089981', 0.786: '#00bcd4',
+  1: '#787b86', 1.618: '#2962ff', 2.618: '#f23645', 3.618: '#9c27b0', 4.236: '#e91e63',
 };
 const withAlpha = (hex: string, a: number) => `${hex}${Math.round(a * 255).toString(16).padStart(2, '0')}`;
 
@@ -103,7 +110,7 @@ function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number
   ctx.fillText(text, left + 6, y + 0.5);
 }
 
-function drawOne(ctx: CanvasRenderingContext2D, { d, a, b }: Placed, W: number, H: number, selected: boolean) {
+function drawOne(ctx: CanvasRenderingContext2D, { d, a, b, levels, a2, b2, c }: Placed, W: number, H: number, selected: boolean) {
   ctx.strokeStyle = d.color;
   ctx.lineWidth = selected ? 2.5 : 2;
   switch (d.kind) {
@@ -131,6 +138,39 @@ function drawOne(ctx: CanvasRenderingContext2D, { d, a, b }: Placed, W: number, 
       ctx.lineWidth = selected ? 2 : 1.5;
       ctx.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
       break;
+    case 'fib': {
+      if (!b || !levels) break;
+      const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
+      for (let i = 0; i + 1 < levels.length; i++) { // light band between neighbouring levels
+        ctx.fillStyle = withAlpha(FIB_COLORS[levels[i].level] ?? d.color, 0.08);
+        ctx.fillRect(x0, Math.min(levels[i].y, levels[i + 1].y), x1 - x0, Math.abs(levels[i + 1].y - levels[i].y));
+      }
+      ctx.lineWidth = 1;
+      for (const l of levels) {
+        const col = FIB_COLORS[l.level] ?? d.color;
+        ctx.strokeStyle = col;
+        ctx.beginPath(); ctx.moveTo(x0, l.y); ctx.lineTo(x1, l.y); ctx.stroke();
+        ctx.fillStyle = col; ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
+        ctx.fillText(`${l.level} (${fmtPrice(fibPrice(d.p1, d.p2!, l.level))})`, x0 - 6, l.y);
+        ctx.textAlign = 'left';
+      }
+      ctx.strokeStyle = withAlpha('#787b86', 0.8); ctx.setLineDash([4, 4]); // the swing it was drawn on
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      ctx.setLineDash([]);
+      break;
+    }
+    case 'channel': {
+      if (!b) break;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      if (!a2 || !b2) break; // still placing the base line
+      ctx.fillStyle = withAlpha(d.color, 0.1);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(b2.x, b2.y); ctx.lineTo(a2.x, a2.y); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(a2.x, a2.y); ctx.lineTo(b2.x, b2.y); ctx.stroke();
+      ctx.lineWidth = 1; ctx.setLineDash([5, 4]); // middle line
+      ctx.beginPath(); ctx.moveTo((a.x + a2.x) / 2, (a.y + a2.y) / 2); ctx.lineTo((b.x + b2.x) / 2, (b.y + b2.y) / 2); ctx.stroke();
+      ctx.setLineDash([]);
+      break;
+    }
     case 'text':
       ctx.font = '600 13px "Plus Jakarta Sans", system-ui, sans-serif';
       ctx.fillStyle = d.color;
@@ -141,7 +181,8 @@ function drawOne(ctx: CanvasRenderingContext2D, { d, a, b }: Placed, W: number, 
       break;
   }
   if (selected && d.kind !== 'hline' && d.kind !== 'vline' && d.kind !== 'text') {
-    for (const p of [a, b]) if (p) {
+    ctx.strokeStyle = d.color;
+    for (const p of [a, b, c]) if (p) {
       ctx.fillStyle = '#ffffff'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     }
@@ -180,7 +221,7 @@ export class DrawingLayer extends PluginBase {
   priceAxisViews() {
     const out: ISeriesPrimitiveAxisView[] = [];
     for (const d of this.state.drawings) {
-      if (d.kind !== 'hline' && !(d.id === this.state.selected && (d.kind === 'trend' || d.kind === 'ray' || d.kind === 'rect'))) continue;
+      if (d.kind !== 'hline' && !(d.id === this.state.selected && (d.kind === 'trend' || d.kind === 'ray' || d.kind === 'rect' || d.kind === 'fib' || d.kind === 'channel'))) continue;
       for (const p of [d.p1, d.p2]) if (p) { const y = this.priceY(p.price); if (y != null) out.push(new AxisLabel(y as Coordinate, fmtPrice(p.price), d.color)); }
     }
     for (const al of this.state.alerts) { const y = this.priceY(al.price); if (y != null) out.push(new AxisLabel(y as Coordinate, fmtPrice(al.price), AMBER, '#3d2c00')); }
@@ -190,11 +231,12 @@ export class DrawingLayer extends PluginBase {
   timeAxisViews() {
     const out: ISeriesPrimitiveAxisView[] = [];
     const width = this.chart?.timeScale().width() ?? 0;
+    const t = this.state.times, daily = t.length > 1 && t[1] - t[0] >= 86400;
     for (const d of this.state.drawings) {
       if (d.kind !== 'vline' && d.id !== this.state.selected) continue;
       for (const p of [d.p1, d.p2]) if (p) {
         const x = this.timeX(p.time);
-        if (x != null && x >= 0 && x <= width) out.push(new AxisLabel(x as Coordinate, fmtTime(p.time), d.color)); // off-screen points get no label
+        if (x != null && x >= 0 && x <= width) out.push(new AxisLabel(x as Coordinate, fmtTime(p.time, daily), d.color)); // off-screen points get no label
       }
     }
     return out;
@@ -224,7 +266,18 @@ export class DrawingLayer extends PluginBase {
       const a = d.kind === 'hline' ? (this.priceY(d.p1.price) == null ? null : { x: 0, y: this.priceY(d.p1.price)! }) : d.kind === 'vline' ? (this.timeX(d.p1.time) == null ? null : { x: this.timeX(d.p1.time)!, y: 0 }) : this.pointXY(d.p1);
       if (!a) continue;
       const b = d.p2 ? this.pointXY(d.p2) ?? undefined : undefined;
-      out.push({ d, a, b });
+      const pl: Placed = { d, a, b };
+      if (d.kind === 'fib' && d.p2) {
+        pl.levels = [];
+        for (const level of FIB_LEVELS) { const y = this.priceY(fibPrice(d.p1, d.p2, level)); if (y != null) pl.levels.push({ level, y }); }
+      }
+      if (d.kind === 'channel' && d.p2 && d.p3) {
+        const off = channelOffset(d.p1, d.p2, d.p3);
+        pl.a2 = this.pointXY({ time: d.p1.time, price: d.p1.price + off }) ?? undefined;
+        pl.b2 = this.pointXY({ time: d.p2.time, price: d.p2.price + off }) ?? undefined;
+        if (pl.a2 && pl.b2) pl.c = { x: (pl.a2.x + pl.b2.x) / 2, y: (pl.a2.y + pl.b2.y) / 2 }; // width handle
+      }
+      out.push(pl);
     }
     return out;
   }

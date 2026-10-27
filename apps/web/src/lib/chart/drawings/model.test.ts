@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distanceToSegment, hitTest, logicalToTime, measureText, timeToLogical, type Drawing } from './model';
+import { channelOffset, distanceToSegment, fibPrice, hitTest, logicalToTime, measureText, timeToLogical, type Drawing } from './model';
 
 describe('time ↔ bar position', () => {
   const t = [1000, 1300, 1600, 1900]; // 5-minute bars
@@ -37,6 +37,19 @@ describe('hit testing', () => {
   it('distance to a ray continues past its second point', () => {
     expect(distanceToSegment({ x: 200, y: 200 }, { x: 0, y: 0 }, { x: 100, y: 100 }, true)).toBeCloseTo(0, 9);
     expect(distanceToSegment({ x: 200, y: 200 }, { x: 0, y: 0 }, { x: 100, y: 100 })).toBeGreaterThan(100);
+  });
+});
+
+describe('Fibonacci retracement and parallel channel', () => {
+  it('Fibonacci levels run from 1 at the first point to 0 at the second, as on TradingView', () => {
+    const low = { time: 0, price: 100 }, high = { time: 10, price: 200 };
+    expect(fibPrice(low, high, 0)).toBe(200);
+    expect(fibPrice(low, high, 1)).toBe(100);
+    expect(fibPrice(low, high, 0.618)).toBeCloseTo(138.2, 9);
+    expect(fibPrice(low, high, 1.618)).toBeCloseTo(38.2, 9);
+  });
+  it('channel width is the price distance from the base line at the third point', () => {
+    expect(channelOffset({ time: 0, price: 100 }, { time: 10, price: 200 }, { time: 5, price: 170 })).toBe(20); // base 150 at t=5
   });
 });
 

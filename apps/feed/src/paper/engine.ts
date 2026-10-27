@@ -2,10 +2,10 @@
 // positions at 15:20 IST and expires unfilled orders at the close. All state changes run one at a time.
 
 import {
-  CHARGE_RATES,
   avgPricePaise,
   buildLedger,
   computeCharges,
+  statutoryOn,
   evaluate,
   funds,
   toPaise,
@@ -282,7 +282,7 @@ export class PaperEngine {
         }),
       orders: all,
       trades: trades.filter((t) => t.tradeDate === today).sort((a, b) => b.time - a.time).map((t) => ({ id: t.id, orderId: t.orderId, symbol: t.symbol, side: t.side, product: t.product, qty: t.qty, pricePaise: t.pricePaise, charges: t.charges, time: t.time })),
-      chargeRatesEffectiveFrom: CHARGE_RATES.effectiveFrom,
+      chargeRatesEffectiveFrom: statutoryOn().effectiveFrom,
     };
   }
 }

@@ -130,7 +130,7 @@ export async function syncEod(from: string, log: (m: string) => void): Promise<n
   running = true;
   try {
     const done = new Set((await prisma.eodFetch.findMany({ where: { status: { in: ['saved', 'not-published'] } }, select: { date: true } })).map((f) => f.date));
-    const todo = datesToFetch(from, Date.now() / 1000).filter((d) => !done.has(d)).reverse();
+    const todo = datesToFetch(from, Date.now() / 1000, true).filter((d) => !done.has(d)).reverse(); // incl. weekend special sessions
     if (todo.length) log(`NSE equity history: ${todo.length} trading days to download`);
     let saved = 0;
     for (const date of todo) {
