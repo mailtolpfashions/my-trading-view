@@ -7,7 +7,8 @@
     "dev": "dotenv -e ../../.env -- next dev --turbopack -p 3000",
     "build": "dotenv -e ../../.env -- next build",
     "start": "dotenv -e ../../.env -- next start -p 3000",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@mtv/backtest": "^0.1.0",
@@ -31,7 +32,9 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "dotenv-cli": "^8.0.0",
+    "fancy-canvas": "2.1.0",
     "tailwindcss": "4.3.3",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.5"
   }
 }

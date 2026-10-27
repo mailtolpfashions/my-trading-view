@@ -73,7 +73,11 @@ export type ClientMessage = { type: 'subscribe'; symbols: string[] } | { type: '
 export type ServerMessage =
   | { type: 'quotes'; quotes: Quote[] }
   | { type: 'status'; status: DataStatus; session: MarketSession }
-  | { type: 'paper'; snapshot: PaperSnapshot };
+  | { type: 'paper'; snapshot: PaperSnapshot }
+  | { type: 'alert'; event: AlertEventMessage };
+
+/** An alert that just fired, as pushed to the user's open browsers. */
+export type AlertEventMessage = { id: string; alertId: string; symbol: string; message: string; price: number; marketTime: number; triggeredAt: number };
 
 /** Error code returned when a feature needs a connected broker (e.g. option chain on free data). */
 export const NEEDS_BROKER = 'needs_broker';

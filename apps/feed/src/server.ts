@@ -2,7 +2,7 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import Fastify, { type FastifyRequest } from 'fastify';
 import type { WebSocket } from 'ws';
-import { BacktestError, OptionsBacktestError, runBacktest, runOptionsBacktest, type OptionsStrategy, type RuleSet, type Strategy } from '@mtv/backtest';
+import { BacktestError, OptionsBacktestError, runBacktest, runOptionsBacktest, validateStrategy, type OptionsStrategy, type RuleSet, type Strategy } from '@mtv/backtest';
 import { prisma } from '@mtv/db';
 import { toPaise, type PlaceOrderInput } from '@mtv/paper';
 import { NEEDS_BROKER, TIMEFRAMES, marketSession, type Candle, type ClientMessage, type DataStatus, type Quote, type ServerMessage, type Timeframe } from '@mtv/shared';
@@ -21,6 +21,9 @@ import { FNO_UNDERLYINGS, type FnoUnderlying } from './fno/bhavcopy';
 import { getChain, latestFnoDate } from './fno/chain';
 import { prismaOptionsData } from './fno/data';
 import { fnoStatus, startFnoSync } from './fno/store';
+import { classifyBuildUp, futuresHistory, previousOi } from './fno/futures';
+import { ALERT_LIMITS, AlertEngine, planOf } from './alerts/engine';
+import { ALERT_TIMEFRAMES, type PriceParams, type RulesParams } from './alerts/logic';
 import { auditCandles } from './quality';
 import { dailyHistory, eodStatus, onEodReady, startEodSync } from './eod/store';
 import { publishStrategies, latestSignals, runSignals, signalDetail, signalsOverview } from './signals/runner';
@@ -48,7 +51,14 @@ if (wantKite && !kiteConfigured()) app.log.warn('DATA_PROVIDER=kite but KITE_API
 
 // A failed background job (database restarting, NSE unreachable) must never take the price feed down: log it loudly.
 process.on('unhandledRejection', (e) => app.log.error({ err: e }, 'Unhandled background error'));
-await app.register(cors, { origin: [WEB_ORIGIN] });
+// The website calls PATCH and DELETE too (pause/delete alerts, cancel paper orders): the default only allows GET/HEAD/POST.
+await app.register(cors, { origin: [WEB_ORIGIN], methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'] });
+// An empty body sent as JSON (e.g. a DELETE from a client that always sets the header) means "no body", not an error.
+app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+  const text = String(body ?? '');
+  if (!text.trim()) return done(null, undefined);
+  try { done(null, JSON.parse(text)); } catch { const e = new Error('Invalid JSON body') as Error & { statusCode: number }; e.statusCode = 400; done(e, undefined); }
+});
 await app.register(websocket);
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -263,6 +273,41 @@ app.get<{ Querystring: { underlying?: string; date?: string; expiry?: string } }
   const chain = await getChain(u as FnoUnderlying, date, req.query.expiry);
   return chain ?? reply.code(404).send({ error: 'no_data', message: `No options for ${u} on ${date}` });
 });
+// ---- index futures: history from NSE's files for every signed-in user; live (Kite) for admin / Live plan ----
+app.get<{ Querystring: { underlying?: string; days?: string } }>('/api/futures/history', async (req, reply) => {
+  const u = String(req.query.underlying ?? 'NIFTY').toUpperCase();
+  if (!(FNO_UNDERLYINGS as readonly string[]).includes(u)) return reply.code(400).send({ error: 'bad_underlying', message: 'Futures cover NIFTY and BANKNIFTY' });
+  const days = Math.min(750, Math.max(5, Number(req.query.days) || 250));
+  return { underlying: u, days: await futuresHistory(u as FnoUnderlying, days) };
+});
+app.get<{ Querystring: { underlying?: string } }>('/api/futures/live', async (req, reply) => {
+  const u = String(req.query.underlying ?? 'NIFTY').toUpperCase() as LiveChainUnderlying;
+  if (!(LIVE_CHAIN_UNDERLYINGS as readonly string[]).includes(u)) return reply.code(400).send({ error: 'bad_underlying', message: 'Futures cover NIFTY and BANKNIFTY' });
+  if (!liveSource() || !kite.ready) return reply.code(503).send({ error: NEEDS_BROKER, message: 'Live futures need a live data connection' });
+  if (!isLive(req.user!.plan) && !req.user!.admin) return reply.code(403).send({ error: 'live_plan_required', message: 'Live futures are on the Live plan. End-of-day futures data is shown below.' });
+  try {
+    const today = new Date((now() + 5.5 * 3600) * 1000).toISOString().slice(0, 10);
+    const [live, prev] = await Promise.all([kite.liveFutures(u), previousOi(u, today)]);
+    const total = live.contracts.reduce((s, c) => s + c.oi, 0);
+    const contracts = live.contracts.map((c) => {
+      const prevOi = prev?.oi.get(c.expiry);
+      const change = c.prevClosePaise > 0 && c.ltpPaise > 0 ? c.ltpPaise - c.prevClosePaise : null;
+      const oiChange = prevOi != null ? c.oi - prevOi : null;
+      const basis = live.spotPaise != null && c.ltpPaise > 0 ? c.ltpPaise - live.spotPaise : null;
+      const dte = Math.max(0, Math.round((Date.parse(`${c.expiry}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400_000));
+      return {
+        ...c, changePaise: change, oiChange, oiBaseDate: prev?.date ?? null, buildUp: classifyBuildUp(change, oiChange), basisPaise: basis, daysToExpiry: dte,
+        premiumPct: basis != null && live.spotPaise ? (basis / live.spotPaise) * 100 : null,
+        carryPct: basis != null && live.spotPaise && dte > 0 ? (basis / live.spotPaise) * (365 / dte) * 100 : null,
+      };
+    });
+    return { underlying: u, asOf: now(), spotPaise: live.spotPaise, lot: live.lot, totalOi: total, rolloverPct: total > 0 && contracts.length > 1 ? ((total - contracts[0].oi) / total) * 100 : null, contracts };
+  } catch (e) {
+    req.log.error(e);
+    return reply.code(502).send({ error: 'upstream_failed', message: 'Live futures are unavailable right now' });
+  }
+});
+
 app.get('/api/official/status', async () => ({ days: storedDays(), attempts: officialAttempts() }));
 
 // ---- NSE end-of-day history, scanner and signals (all from NSE's official files) ----
@@ -348,6 +393,86 @@ app.post<{ Body: { startingCash: string | number } }>('/api/paper/reset', async 
     if (e instanceof Error && /Starting funds/.test(e.message)) return reply.code(400).send({ error: 'bad_amount', message: e.message });
     return paperError(reply, e);
   }
+});
+
+// ---- alerts ----
+const alerts = new AlertEngine({
+  priceFor: (symbol, plan) => {
+    const live = lastQuotes.get(symbol);
+    const q = live ? quoteFor(live, plan) : liveSource() && !isLive(plan) ? delayBuffer.delayed(symbol, now()) : null;
+    return q ? { price: q.ltp, time: q.time } : null;
+  },
+  candles: (symbol, tf) => provider.candles(symbol, tf),
+  liveSource,
+  notify: (userId, event) => { for (const [ws, c] of clients) if (c.claims.uid === userId) send(ws, { type: 'alert', event }); },
+  now,
+  log: (m) => app.log.info(m),
+});
+
+type AlertBody = { symbol?: string; kind?: string; params?: { op?: string; value?: number; tf?: string; rules?: RuleSet }; note?: string; repeat?: string };
+
+/** Checks a new alert; returns the row to store, or an error message. */
+function validateAlert(b: AlertBody): { symbol: string; kind: 'PRICE' | 'RULES'; params: PriceParams | RulesParams; note: string | null; repeat: 'once' | 'every' } | string {
+  const symbol = String(b.symbol ?? '').toUpperCase();
+  if (!findInstrument(symbol)) return 'Unknown symbol';
+  const repeat = b.repeat === 'every' ? 'every' : 'once';
+  const note = b.note ? String(b.note).slice(0, 200) : null;
+  if (b.kind === 'PRICE') {
+    const op = b.params?.op, value = Number(b.params?.value);
+    if (op !== 'crossesAbove' && op !== 'crossesBelow') return 'Choose "crosses above" or "crosses below"';
+    if (!(value > 0) || !Number.isFinite(value)) return 'Enter a price above zero';
+    return { symbol, kind: 'PRICE', params: { op, valuePaise: Math.round(value * 100) }, note, repeat };
+  }
+  if (b.kind === 'RULES') {
+    const tf = b.params?.tf as Timeframe, rules = b.params?.rules;
+    if (!ALERT_TIMEFRAMES.includes(tf)) return 'Choose a timeframe: 5 min, 15 min, 1 hour or daily';
+    if (!rules?.conditions?.length || rules.conditions.length > 5) return 'Use between 1 and 5 conditions';
+    const invalid = validateStrategy({ name: 'alert', direction: 'LONG', product: 'CNC', entry: rules, sizing: { mode: 'qty', qty: 1 }, initialCapitalPaise: 1 }, false);
+    if (invalid) return invalid;
+    return { symbol, kind: 'RULES', params: { tf, rules: { match: rules.match === 'any' ? 'any' : 'all', conditions: rules.conditions } }, note, repeat };
+  }
+  return 'Choose a price alert or an indicator alert';
+}
+
+app.get('/api/alerts', async (req) => {
+  const uid = req.user!.uid;
+  const [list, events, plan] = await Promise.all([
+    prisma.alert.findMany({ where: { userId: uid }, orderBy: { createdAt: 'desc' } }),
+    prisma.alertEvent.findMany({ where: { userId: uid }, orderBy: { triggeredAt: 'desc' }, take: 50, include: { alert: { select: { symbol: true } } } }),
+    planOf(uid),
+  ]);
+  return {
+    alerts: list, limit: ALERT_LIMITS[plan], used: list.filter((a) => a.status !== 'TRIGGERED').length, emailEnabled: !!(process.env.RESEND_API_KEY && process.env.ALERT_EMAIL_FROM),
+    events: events.map((e) => ({ id: e.id, alertId: e.alertId, symbol: e.alert.symbol, message: e.message, price: e.pricePaise / 100, marketTime: e.marketTime, triggeredAt: e.triggeredAt, emailStatus: e.emailStatus, seen: !!e.seenAt })),
+  };
+});
+app.post<{ Body: AlertBody }>('/api/alerts', async (req, reply) => {
+  const v = validateAlert(req.body ?? {});
+  if (typeof v === 'string') return reply.code(400).send({ error: 'bad_alert', message: v });
+  const uid = req.user!.uid, plan = await planOf(uid);
+  const used = await prisma.alert.count({ where: { userId: uid, status: { in: ['ACTIVE', 'PAUSED'] } } });
+  if (used >= ALERT_LIMITS[plan]) return reply.code(409).send({ error: 'limit', message: `Your plan allows ${ALERT_LIMITS[plan]} alerts. Delete one, or upgrade to Live for ${ALERT_LIMITS.LIVE}.` });
+  const row = await prisma.alert.create({ data: { userId: uid, symbol: v.symbol, kind: v.kind, params: v.params as object, note: v.note, repeat: v.repeat, status: 'ACTIVE' } });
+  await alerts.reload();
+  return row;
+});
+app.patch<{ Params: { id: string }; Body: { status?: string } }>('/api/alerts/:id', async (req, reply) => {
+  const status = req.body?.status;
+  if (status !== 'ACTIVE' && status !== 'PAUSED') return reply.code(400).send({ error: 'bad_status', message: 'Status must be ACTIVE or PAUSED' });
+  const res = await prisma.alert.updateMany({ where: { id: req.params.id, userId: req.user!.uid }, data: { status } });
+  if (!res.count) return reply.code(404).send({ error: 'not_found', message: 'Alert not found' });
+  await alerts.reload();
+  return { ok: true };
+});
+app.delete<{ Params: { id: string } }>('/api/alerts/:id', async (req, reply) => {
+  const res = await prisma.alert.deleteMany({ where: { id: req.params.id, userId: req.user!.uid } });
+  if (!res.count) return reply.code(404).send({ error: 'not_found', message: 'Alert not found' });
+  await alerts.reload();
+  return { ok: true };
+});
+app.post('/api/alerts/seen', async (req) => {
+  await prisma.alertEvent.updateMany({ where: { userId: req.user!.uid, seenAt: null }, data: { seenAt: new Date() } });
+  return { ok: true };
 });
 
 // ---- live quotes over WebSocket ----
@@ -472,7 +597,7 @@ async function loop() {
   }
   // The paper engine needs prices for its open orders and positions even when no browser is watching them.
   const engineSymbols = await paper.symbols().catch(() => [] as string[]);
-  await pushQuotes([...clients.keys()], engineSymbols);
+  await pushQuotes([...clients.keys()], [...engineSymbols, ...alerts.symbols()]); // alerts need prices even when nobody watches
   await paper.tick().catch((e) => app.log.warn(`Paper tick failed: ${(e as Error).message}`));
   await broadcastPaper(); // refresh live P&L
   setTimeout(loop, session === 'closed' ? 60_000 : 5_000);
@@ -492,3 +617,14 @@ onEodReady(() => runSignals((m) => app.log.info(m)));
 startEodSync(process.env.EOD_BACKFILL_FROM ?? '2022-01-03', (m) => app.log.info(m));
 await app.listen({ port: PORT, host: '127.0.0.1' });
 void loop();
+// Alerts: load active ones (retrying while the database starts), then check every second.
+void (async function startAlerts() {
+  try {
+    await alerts.reload();
+    setInterval(() => void alerts.tick(), 1000);
+    app.log.info(`Alerts: ${alerts.symbols().length} symbols watched`);
+  } catch (e) {
+    app.log.warn(`Alerts not started yet (${(e as Error).message.split('\n').at(-1)}); retrying in 10 s`);
+    setTimeout(startAlerts, 10_000);
+  }
+})();

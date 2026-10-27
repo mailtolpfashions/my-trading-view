@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AreaChart, BarChart3, CandlestickChart, Check, ChevronDown, LineChart, PlugZap, Search, TrendingUp } from 'lucide-react';
+import { AreaChart, BarChart3, CandlestickChart, Check, ChevronDown, LineChart, Bell, PlugZap, Search, TrendingUp } from 'lucide-react';
 import { mergeTick } from '@mtv/indicators';
 import { marketSession, type Candle, type DataQuality, type Instrument, type MarketSession, type Timeframe } from '@mtv/shared';
 import { LogoMark } from '@/components/logo';
@@ -10,6 +10,12 @@ import { STUDIES } from '@/lib/chart/studies';
 import { FEED_URL, feedFetch, fetchCandles, useQuotes } from '@/lib/feed';
 import { fmt, tfLabel } from '@/lib/format';
 import { BacktestModule } from '@/components/backtest/backtest-module';
+import { AlertBell } from '@/components/alerts/alert-bell';
+import { AlertDialog } from '@/components/alerts/alert-dialog';
+import { AlertsView } from '@/components/alerts/alerts-view';
+import { fetchAlerts } from '@/lib/alerts';
+import type { AlertLine } from '@/lib/chart/drawings/layer';
+import { FuturesView } from '@/components/futures/futures-view';
 import { LiveChain } from '@/components/options/live-chain';
 import { OptionsView } from '@/components/options/options-view';
 import { ScannerView } from '@/components/signals/scanner-view';
@@ -30,7 +36,7 @@ const PULSE_NAMES: Record<string, string> = { NIFTY: 'NIFTY 50', MIDCPNIFTY: 'MI
 const DEFAULT_WATCH = ['NIFTY', 'BANKNIFTY', 'SENSEX', 'FINNIFTY', 'INDIAVIX', 'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 'SBIN', 'BHARTIARTL', 'ITC', 'LT', 'AXISBANK', 'KOTAKBANK', 'BAJFINANCE', 'MARUTI'];
 const TFS: Timeframe[] = ['1', '5', '15', '30', '60', 'D', 'W'];
 const MODULES = ['Chart', 'Option chain', 'Futures', 'Signals', 'Backtest', 'Paper', 'Algo', 'Research'];
-const LIVE_MODULES = ['Chart', 'Option chain', 'Signals', 'Backtest', 'Research'];
+const LIVE_MODULES = ['Chart', 'Option chain', 'Futures', 'Signals', 'Backtest', 'Research'];
 const DAY = 86400;
 const RANGES: [label: string, tf: Timeframe, seconds: number | (() => number)][] = [
   ['1D', '1', DAY], ['5D', '5', 7 * DAY], ['1M', '30', 31 * DAY], ['3M', '60', 92 * DAY], ['6M', '60', 183 * DAY],
@@ -76,7 +82,19 @@ export function Terminal({ user }: { user: TerminalUser | null }) {
   const [guestPrompt, setGuestPrompt] = useState<string | null>(null);
 
   const subscribed = useMemo(() => [...new Set([...PULSE, ...watch, sym.symbol])], [watch, sym.symbol]);
-  const { quotes, status, session: feedSession, connected, paper } = useQuotes(subscribed);
+  const { quotes, status, session: feedSession, connected, paper, alert } = useQuotes(subscribed);
+  /** Alert form: open, optionally at a price picked on the chart (direction from the current price). */
+  const [alertDialog, setAlertDialog] = useState<false | { price?: number; op?: 'crossesAbove' | 'crossesBelow' }>(false);
+  const [alertsVersion, setAlertsVersion] = useState(0);
+  // Active price alerts on the charted symbol, drawn as dashed lines.
+  const [alertLines, setAlertLines] = useState<AlertLine[]>([]);
+  // An alert fired: show it, and as a desktop notification when the user allowed them.
+  useEffect(() => {
+    if (!alert) return;
+    setNotice(`Alert · ${alert.message}`);
+    setAlertsVersion((v) => v + 1);
+    try { if ('Notification' in window && Notification.permission === 'granted') new Notification(`Alert: ${alert.symbol}`, { body: alert.message, tag: alert.id }); } catch { /* not available */ }
+  }, [alert]);
   const delayed = status?.delayed ?? true;
   const [ticket, setTicket] = useState<TicketRequest | null>(null);
   const openTicket = (side: 'BUY' | 'SELL') => {
@@ -85,6 +103,22 @@ export function Terminal({ user }: { user: TerminalUser | null }) {
     setTicket({ symbol: sym.symbol, side, ltp: quotes[sym.symbol]?.ltp ?? data.candles.at(-1)?.close });
   };
   const chartPositions = (paper?.positions ?? []).filter((p) => p.symbol === sym.symbol && p.qty !== 0);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchAlerts().then(
+      (r) => setAlertLines(r.alerts.filter((a) => a.symbol === sym.symbol && a.status === 'ACTIVE' && 'op' in a.params).map((a) => {
+        const pr = a.params as { op: 'crossesAbove' | 'crossesBelow'; valuePaise: number };
+        return { price: pr.valuePaise / 100, label: `Alert ${pr.op === 'crossesAbove' ? '↑' : '↓'} ${fmt(pr.valuePaise / 100)}` };
+      })),
+      () => setAlertLines([]),
+    );
+  }, [user, sym.symbol, alertsVersion]);
+  const alertAt = useCallback((price: number) => {
+    if (!user) return setGuestPrompt('Alerts');
+    const now = quotesRef.current[sym.symbol]?.ltp;
+    setAlertDialog({ price, op: now != null && price < now ? 'crossesBelow' : 'crossesAbove' });
+  }, [user, sym.symbol]);
 
   // ---- history for the current symbol/timeframe ----
   useEffect(() => {
@@ -155,7 +189,7 @@ export function Terminal({ user }: { user: TerminalUser | null }) {
 
   useEffect(() => {
     if (!notice) return;
-    const t = setTimeout(() => setNotice(null), 2600);
+    const t = setTimeout(() => setNotice(null), notice.startsWith('Alert · ') ? 8000 : 2600); // fired alerts stay longer
     return () => clearTimeout(t);
   }, [notice]);
 
@@ -238,6 +272,7 @@ export function Terminal({ user }: { user: TerminalUser | null }) {
           </span>
         )}
         {!connected && <span className="flex h-8 items-center rounded-full bg-down-soft px-3 text-[12px] font-bold whitespace-nowrap text-down">Feed offline</span>}
+        {user && <AlertBell latest={alert} onManage={() => setModule('Alerts')} />}
         {user ? <UserMenu user={user} /> : (
           <>
             <Link href="/login?next=/terminal" className="flex h-8 items-center rounded-full bg-panel px-3 text-[12px] font-bold whitespace-nowrap shadow-[var(--shadow-panel)] hover:bg-raised">Sign in</Link>
@@ -263,6 +298,8 @@ export function Terminal({ user }: { user: TerminalUser | null }) {
 
       {/* workspace */}
       {module === 'Backtest' ? <BacktestModule /> : module === 'Option chain' ? <OptionsView />
+        : module === 'Futures' ? <FuturesView />
+        : module === 'Alerts' ? <AlertsView onNew={() => setAlertDialog({})} refreshKey={alertsVersion} />
         : module === 'Signals' ? <SignalsView onOpenChart={openDailyChart} />
         : module === 'Research' ? <ScannerView onOpenChart={openDailyChart} /> : (
       <main className="grid min-h-0 grid-cols-[1fr_380px] grid-rows-[1fr_210px] gap-2">
@@ -315,6 +352,9 @@ export function Terminal({ user }: { user: TerminalUser | null }) {
                 </div>
               )}
             </div>
+            <button type="button" onClick={() => (user ? setAlertDialog({}) : setGuestPrompt('Alerts'))} className="flex h-[30px] items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-semibold hover:bg-raised" title={`Set an alert on ${sym.symbol}`}>
+              <Bell size={15} /> Alert
+            </button>
             {loading && <span className="ml-3 text-[12px] text-muted">Loading…</span>}
             <span className="flex-1" />
             {!loading && <DataCheck quality={data.quality} delayed={delayed} />}
@@ -336,6 +376,8 @@ export function Terminal({ user }: { user: TerminalUser | null }) {
               onRemoveStudy={(id) => setStudies(studies.filter((s) => s !== id))}
               onTrade={openTicket}
               positions={chartPositions}
+              alertLines={alertLines}
+              onAlertAt={alertAt}
             />
             {error && (
               <div className="absolute inset-0 z-20 grid place-items-center bg-white/80">
@@ -401,6 +443,10 @@ export function Terminal({ user }: { user: TerminalUser | null }) {
 
       {user && <OrderTicket req={ticket} snapshot={paper} delayed={delayed} onClose={() => setTicket(null)} onDone={setNotice} />}
       {guestPrompt && <GuestPrompt feature={guestPrompt} onClose={() => setGuestPrompt(null)} />}
+      {alertDialog && user && (
+        <AlertDialog symbol={sym.symbol} price={alertDialog.price ?? quotes[sym.symbol]?.ltp ?? data.candles.at(-1)?.close} initialOp={alertDialog.op} delayed={delayed}
+          onClose={() => setAlertDialog(false)} onCreated={(m) => { setNotice(m); setAlertsVersion((v) => v + 1); }} />
+      )}
 
       <SymbolSearch
         open={search !== null}

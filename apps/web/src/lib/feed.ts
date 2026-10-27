@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { PaperOrder, PaperSnapshot, PlaceOrderInput } from '@mtv/paper';
-import type { Candle, ClientMessage, DataQuality, DataStatus, Instrument, MarketSession, Quote, ServerMessage, Timeframe } from '@mtv/shared';
+import type { AlertEventMessage, Candle, ClientMessage, DataQuality, DataStatus, Instrument, MarketSession, Quote, ServerMessage, Timeframe } from '@mtv/shared';
 
 export const FEED_URL = process.env.NEXT_PUBLIC_FEED_URL ?? 'http://localhost:4001';
 
@@ -52,6 +52,8 @@ export function useQuotes(symbols: string[]) {
   const [session, setSession] = useState<MarketSession | null>(null);
   const [connected, setConnected] = useState(false);
   const [paper, setPaper] = useState<PaperSnapshot | null>(null);
+  /** The latest alert that fired for this user (pushed by the server). */
+  const [alert, setAlert] = useState<AlertEventMessage | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const subscribed = useRef<Set<string>>(new Set());
   const key = [...new Set(symbols)].sort().join(',');
@@ -87,6 +89,8 @@ export function useQuotes(symbols: string[]) {
           setSession(msg.session);
         } else if (msg.type === 'paper') {
           setPaper(msg.snapshot);
+        } else if (msg.type === 'alert') {
+          setAlert(msg.event);
         } else if (msg.type === 'quotes' && msg.quotes.length) {
           setQuotes((prev) => {
             const next = { ...prev };
@@ -122,12 +126,13 @@ export function useQuotes(symbols: string[]) {
 
   useEffect(syncSubscriptions, [key]);
 
-  return { quotes, status, session, connected, paper };
+  return { quotes, status, session, connected, paper, alert };
 }
 
 // ---- paper trading API ----
 async function paperCall<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await feedFetch(`${FEED_URL}/api/paper${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
+  // Content-Type only with a body: an empty body declared as JSON is invalid (e.g. cancelling an order with DELETE).
+  const res = await feedFetch(`${FEED_URL}/api/paper${path}`, { ...init, headers: { ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...init?.headers } });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.message ?? 'Paper trading is unavailable right now');
   return body as T;

@@ -17,12 +17,18 @@ export function LiveChain({ onOpenModule }: { onOpenModule: () => void }) {
 
   useEffect(() => {
     let stop = false;
+    let id: ReturnType<typeof setInterval> | undefined;
     const load = () => fetchLiveChain(underlying, expiry).then(
       (c) => { if (!stop) { setChain(c); setError(null); } },
-      (e) => { if (!stop) setError(e instanceof ChainAccessError ? e : new ChainAccessError('Live option chain unavailable', 'failed')); },
+      (e) => {
+        if (stop) return;
+        const err = e instanceof ChainAccessError ? e : new ChainAccessError('Live option chain unavailable', 'failed');
+        setError(err);
+        if (['live_plan_required', 'needs_broker'].includes(err.code)) clearInterval(id); // retrying won't change the answer
+      },
     );
     void load();
-    const id = setInterval(load, 2000);
+    id = setInterval(load, 2000);
     return () => { stop = true; clearInterval(id); };
   }, [underlying, expiry]);
 

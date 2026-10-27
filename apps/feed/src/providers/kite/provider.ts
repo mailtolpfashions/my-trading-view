@@ -14,6 +14,7 @@ import { KiteTicker, type Tick } from './ticker';
 /** Underlyings with a live option chain. */
 export const LIVE_CHAIN_UNDERLYINGS = ['NIFTY', 'BANKNIFTY'] as const;
 export type LiveChainUnderlying = (typeof LIVE_CHAIN_UNDERLYINGS)[number];
+export type LiveFuture = { expiry: string; ltpPaise: number; prevClosePaise: number; oi: number; volume: number };
 type OptionContract = { token: number; tradingsymbol: string; expiry: string; strike: number; right: 'CE' | 'PE'; lot: number };
 
 const API = 'https://api.kite.trade';
@@ -82,6 +83,8 @@ export class KiteProvider implements MarketDataProvider {
   private ticks = new Map<number, Tick>();
   /** NFO option contracts per underlying, from Kite's instrument list. */
   private options = new Map<string, OptionContract[]>();
+  /** NFO index futures per underlying. */
+  private futures = new Map<string, { token: number; tradingsymbol: string; expiry: string; lot: number }[]>();
   private candleCache = new TtlCache<Candle[]>();
   private nextHistorical = 0;
   ticker: KiteTicker;
@@ -130,10 +133,15 @@ export class KiteProvider implements MarketDataProvider {
     this.tokens.clear();
     this.symbolsByToken.clear();
     this.options.clear();
+    this.futures.clear();
     for (const line of lines.slice(1)) {
       const c = splitCsvLine(line);
       const token = Number(c[cTok]);
-      if (c[cSeg] === 'NFO-OPT' && (LIVE_CHAIN_UNDERLYINGS as readonly string[]).includes(c[cName]) && (c[cType] === 'CE' || c[cType] === 'PE')) {
+      if (c[cSeg] === 'NFO-FUT' && (LIVE_CHAIN_UNDERLYINGS as readonly string[]).includes(c[cName])) {
+        const list = this.futures.get(c[cName]) ?? [];
+        list.push({ token, tradingsymbol: c[cSym], expiry: c[cExp], lot: Number(c[cLot]) });
+        this.futures.set(c[cName], list);
+      } else if (c[cSeg] === 'NFO-OPT' && (LIVE_CHAIN_UNDERLYINGS as readonly string[]).includes(c[cName]) && (c[cType] === 'CE' || c[cType] === 'PE')) {
         const list = this.options.get(c[cName]) ?? [];
         list.push({ token, tradingsymbol: c[cSym], expiry: c[cExp], strike: Number(c[cStrike]), right: c[cType], lot: Number(c[cLot]) });
         this.options.set(c[cName], list);
@@ -146,7 +154,7 @@ export class KiteProvider implements MarketDataProvider {
       }
     }
     const missing = INDICES.map((i) => i.symbol).filter((s) => !this.tokens.has(s));
-    const opts = [...this.options].map(([u, l]) => `${u} ${l.length}`).join(', ');
+    const opts = [...this.options].map(([u, l]) => `${u} ${l.length}`).join(', ') + `; futures: ${[...this.futures].map(([u, l]) => `${u} ${l.length}`).join(', ') || 'none'}`;
     this.log(`Kite instruments loaded: ${this.tokens.size} symbols, options: ${opts || 'none'}${missing.length ? `; indices not found: ${missing.join(', ')}` : ''}`);
   }
 
@@ -241,6 +249,31 @@ export class KiteProvider implements MarketDataProvider {
       underlying, date: today, expiry: exp, expiries, lotSize: contracts[0]?.lot ?? null, spotPaise: spot,
       forwardPaise: F == null ? null : Math.round(F), atmStrikePaise: strikes[atmIndex] != null ? Math.round(strikes[atmIndex] * 100) : null, rows,
     };
+  }
+
+  /** Live index futures (all listed expiries, nearest first), streamed in full mode for OI; REST fills the first call. */
+  async liveFutures(underlying: LiveChainUnderlying): Promise<{ spotPaise: number | null; lot: number | null; contracts: LiveFuture[] }> {
+    const today = new Date(Date.now() + IST * 1000).toISOString().slice(0, 10);
+    const list = (this.futures.get(underlying) ?? []).filter((f) => f.expiry >= today).sort((a, b) => (a.expiry < b.expiry ? -1 : 1)).slice(0, 3);
+    this.ticker.subscribe(list.map((f) => f.token), 'full');
+    const [spotQuote] = await this.quotes([underlying]);
+    const missing = list.filter((f) => this.ticks.get(f.token)?.oi == null);
+    const rest = new Map<number, LiveFuture>();
+    if (missing.length) {
+      const json = await this.get<{ data: Record<string, { instrument_token: number; last_price: number; volume?: number; oi?: number; ohlc: { close: number } }> }>(
+        `/quote?${missing.map((f) => `i=${encodeURIComponent(`NFO:${f.tradingsymbol}`)}`).join('&')}`,
+      );
+      for (const q of Object.values(json.data ?? {})) {
+        const f = missing.find((m) => m.token === q.instrument_token);
+        if (f) rest.set(f.token, { expiry: f.expiry, ltpPaise: Math.round(q.last_price * 100), prevClosePaise: Math.round(q.ohlc.close * 100), oi: q.oi ?? 0, volume: q.volume ?? 0 });
+      }
+    }
+    const contracts = list.map((f): LiveFuture => {
+      const t = this.ticks.get(f.token);
+      if (t?.oi != null) return { expiry: f.expiry, ltpPaise: t.ltpPaise, prevClosePaise: t.closePaise, oi: t.oi, volume: t.volume ?? 0 };
+      return rest.get(f.token) ?? { expiry: f.expiry, ltpPaise: 0, prevClosePaise: 0, oi: 0, volume: 0 };
+    });
+    return { spotPaise: spotQuote ? Math.round(spotQuote.ltp * 100) : null, lot: list[0]?.lot ?? null, contracts };
   }
 
   /** Streams these symbols continuously (up to Kite's 3,000 per connection), whether or not anyone is watching. */

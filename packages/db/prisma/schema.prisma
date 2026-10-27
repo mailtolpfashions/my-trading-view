@@ -23,6 +23,8 @@ model User {
   payments      Payment[]
   liveUsage     LiveUsage[]
   paperAccount  PaperAccount?
+  alerts        Alert[]
+  alertEvents   AlertEvent[]
 
   @@map("user")
 }
@@ -213,6 +215,49 @@ model EodFetch {
   message   String?
   attempts  Int      @default(1)
   updatedAt DateTime @updatedAt
+}
+
+// ---- Alerts: price and indicator alerts per user ----
+
+model Alert {
+  id              String       @id @default(cuid())
+  userId          String
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  symbol          String
+  /// PRICE | RULES
+  kind            String
+  /// PRICE: { op: crossesAbove | crossesBelow, valuePaise }. RULES: { tf, rules } (a backtest RuleSet).
+  params          Json
+  note            String?
+  /// ACTIVE | PAUSED | TRIGGERED
+  status          String
+  /// once: stops after firing. every: fires again on the next crossing (PRICE) or the next bar (RULES).
+  repeat          String       @default("once")
+  lastTriggeredAt DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  events          AlertEvent[]
+
+  @@index([status])
+  @@index([userId])
+}
+
+model AlertEvent {
+  id          String    @id @default(cuid())
+  alertId     String
+  alert       Alert     @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  triggeredAt DateTime  @default(now())
+  /// The price (or bar close) that triggered the alert, in paise, and its market time (delayed for Free users).
+  pricePaise  Int
+  marketTime  DateTime
+  message     String
+  /// sent | not_configured | failed
+  emailStatus String
+  seenAt      DateTime?
+
+  @@index([userId, triggeredAt])
 }
 
 // ---- Signals: published rule-based strategies and every signal they ever issued ----

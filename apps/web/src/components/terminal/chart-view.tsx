@@ -19,11 +19,14 @@ import {
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import { X } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { heikinAshi, type Series } from '@mtv/indicators';
 import type { Candle, Timeframe } from '@mtv/shared';
+import { DrawingLayer, type AlertLine } from '@/lib/chart/drawings/layer';
+import { COLORS, TWO_POINT, hitTest, loadDrawings, logicalToTime, measureText, newId, saveDrawings, timeToLogical, type Drawing, type Point, type Tool } from '@/lib/chart/drawings/model';
 import { DOWN, UP, studyById, type PointColors } from '@/lib/chart/studies';
 import { fmt, tfLabel } from '@/lib/format';
+import { DrawingRail } from './drawing-rail';
 
 export type ChartType = 'candles' | 'bars' | 'ha' | 'line' | 'area';
 
@@ -49,6 +52,10 @@ type Props = {
   onTrade: (side: 'BUY' | 'SELL') => void;
   /** Open paper positions in this symbol, drawn as average-price lines like TradingView's position lines. */
   positions?: { product: string; qty: number; avgPricePaise: number }[];
+  /** Active price alerts on this symbol, drawn as dashed lines. */
+  alertLines?: AlertLine[];
+  /** The alert tool was clicked at this price. */
+  onAlertAt?: (price: number) => void;
 };
 
 type Built = { id: string; pane: number; series: ISeriesApi<SeriesType>[] };
@@ -64,6 +71,7 @@ export function ChartView(p: Props) {
   const viewKey = useRef('');
   const computed = useRef(new Map<string, { values: Record<string, Series>; colors?: PointColors }>());
   const indexByTime = useRef(new Map<number, number>());
+  const layer = useRef(new DrawingLayer());
   const [hover, setHover] = useState<number | null>(null);
   const [paneTops, setPaneTops] = useState<number[]>([]);
   const [, setVersion] = useState(0);
@@ -124,6 +132,7 @@ export function ChartView(p: Props) {
       : p.chartType === 'bars' ? chart.addSeries(BarSeries, { upColor: UP, downColor: DOWN })
       : chart.addSeries(CandlestickSeries, ohlc);
     mainRef.current.setData([]); // filled by the data effect below
+    mainRef.current.attachPrimitive(layer.current); // drawings follow the main series
   }, [p.chartType]);
 
   // ---- data, studies and view ----
@@ -132,6 +141,7 @@ export function ChartView(p: Props) {
     if (!chart || !main) return;
     const c = p.candles;
     indexByTime.current = new Map(c.map((b, i) => [toChart(b.time), i]));
+    layer.current.set({ times: c.map((b) => b.time) });
 
     const shown = p.chartType === 'ha' ? heikinAshi(c) : c;
     main.setData(
@@ -230,6 +240,148 @@ export function ChartView(p: Props) {
     });
   }, [p.symbol, p.name, p.tf]);
 
+  // ---- drawings: trend lines, rays, horizontal/vertical lines, zones, notes, measure, alert-by-click ----
+  const [tool, setTool] = useState<Tool>('cursor');
+  const [drawings, setDrawings] = useState<Drawing[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [textAt, setTextAt] = useState<{ x: number; y: number; point: Point } | null>(null);
+  const live = useRef({ tool, drawings, selected, start: null as Point | null, measureDone: false });
+  live.current.tool = tool; live.current.drawings = drawings; live.current.selected = selected;
+  const loadedFor = useRef('');
+
+  // Each symbol keeps its own drawings, shown on every timeframe.
+  useEffect(() => {
+    loadedFor.current = p.symbol;
+    setDrawings(loadDrawings(p.symbol));
+    setSelected(null);
+    live.current.start = null;
+    layer.current.set({ preview: null, measure: null });
+  }, [p.symbol]);
+  useEffect(() => { if (loadedFor.current === p.symbol) saveDrawings(p.symbol, drawings); }, [drawings]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { layer.current.set({ drawings, selected }); }, [drawings, selected]);
+  useEffect(() => { layer.current.set({ alerts: p.alertLines ?? [] }); }, [p.alertLines]);
+
+  const pickTool = (t: Tool) => {
+    setTool(t);
+    live.current.start = null;
+    live.current.measureDone = false;
+    layer.current.set({ preview: null, measure: null });
+    if (t !== 'cursor') setSelected(null);
+  };
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    /** Chart point (time, price) under pane-0 coordinates, or null outside the data. */
+    const pointAt = (x: number, y: number): Point | null => {
+      const main = mainRef.current, ts = chart.timeScale();
+      const x0 = ts.logicalToCoordinate(0 as never), x1 = ts.logicalToCoordinate(1 as never);
+      const price = main?.coordinateToPrice(y);
+      if (x0 == null || x1 == null || x1 === x0 || price == null) return null;
+      const time = logicalToTime(layer.current.state.times, (x - x0) / (x1 - x0));
+      return time == null ? null : { time, price };
+    };
+    const bars = (a: Point, b: Point) => Math.abs((timeToLogical(layer.current.state.times, b.time) ?? 0) - (timeToLogical(layer.current.state.times, a.time) ?? 0));
+    const add = (d: Drawing) => { setDrawings((list) => [...list, d]); setSelected(d.id); };
+
+    /** A click with a drawing tool at pane-0 coordinates (detected from pointer down/up, see below). */
+    const onClick = (at: { x: number; y: number }) => {
+      const L = live.current;
+      if (L.tool === 'cursor') return;
+      const e = { point: at };
+      const pt = pointAt(at.x, at.y);
+      if (!pt) return;
+      const color = COLORS[0];
+      if (L.tool === 'alert') { p.onAlertAt?.(Math.round(pt.price * 20) / 20); pickTool('cursor'); return; }
+      if (L.tool === 'hline' || L.tool === 'vline') { add({ id: newId(), kind: L.tool, p1: pt, color }); pickTool('cursor'); return; }
+      // Opened after this pointer event finishes, so the release doesn't immediately take focus away from the box.
+      if (L.tool === 'text') { setTimeout(() => setTextAt({ x: e.point.x, y: e.point.y, point: pt }), 0); return; }
+      if (L.tool === 'measure') {
+        if (!L.start || L.measureDone) { L.start = pt; L.measureDone = false; layer.current.set({ measure: { from: pt, to: pt, text: measureText(pt, pt, 0) } }); }
+        else { L.measureDone = true; layer.current.set({ measure: { from: L.start, to: pt, text: measureText(L.start, pt, bars(L.start, pt)) } }); }
+        return;
+      }
+      if (TWO_POINT.includes(L.tool)) {
+        if (!L.start) { L.start = pt; layer.current.set({ preview: { id: 'preview', kind: L.tool as Drawing['kind'], p1: pt, p2: pt, color } }); }
+        else { add({ id: newId(), kind: L.tool as Drawing['kind'], p1: L.start, p2: pt, color }); L.start = null; layer.current.set({ preview: null }); pickTool('cursor'); }
+      }
+    };
+    const onMove = (e: MouseEventParams<Time>) => {
+      const L = live.current;
+      if (!L.start || !e.point) return;
+      const pt = pointAt(e.point.x, e.point.y);
+      if (!pt) return;
+      if (L.tool === 'measure' && !L.measureDone) layer.current.set({ measure: { from: L.start, to: pt, text: measureText(L.start, pt, bars(L.start, pt)) } });
+      else if (layer.current.state.preview) layer.current.set({ preview: { ...layer.current.state.preview, p2: pt } });
+    };
+    chart.subscribeCrosshairMove(onMove);
+
+    // Pointer handling, captured before the chart sees it. Drawing tools: a press and release in the same spot is a
+    // click (the chart's own click event can be swallowed right after another interaction). Cursor tool: select and
+    // drag drawings, without also panning the chart.
+    const el = host.current!;
+    let drag: { id: string; handle: 'p1' | 'p2' | 'body'; from: Point; orig: Drawing } | null = null;
+    let press: { x: number; y: number } | null = null;
+    const local = (e: PointerEvent) => { const r = el.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+    const inMainPane = (xy: { x: number; y: number }) => xy.y >= 0 && xy.y <= (chart.panes()[0]?.getHeight() ?? 0) && xy.x >= 0 && xy.x <= chart.timeScale().width();
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const xy = local(e);
+      if (!inMainPane(xy)) return;
+      if (live.current.tool !== 'cursor') { press = xy; return; }
+      const hit = hitTest(layer.current.placeAll(live.current.drawings), xy, chart.timeScale().width());
+      if (!hit) { setSelected(null); return; }
+      setSelected(hit.id);
+      const from = pointAt(xy.x, xy.y), orig = live.current.drawings.find((d) => d.id === hit.id);
+      if (!from || !orig) return;
+      drag = { id: hit.id, handle: hit.handle, from, orig };
+      chart.applyOptions({ handleScroll: false, handleScale: false });
+      e.stopPropagation();
+    };
+    const onDrag = (e: PointerEvent) => {
+      if (!drag) return;
+      const xy = local(e), pt = pointAt(xy.x, xy.y);
+      if (!pt) return;
+      const { orig, handle, from } = drag;
+      const shift = (q: Point): Point => ({ time: q.time + (pt.time - from.time), price: q.price + (pt.price - from.price) });
+      const next: Drawing = handle === 'p1' ? { ...orig, p1: pt } : handle === 'p2' ? { ...orig, p2: pt } : { ...orig, p1: shift(orig.p1), p2: orig.p2 && shift(orig.p2) };
+      setDrawings((list) => list.map((d) => (d.id === next.id ? next : d)));
+    };
+    const onUp = (e: PointerEvent) => {
+      if (press) {
+        const xy = local(e), at = press;
+        press = null;
+        if (Math.hypot(xy.x - at.x, xy.y - at.y) <= 5) onClick(at); // a click, not a pan
+      }
+      if (!drag) return;
+      drag = null;
+      chart.applyOptions({ handleScroll: true, handleScale: true });
+    };
+    el.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('pointermove', onDrag);
+    window.addEventListener('pointerup', onUp);
+
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).closest('input, textarea, select')) return;
+      if (e.key === 'Escape') { pickTool('cursor'); setSelected(null); setTextAt(null); }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && live.current.selected) {
+        const id = live.current.selected;
+        setDrawings((list) => list.filter((d) => d.id !== id));
+        setSelected(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      chart.unsubscribeCrosshairMove(onMove);
+      el.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('pointermove', onDrag);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [p.onAlertAt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selectedDrawing = drawings.find((d) => d.id === selected);
+
   // ---- legend ----
   const c = p.candles;
   const i = hover ?? c.length - 1;
@@ -245,7 +397,7 @@ export function ChartView(p: Props) {
     const st = studyById(id)!;
     const out = computed.current.get(id);
     return (
-      <div key={id} className="pointer-events-auto flex items-center gap-1.5 text-[12px] text-ink-2">
+      <div key={id} className="pointer-events-auto flex w-fit items-center gap-1.5 text-[12px] text-ink-2">
         <span>{st.name}</span>
         {st.lines.map((ln) => {
           const v = out?.values[ln.key]?.[i];
@@ -260,8 +412,34 @@ export function ChartView(p: Props) {
   };
 
   return (
-    <div className="relative h-full w-full">
-      <div ref={host} className="absolute inset-0" />
+    <div className="flex h-full w-full">
+    <DrawingRail tool={tool} onTool={pickTool} count={drawings.length} onClearAll={() => { setDrawings([]); setSelected(null); }} />
+    <div className="relative h-full min-w-0 flex-1">
+      <div ref={host} className={`absolute inset-0 ${tool !== 'cursor' ? 'cursor-crosshair' : ''}`} />
+      {selectedDrawing && (
+        <div className="absolute top-2 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full bg-panel px-2 py-1 shadow-[var(--shadow-pop)]" role="toolbar" aria-label="Selected drawing">
+          {COLORS.map((col) => (
+            <button key={col} type="button" onClick={() => setDrawings((list) => list.map((d) => (d.id === selectedDrawing.id ? { ...d, color: col } : d)))}
+              className={`h-5 w-5 rounded-full border-2 ${selectedDrawing.color === col ? 'border-ink' : 'border-transparent'}`} style={{ background: col }} aria-label={`Colour ${col}`} />
+          ))}
+          <span className="mx-1 h-4 w-px bg-line" />
+          <button type="button" onClick={() => { setDrawings((list) => list.filter((d) => d.id !== selectedDrawing.id)); setSelected(null); }}
+            className="rounded-full p-1 text-ink-2 hover:bg-down-soft hover:text-down" aria-label="Delete drawing" title="Delete (Del)"><Trash2 size={14} /></button>
+        </div>
+      )}
+      {textAt && (
+        <form className="absolute z-20" style={{ left: textAt.x, top: textAt.y - 16 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const text = String(new FormData(e.currentTarget).get('note') ?? '').trim();
+            if (text) { const d: Drawing = { id: newId(), kind: 'text', p1: textAt.point, text: text.slice(0, 80), color: COLORS[4] }; setDrawings((list) => [...list, d]); setSelected(d.id); }
+            setTextAt(null);
+            pickTool('cursor');
+          }}>
+          <input name="note" autoFocus maxLength={80} placeholder="Note, then Enter" onBlur={(e) => { if (e.currentTarget.value.trim()) e.currentTarget.form?.requestSubmit(); }}
+            className="h-8 w-56 rounded-[8px] border border-ink bg-panel px-2 text-[13px] shadow-[var(--shadow-pop)] outline-none" />
+        </form>
+      )}
       {bar && (
         <div className="pointer-events-none absolute top-1.5 left-2.5 z-10 flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-x-2 text-[13px] whitespace-nowrap">
@@ -273,7 +451,7 @@ export function ChartView(p: Props) {
             </span>
           </div>
           {last && (
-            <div className="pointer-events-auto flex items-center gap-1">
+            <div className="pointer-events-auto flex w-fit items-center gap-1">
               <button type="button" onClick={() => p.onTrade('SELL')} className="flex flex-col items-center rounded-md border border-down bg-white px-2.5 py-0.5 text-[12.5px] leading-tight font-bold text-down hover:bg-down hover:text-white">
                 <span className="num">{fmt(last.close)}</span><span className="text-[9.5px] font-semibold">SELL</span>
               </button>
@@ -291,6 +469,7 @@ export function ChartView(p: Props) {
           {row(b.id)}
         </div>
       ))}
+    </div>
     </div>
   );
 }
