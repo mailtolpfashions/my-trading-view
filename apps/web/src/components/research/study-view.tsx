@@ -76,7 +76,7 @@ export function StudyView() {
   );
 
   return (
-    <div className="grid min-h-0 grid-cols-[400px_1fr] gap-2">
+    <div className="grid grid-cols-1 gap-2 lg:min-h-0 lg:grid-cols-[400px_1fr]">
       <section className="panel flex min-h-0 flex-col gap-3 overflow-auto p-3">
         <h2 className="text-[14px] font-extrabold tracking-[-0.02em]">Condition study</h2>
         <p className="text-[12px] leading-snug text-ink-2">Finds every day the condition was true and shows what happened next, year by year, compared with all days.</p>
@@ -122,7 +122,7 @@ export function StudyView() {
                 {totals && ` · overall up after ${result.horizons[h]}: ${share(totals[h].up, totals[h].n)} (any day ${share(totals[h].bUp, totals[h].bN)})`}
               </span>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
+            <div className="max-lg:max-h-[75dvh] min-h-0 flex-1 overflow-auto px-3 pb-3">
               {tab === 'Years' && table(result.years, 'YEAR')}
               {tab === 'Months' && table(result.months, 'MONTH')}
               {tab === 'Data breaks' && (

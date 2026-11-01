@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  CandlestickChart, ChevronsLeft, ChevronsRight, FlaskConical, History, Layers, LayoutDashboard, Microscope, Search, TrendingUp,
+  CandlestickChart, ChevronsLeft, ChevronsRight, FlaskConical, History, Layers, LayoutDashboard, Menu, Microscope, Search, TrendingUp, X,
 } from 'lucide-react';
 import { LogoMark } from '@/components/logo';
 import { SymbolSearch } from '@/components/terminal/symbol-search';
@@ -36,6 +36,10 @@ export function AppShell({ user, children }: { user: TerminalUser | null; childr
   const router = useRouter();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = usePersisted('mtv.sidebar.collapsed', false);
+  // Below lg the sidebar is a drawer; it closes whenever the page changes.
+  const [drawer, setDrawer] = useState(false);
+  useEffect(() => { setDrawer(false); }, [pathname]);
+  const labels = drawer || !collapsed;
   const [watch, setWatch] = usePersisted<string[]>('mtv.watchlist', DEFAULT_WATCH);
   const [search, setSearch] = useState<null | 'chart' | 'watch'>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -68,15 +72,19 @@ export function AppShell({ user, children }: { user: TerminalUser | null; childr
 
   return (
     <ShellContext.Provider value={shell}>
-      <div className="grid h-dvh grid-cols-[auto_minmax(0,1fr)] overflow-hidden bg-canvas">
-        {/* sidebar */}
-        <nav aria-label="Main" className={`flex flex-col border-r border-line bg-panel transition-[width] ${collapsed ? 'w-[76px]' : 'w-[76px] lg:w-[256px]'}`}>
-          <Link href="/" className="mx-3 flex h-[76px] shrink-0 items-center gap-3 border-b border-dashed border-line-strong px-2.5" aria-label="Nandibull home">
-            <LogoMark size={36} />
-            {!collapsed && <span className="hidden text-[21px] font-bold tracking-[-0.03em] whitespace-nowrap lg:inline">Nandibull</span>}
-          </Link>
+      <div className="grid h-dvh grid-cols-1 overflow-hidden bg-canvas lg:grid-cols-[auto_minmax(0,1fr)]">
+        {/* sidebar: a slide-in drawer below lg, a fixed column from lg */}
+        {drawer && <div className="fixed inset-0 z-40 bg-scrim lg:hidden" onClick={() => setDrawer(false)} aria-hidden="true" />}
+        <nav aria-label="Main" className={`flex-col border-r border-line bg-panel ${drawer ? 'fixed inset-y-0 left-0 z-50 flex w-[272px] shadow-[var(--shadow-pop)]' : 'hidden'} lg:static lg:z-auto lg:flex lg:shadow-none lg:transition-[width] ${collapsed ? 'lg:w-[76px]' : 'lg:w-[256px]'}`}>
+          <div className="mx-3 flex h-[76px] shrink-0 items-center border-b border-dashed border-line-strong">
+            <Link href="/" className="flex items-center gap-3 px-2.5" aria-label="Nandibull home">
+              <LogoMark size={36} />
+              {labels && <span className="text-[21px] font-bold tracking-[-0.03em] whitespace-nowrap">Nandibull</span>}
+            </Link>
+            {drawer && <button type="button" onClick={() => setDrawer(false)} aria-label="Close menu" className="ml-auto grid h-10 w-10 place-items-center rounded-[12px] text-muted hover:bg-raised lg:hidden"><X size={20} /></button>}
+          </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pt-4">
-            {!collapsed && <p className="hidden px-3 pb-2 text-[11.5px] font-semibold text-muted lg:block">Workspace</p>}
+            {labels && <p className="px-3 pb-2 text-[11.5px] font-semibold text-muted">Workspace</p>}
             <ul className="flex flex-col gap-1">
               {NAV.map((n) => {
                 const on = pathname === n.match || pathname.startsWith(n.match + '/');
@@ -89,11 +97,11 @@ export function AppShell({ user, children }: { user: TerminalUser | null; childr
                         ? 'bg-accent-soft font-bold text-accent-deep before:absolute before:top-2 before:bottom-2 before:-left-3 before:w-1 before:rounded-r-full before:bg-accent'
                         : 'font-medium text-ink-2 hover:bg-raised hover:text-ink'}`}>
                       <Icon size={19} aria-hidden="true" className="shrink-0" />
-                      {!collapsed && <span className="hidden lg:inline">{n.label}</span>}
-                      {!collapsed && n.soon && <span className="ml-auto hidden rounded-full bg-raised px-2 py-0.5 text-[10.5px] font-semibold text-muted lg:inline">Soon</span>}
+                      {labels && <span>{n.label}</span>}
+                      {labels && n.soon && <span className="ml-auto rounded-full bg-raised px-2 py-0.5 text-[10.5px] font-semibold text-muted">Soon</span>}
                     </Link>
-                    {n.href === '/research' && !collapsed && (
-                      <ul className="my-1 ml-[30px] hidden flex-col border-l border-line-strong lg:flex">
+                    {n.href === '/research' && labels && (
+                      <ul className="my-1 ml-[30px] flex flex-col border-l border-line-strong">
                         {RESEARCH_VIEWS.map((v) => {
                           const subOn = pathname === `/research/${v.slug}`;
                           return (
@@ -109,8 +117,8 @@ export function AppShell({ user, children }: { user: TerminalUser | null; childr
                 );
               })}
             </ul>
-            {!collapsed && (
-              <div className="mt-auto mb-3 hidden rounded-[18px] bg-accent-soft p-4 lg:block" title="All prices are NSE's official end-of-day data">
+            {labels && (
+              <div className="mt-auto mb-3 rounded-[18px] bg-accent-soft p-4" title="All prices are NSE's official end-of-day data">
                 <p className="text-[11.5px] font-semibold text-muted">Data as of</p>
                 <p className="num mt-0.5 text-[16px] font-bold">{asOf ? fmtTradingDay(asOf) : 'Loading…'}</p>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-accent/25"><div className={`h-full bg-accent ${asOf ? 'w-full' : 'w-1/3 animate-pulse'}`} /></div>
@@ -124,30 +132,34 @@ export function AppShell({ user, children }: { user: TerminalUser | null; childr
           </button>
         </nav>
 
-        <div className="grid min-w-0 grid-rows-[76px_40px_minmax(0,1fr)] overflow-hidden">
+        <div className="grid min-w-0 grid-rows-[64px_minmax(0,1fr)] overflow-hidden md:grid-rows-[76px_40px_minmax(0,1fr)]">
           {/* top bar */}
-          <header className="flex items-center gap-2.5 px-4 sm:px-6">
-            <button type="button" onClick={() => setSearch('chart')} className="flex h-12 w-full max-w-[440px] items-center gap-2.5 rounded-[14px] border border-line bg-panel pr-1.5 pl-4 text-[14px] text-muted hover:border-line-strong">
-              <Search size={17} aria-hidden="true" /> Search a symbol, e.g. RELIANCE
-              <kbd className="num ml-auto rounded-[8px] border border-line-strong px-2 py-1 text-[11px] font-semibold text-muted">Ctrl K</kbd>
+          <header className="flex min-w-0 items-center gap-2 px-3 sm:gap-2.5 sm:px-6">
+            <button type="button" onClick={() => setDrawer(true)} aria-label="Open menu" className="grid h-11 w-11 shrink-0 place-items-center rounded-[12px] border border-line bg-panel text-ink-2 lg:hidden"><Menu size={20} /></button>
+            <Link href="/" aria-label="Nandibull home" className="shrink-0 sm:hidden"><LogoMark size={32} /></Link>
+            <button type="button" onClick={() => setSearch('chart')} aria-label="Search symbols"
+              className="ml-auto grid h-11 w-11 shrink-0 place-items-center rounded-[12px] border border-line bg-panel text-muted sm:ml-0 sm:flex sm:h-12 sm:w-full sm:max-w-[440px] sm:items-center sm:gap-2.5 sm:rounded-[14px] sm:pr-1.5 sm:pl-4 sm:text-[14px] hover:border-line-strong">
+              <Search size={17} aria-hidden="true" /> <span className="hidden truncate sm:inline">Search a symbol, e.g. RELIANCE</span>
+              <kbd className="num ml-auto hidden rounded-[8px] border border-line-strong px-2 py-1 text-[11px] font-semibold text-muted md:inline">Ctrl K</kbd>
             </button>
-            <span className="ml-auto hidden h-9 items-center gap-2 rounded-full bg-up-soft px-3.5 text-[12.5px] font-semibold whitespace-nowrap text-up md:flex" title="All prices are NSE's official end-of-day data">
+            <span className="ml-auto hidden h-9 items-center gap-2 rounded-full bg-up-soft px-3.5 text-[12.5px] font-semibold whitespace-nowrap text-up xl:flex" title="All prices are NSE's official end-of-day data">
               <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" /> EOD{asOf ? ` · ${fmtTradingDay(asOf)}` : ''}
             </span>
             {!user && (
-              <span className="hidden h-9 items-center rounded-full bg-panel px-3.5 text-[12.5px] font-semibold whitespace-nowrap text-ink-2 shadow-[var(--shadow-panel)] lg:flex"
+              <span className="hidden h-9 items-center rounded-full bg-panel px-3.5 text-[12.5px] font-semibold whitespace-nowrap text-ink-2 shadow-[var(--shadow-panel)] xl:flex"
                 title="Backtests, studies, scans and simulations count as runs. Charts, option chains and the strategy builder are unlimited.">
                 {runs ? `${runs.remaining} free run${runs.remaining === 1 ? '' : 's'} left today` : 'Free daily runs'}
               </span>
             )}
+            <span className="hidden sm:ml-auto sm:block xl:hidden" />
             <ThemeToggle />
             {user ? <UserMenu user={user} /> : (
-              <Link href={signInHref} className="flex h-11 items-center rounded-[12px] bg-inverse px-5 text-[13.5px] font-semibold whitespace-nowrap text-on-inverse hover:bg-inverse-hover">Sign in</Link>
+              <Link href={signInHref} className="flex h-11 shrink-0 items-center rounded-[12px] bg-inverse px-3.5 text-[13.5px] font-semibold whitespace-nowrap text-on-inverse hover:bg-inverse-hover sm:px-5">Sign in</Link>
             )}
           </header>
 
-          {/* market pulse: auto margins centre the row, yet keep it scrollable from the start on narrow screens */}
-          <div className="flex items-center gap-1.5 overflow-x-auto px-4 whitespace-nowrap [scrollbar-width:none] sm:px-6 [&>*:first-child]:ml-auto [&>*:last-child]:mr-auto" role="region" aria-label="Market pulse">
+          {/* market pulse (from md): auto margins centre the row, yet keep it scrollable from the start when narrow */}
+          <div className="hidden items-center gap-1.5 overflow-x-auto px-4 whitespace-nowrap [scrollbar-width:none] sm:px-6 md:flex [&>*:first-child]:ml-auto [&>*:last-child]:mr-auto" role="region" aria-label="Market pulse">
             <span className="eyebrow pr-1" title="Last official NSE closing prices; this site shows no live data">NSE close{asOf ? ` · ${fmtTradingDay(asOf)}` : ''}</span>
             {PULSE.map((s) => {
               const q = quotes[s];
@@ -161,7 +173,8 @@ export function AppShell({ user, children }: { user: TerminalUser | null; childr
             })}
           </div>
 
-          <main className="grid min-h-0 grid-rows-[minmax(0,1fr)] px-3 pb-3 sm:px-6 sm:pb-5">{children}</main>
+          {/* below lg the page scrolls as one column; from lg each page fills the window and scrolls inside its panels */}
+          <main className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-3 pb-4 sm:px-6 sm:pb-5 lg:grid lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden">{children}</main>
         </div>
       </div>
 

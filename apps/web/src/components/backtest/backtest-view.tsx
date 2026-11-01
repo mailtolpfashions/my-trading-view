@@ -48,7 +48,7 @@ export function BacktestView() {
   }
 
   return (
-    <div className="grid min-h-0 grid-cols-[400px_1fr] gap-2">
+    <div className="grid grid-cols-1 gap-2 lg:min-h-0 lg:grid-cols-[400px_1fr]">
       <section className="panel flex min-h-0 flex-col overflow-hidden">
         <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
           <FlaskConical size={16} aria-hidden="true" />

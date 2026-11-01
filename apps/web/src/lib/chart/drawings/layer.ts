@@ -42,8 +42,8 @@ const fmtTime = (t: number, daily = false) => {
 };
 /** TradingView's default colour for each Fibonacci level. */
 const FIB_COLORS: Record<number, string> = {
-  0: '#787b86', 0.236: '#f23645', 0.382: '#ff9800', 0.5: '#4caf50', 0.618: '#089981', 0.786: '#00bcd4',
-  1: '#787b86', 1.618: '#2962ff', 2.618: '#f23645', 3.618: '#9c27b0', 4.236: '#e91e63',
+  0: '#8f877b', 0.236: '#e5484d', 0.382: '#f59a0b', 0.5: '#0a9b76', 0.618: '#2f5bff', 0.786: '#7346ff',
+  1: '#8f877b', 1.618: '#2f5bff', 2.618: '#e5484d', 3.618: '#7346ff', 4.236: '#c2410c',
 };
 const withAlpha = (hex: string, a: number) => `${hex}${Math.round(a * 255).toString(16).padStart(2, '0')}`;
 

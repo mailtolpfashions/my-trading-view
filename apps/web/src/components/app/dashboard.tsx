@@ -41,16 +41,16 @@ export function Dashboard() {
             <h1 className="text-[30px] leading-tight font-bold tracking-[-0.03em] sm:text-[34px]">Market overview</h1>
             <p className="mt-1 text-[14px] text-muted">{data ? `NSE closing data for ${fmtDate(data.asOf)}` : error ? '' : 'Loading…'}</p>
           </div>
-          <div className="ml-auto flex gap-2.5">
-            <Link href={chartHref('NIFTY')} className="flex h-11 items-center gap-2 rounded-[12px] bg-inverse px-5 text-[14px] font-semibold text-on-inverse hover:bg-inverse-hover">
+          <div className="flex w-full gap-2.5 sm:ml-auto sm:w-auto">
+            <Link href={chartHref('NIFTY')} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-[12px] bg-inverse px-5 text-[14px] font-semibold text-on-inverse hover:bg-inverse-hover sm:flex-none">
               <CandlestickChart size={17} aria-hidden="true" /> Open chart
             </Link>
-            <Link href="/backtest" className="flex h-11 items-center rounded-[12px] border border-accent px-5 text-[14px] font-semibold text-accent-deep hover:bg-accent-soft">Run backtest</Link>
+            <Link href="/backtest" className="flex h-11 flex-1 items-center justify-center rounded-[12px] border border-accent px-5 text-[14px] font-semibold text-accent-deep hover:bg-accent-soft sm:flex-none">Run backtest</Link>
           </div>
         </div>
         {error && <p role="alert" className="rounded-[14px] bg-down-soft px-4 py-3 text-[13.5px] font-semibold text-down">{error}</p>}
 
-        <section aria-label="Indices" className="grid grid-cols-2 gap-5 md:grid-cols-3 2xl:grid-cols-6">
+        <section aria-label="Indices" className="grid grid-cols-2 gap-3 sm:gap-5 md:grid-cols-3 2xl:grid-cols-6">
           {(data?.indices ?? []).map((c) => <IndexTile key={c.symbol} c={c} />)}
           {!data && !error && Array.from({ length: 6 }, (_, i) => <div key={i} className="panel h-[176px] animate-pulse" />)}
         </section>
@@ -93,13 +93,13 @@ function IndexTile({ c }: { c: IndexCard }) {
   const at = span > 0 ? ((c.close - c.low) / span) * 100 : 50;
   const Trend = (c.change ?? 0) < 0 ? TrendingDown : TrendingUp;
   return (
-    <Link href={chartHref(c.symbol)} className="panel block p-5 transition-shadow hover:shadow-[var(--shadow-pop)]">
+    <Link href={chartHref(c.symbol)} className="panel block min-w-0 p-4 transition-shadow hover:shadow-[var(--shadow-pop)] sm:p-5">
       <div className="card-head !mb-3 !pb-3">
         <span className="truncate text-[15.5px] font-semibold">{PULSE_NAMES[c.symbol] ?? c.symbol}</span>
         <span className="ml-auto text-[11px] font-semibold text-muted">NSE</span>
       </div>
-      <p className="num text-[23px] font-bold tracking-[-0.02em]">{fmt(c.close)}</p>
-      <p className={`num mt-1 flex items-center gap-1.5 text-[13px] font-semibold ${tone(c.change)}`}>
+      <p className="num text-[19px] font-bold tracking-[-0.02em] sm:text-[23px]">{fmt(c.close)}</p>
+      <p className={`num mt-1 flex flex-wrap items-center gap-x-1.5 text-[12px] font-semibold sm:text-[13px] ${tone(c.change)}`}>
         {c.change != null && <Trend size={15} aria-hidden="true" />}
         {c.change == null ? '—' : `${signed(c.change)} (${signed(c.changePct!)}%)`}
       </p>

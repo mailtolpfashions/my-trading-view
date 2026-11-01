@@ -70,9 +70,9 @@ export function WhatIf({ state, onChange, legs, modelLegs, spotPaise, carry, max
         <button type="button" onClick={() => onChange({ ...state, spotPaise, days: Math.min(1, maxDays), shiftPts: 0 })} className="ml-auto rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold text-muted hover:bg-raised">Reset</button>
       </div>
 
-      <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-[12px]">
+      <div className="grid grid-cols-1 items-center gap-x-3 gap-y-1.5 text-[12px] sm:grid-cols-[auto_1fr] sm:gap-y-2">
         <span className="font-semibold">NIFTY at</span>
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <input type="number" aria-label="NIFTY level" className="num h-7 w-24 rounded-md border border-line px-1.5 text-right" value={Math.round(S / 100)}
             onChange={(e) => { const v = Number(e.target.value); if (v > 0) set({ spotPaise: Math.round(v * 100) }); }} />
           <span className={`num w-28 font-semibold ${move > 0 ? 'text-up' : move < 0 ? 'text-down' : 'text-muted'}`}>{move >= 0 ? '+' : '−'}{fmt(Math.abs(move) / 100)} ({movePct >= 0 ? '+' : '−'}{Math.abs(movePct).toFixed(2)}%)</span>
@@ -80,19 +80,19 @@ export function WhatIf({ state, onChange, legs, modelLegs, spotPaise, carry, max
             <button key={pts} type="button" onClick={() => set({ spotPaise: S + pts * 100 })}
               className={`num rounded-full px-2 py-0.5 text-[11.5px] font-bold ${pts < 0 ? 'bg-down-soft text-down' : 'bg-up-soft text-up'}`}>{pts > 0 ? '+' : '−'}{Math.abs(pts)}</button>
           ))}
-          <input type="range" aria-label="NIFTY move" className="min-w-40 flex-1 accent-ink" min={-10} max={10} step={0.1} value={Math.max(-10, Math.min(10, movePct))}
+          <input type="range" aria-label="NIFTY move" className="w-full min-w-0 flex-1 accent-ink sm:min-w-40" min={-10} max={10} step={0.1} value={Math.max(-10, Math.min(10, movePct))}
             onChange={(e) => set({ spotPaise: Math.round(spotPaise * (1 + Number(e.target.value) / 100)) })} />
         </div>
 
         <span className="font-semibold">On</span>
-        <div className="flex items-center gap-2">
-          <input type="range" aria-label="Days ahead" className="min-w-40 flex-1 accent-ink" min={0} max={Math.max(0, maxDays)} step={1} value={Math.min(state.days, maxDays)}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <input type="range" aria-label="Days ahead" className="w-full min-w-0 flex-1 accent-ink sm:min-w-40" min={0} max={Math.max(0, maxDays)} step={1} value={Math.min(state.days, maxDays)}
             onChange={(e) => set({ days: Number(e.target.value) })} />
-          <span className="num w-44 text-[11.5px]">{state.days === 0 ? `now (close of ${fmtDate(chainDate)})` : `close of ${fmtDate(addDays(chainDate, state.days))} (+${state.days}d)`}</span>
+          <span className="num text-[11.5px] sm:w-44">{state.days === 0 ? `now (close of ${fmtDate(chainDate)})` : `close of ${fmtDate(addDays(chainDate, state.days))} (+${state.days}d)`}</span>
         </div>
 
         <span className="font-semibold">IV</span>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <select aria-label="IV model" className="h-7 rounded-full bg-raised px-2.5 text-[12px] font-semibold" value={state.model} onChange={(e) => set({ model: e.target.value as IvModel })}>
             {IV_MODELS.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>

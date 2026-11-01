@@ -12,11 +12,11 @@ import { RESEARCH_VIEWS, type ResearchSlug } from '@/lib/research-views';
 export function ResearchModule({ view }: { view: ResearchSlug }) {
   const { openChart } = useShell();
   return (
-    <div className="grid min-h-0 grid-rows-[auto_1fr] gap-2">
-      <nav aria-label="Research views" className="flex justify-self-start rounded-full bg-panel p-1 shadow-[var(--shadow-panel)]">
+    <div className="grid min-h-0 grid-cols-1 grid-rows-[auto_1fr] gap-2">
+      <nav aria-label="Research views" className="flex flex-wrap justify-self-start rounded-[20px] bg-panel p-1 shadow-[var(--shadow-panel)]">
         {RESEARCH_VIEWS.map((v) => (
           <Link key={v.slug} href={`/research/${v.slug}`} aria-current={v.slug === view ? 'page' : undefined}
-            className={`rounded-full px-3 py-1 text-[12.5px] font-semibold ${v.slug === view ? 'bg-inverse text-on-inverse' : 'text-ink-2 hover:bg-raised'}`}>{v.label}</Link>
+            className={`rounded-full px-3 py-1 text-[12.5px] font-semibold whitespace-nowrap ${v.slug === view ? 'bg-inverse text-on-inverse' : 'text-ink-2 hover:bg-raised'}`}>{v.label}</Link>
         ))}
       </nav>
       {view === 'scanner' ? <ScannerView onOpenChart={openChart} /> : view === 'fii' ? <FiiFootprints /> : view === 'study' ? <StudyView /> : <NiftyResearch />}

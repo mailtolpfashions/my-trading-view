@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { AreaSeries, createChart, type UTCTimestamp } from 'lightweight-charts';
 import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
-import type { OptionLegSpec, OptionsStrategy } from '@mtv/backtest';
+import type { OptionLegSpec, OptionsStrategy, OptionsTrade } from '@mtv/backtest';
 import { formatRupees } from '@mtv/paper';
 import { fmt } from '@/lib/format';
 import { CHART_COLORS, useTheme } from '@/lib/theme';
@@ -56,6 +56,8 @@ export function OptionsBacktest() {
   const [s, setS] = useState<OptionsStrategy>(() => structuredClone(OPTION_PRESETS[0]));
   const [coverage, setCoverage] = useState<FnoCoverage | null>(null);
   const [data, setData] = useState<OptionsBacktestResponse | null>(null);
+  // The exit rules the shown result was run with (the form may have changed since).
+  const [ranExit, setRanExit] = useState<OptionsStrategy['exit'] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -67,14 +69,14 @@ export function OptionsBacktest() {
 
   async function run() {
     setBusy(true); setError(null);
-    try { setData(await runOptionsBacktestApi(s)); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    try { const exit = structuredClone(s.exit); setData(await runOptionsBacktestApi(s)); setRanExit(exit); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
 
   const e = s.entry;
   const num = (v: string) => (v === '' ? undefined : Number(v));
 
   return (
-    <div className="grid min-h-0 grid-cols-[440px_1fr] gap-2">
+    <div className="grid grid-cols-1 gap-2 lg:min-h-0 lg:grid-cols-[440px_1fr]">
       <section className="panel flex min-h-0 flex-col overflow-hidden">
         <form className="flex min-h-0 flex-1 flex-col" onSubmit={(ev) => { ev.preventDefault(); void run(); }}>
           <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
@@ -131,7 +133,7 @@ export function OptionsBacktest() {
                 <label>Max trading days held<input className={`${input} mt-1 w-full`} type="number" min="1" placeholder="Off" value={s.exit.holdDays ?? ''} onChange={(ev) => setS({ ...s, exit: { ...s.exit, holdDays: num(ev.target.value) } })} /></label>
               </div>
               <Rules title="Exit signal" optional rules={s.exit.signal ?? { match: 'any', conditions: [] }} onChange={(signal) => setS({ ...s, exit: { ...s.exit, signal: signal.conditions.length ? signal : undefined } })} />
-              <p className="text-[11px] leading-snug text-muted">Stops and targets are checked at the daily close. Intraday stops need minute data.</p>
+              <p className="text-[11px] leading-snug text-muted">Stops and targets are checked at each day’s close, not during the day, so a trade can lose more than the stop (for example on a big move on expiry day). Intraday stops need minute data.</p>
             </div>
           </div>
           <div className="border-t border-line p-3">
@@ -142,7 +144,7 @@ export function OptionsBacktest() {
 
       <section className="panel flex min-h-0 flex-col overflow-hidden">
         {error && <p role="alert" className="m-3 rounded-[10px] bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">{error}</p>}
-        {data ? <OptionsResults data={data} /> : !error && (
+        {data ? <OptionsResults data={data} exit={ranExit} /> : !error && (
           <p className="m-auto max-w-[380px] px-4 text-center text-[13px] leading-relaxed text-ink-2">
             Add legs, choose when to enter (by day or on an indicator signal) and test on NSE&rsquo;s end-of-day option prices.
           </p>
@@ -152,15 +154,25 @@ export function OptionsBacktest() {
   );
 }
 
-function OptionsResults({ data }: { data: OptionsBacktestResponse }) {
+function OptionsResults({ data, exit }: { data: OptionsBacktestResponse; exit: OptionsStrategy['exit'] | null }) {
   const { result } = data;
   const m = result.metrics;
+  // The loss at which the engine's stop fires for a trade (gross, before charges), as it computes it: the ₹ stop or
+  // the % of the net premium, whichever is hit first. Stops are checked at each day's close, so a trade can close
+  // further down than this (a gap, or a big move on the only day held, e.g. entry the day before expiry).
+  const stopAt = (t: OptionsTrade): number | null => {
+    const basis = Math.abs(t.legs.reduce((sum, l) => sum + (l.side === 'SELL' ? 1 : -1) * l.qty * l.entryPaise, 0));
+    const limits = [exit?.stopLossRupees ? exit.stopLossRupees * 100 : null, exit?.stopLossPct ? (basis * exit.stopLossPct) / 100 : null].filter((v): v is number => v != null);
+    return limits.length ? Math.min(...limits) : null;
+  };
+  const beyond = (t: OptionsTrade) => { const lim = stopAt(t); return lim != null && t.grossPaise < -lim; };
+  const beyondCount = result.trades.filter(beyond).length;
   const chartEl = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<number | null>(null);
   const C = CHART_COLORS[useTheme()];
 
   useEffect(() => {
-    const font = getComputedStyle(document.documentElement).getPropertyValue('--font-jakarta').trim() || 'system-ui';
+    const font = getComputedStyle(document.documentElement).getPropertyValue('--font-outfit').trim() || 'system-ui';
     const chart = createChart(chartEl.current!, {
       autoSize: true,
       layout: { background: { color: C.bg }, textColor: C.text, fontSize: 11, fontFamily: `${font}, system-ui, sans-serif` },
@@ -168,7 +180,7 @@ function OptionsResults({ data }: { data: OptionsBacktestResponse }) {
       rightPriceScale: { borderColor: C.line }, timeScale: { borderColor: C.line, minBarSpacing: 0.05 },
       localization: { priceFormatter: (v: number) => fmt(v) },
     });
-    const area = chart.addSeries(AreaSeries, { lineColor: C.ink, topColor: 'rgba(255,194,26,0.35)', bottomColor: 'rgba(255,194,26,0.02)', lineWidth: 2, priceLineVisible: false });
+    const area = chart.addSeries(AreaSeries, { lineColor: C.ink, topColor: 'rgba(245,154,11,0.32)', bottomColor: 'rgba(245,154,11,0.02)', lineWidth: 2, priceLineVisible: false });
     area.setData(result.equity.map((e) => ({ time: (Date.parse(e.date + 'T00:00:00Z') / 1000) as UTCTimestamp, value: e.equityPaise / 100 })));
     area.createPriceLine({ price: 0, color: C.zero, lineStyle: 2, lineWidth: 1, axisLabelVisible: false, title: '' });
     const raf = requestAnimationFrame(() => requestAnimationFrame(() => chart.timeScale().fitContent()));
@@ -187,7 +199,7 @@ function OptionsResults({ data }: { data: OptionsBacktestResponse }) {
         <p className="text-[15px] font-extrabold tracking-[-0.02em]">Options backtest</p>
         <p className="num text-[12px] text-muted">{m.from ? fmtDate(m.from) : ''} → {m.to ? fmtDate(m.to) : ''} · {m.days} trading days · NSE official end-of-day data</p>
       </div>
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {card('Net P&L', formatRupees(m.netPaise), tone(m.netPaise), `Gross ${formatRupees(m.grossPaise)}`)}
         {card('Trades', String(m.trades), '', `${m.wins} won · ${m.losses} lost`)}
         {card('Win rate', m.winRatePct == null ? '—' : `${m.winRatePct.toFixed(1)}%`, '', m.profitFactor == null ? undefined : `Profit factor ${m.profitFactor.toFixed(2)}`)}
@@ -197,16 +209,23 @@ function OptionsResults({ data }: { data: OptionsBacktestResponse }) {
         {card('Largest loss', m.largestLossPaise == null ? '—' : formatRupees(m.largestLossPaise), 'text-down')}
         {card('Charges paid', formatRupees(m.chargesPaise), '', 'Brokerage, STT, exchange, SEBI, stamp, GST')}
       </div>
+      {beyondCount > 0 && (
+        <p className="rounded-[12px] bg-accent-soft px-3 py-2 text-[12.5px] leading-snug text-ink-2">
+          <b className="text-ink">{beyondCount} trade{beyondCount > 1 ? 's' : ''} lost more than the stop loss.</b> Stops are checked once a day, at NSE&rsquo;s closing
+          prices: a position is not closed during the day. When the market moves sharply before a close (or the only close is on expiry day), the loss at that close is
+          the loss taken. These trades are marked <span className="font-semibold text-down">past stop</span> below. Intraday stops need minute data.
+        </p>
+      )}
 
       <div className="relative h-[220px] overflow-hidden rounded-[12px] border border-line">
         <p className="absolute top-2 left-3 z-10 text-[12px] font-bold">Cumulative P&amp;L (₹, after charges)</p>
         <div ref={chartEl} className="absolute inset-0" />
       </div>
 
-      <div className="grid grid-cols-[1fr_220px] gap-2">
-        <div className="overflow-x-auto rounded-[12px] border border-line p-2">
-          <p className="mb-1 px-1 text-[12px] font-bold">Monthly P&amp;L</p>
-          <table className="num w-full text-[11px]">
+      <div className="grid gap-2 md:grid-cols-[1fr_220px]">
+        <div className="rounded-[12px] border border-line p-2">
+          <p className="mb-1 px-1 text-[12px] font-bold">Monthly P&amp;L<span className="font-normal text-muted md:hidden"> · by quarter</span></p>
+          <table className="num hidden w-full text-[11px] md:table">
             <thead><tr className="text-muted"><th className="text-left">Year</th>{MONTHS.map((mo) => <th key={mo} className="px-0.5 font-semibold">{mo}</th>)}<th className="pl-1 text-right font-semibold">Total</th></tr></thead>
             <tbody>
               {years.map((y) => {
@@ -220,7 +239,36 @@ function OptionsResults({ data }: { data: OptionsBacktestResponse }) {
                       return (
                         <td key={i} className="p-0.5">
                           <div className="rounded px-1 py-1 text-center" title={v == null ? 'No trades' : formatRupees(v)}
-                            style={{ background: v == null ? 'var(--color-raised)' : v >= 0 ? `rgba(8,153,129,${a})` : `rgba(242,54,69,${a})` }}>
+                            style={{ background: v == null ? 'var(--color-raised)' : v >= 0 ? `rgba(10,155,118,${a})` : `rgba(229,72,77,${a})` }}>
+                            {v == null ? '' : Math.round(v / 100 / 1000) === 0 ? (v / 100).toFixed(0) : `${(v / 100 / 1000).toFixed(1)}k`}
+                          </div>
+                        </td>
+                      );
+                    })}
+                    <td className={`pl-1 text-right font-semibold ${tone(total)}`}>{(total / 100 / 1000).toFixed(1)}k</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {/* Phones: the same P&L by quarter, so the grid fits the screen. */}
+          <table className="num w-full text-[11px] md:hidden">
+            <thead><tr className="text-muted"><th className="text-left">Year</th>{['Q1', 'Q2', 'Q3', 'Q4'].map((q) => <th key={q} className="px-0.5 font-semibold">{q}</th>)}<th className="pl-1 text-right font-semibold">Total</th></tr></thead>
+            <tbody>
+              {years.map((y) => {
+                const month = (i: number) => m.monthly[`${y}-${String(i + 1).padStart(2, '0')}`];
+                const quarters = [0, 1, 2, 3].map((q) => { const vs = [0, 1, 2].map((k) => month(q * 3 + k)).filter((v): v is number => v != null); return vs.length ? vs.reduce((a, b) => a + b, 0) : null; });
+                const total = quarters.reduce<number>((a, v) => a + (v ?? 0), 0);
+                const qMax = Math.max(1, ...years.flatMap((yy) => [0, 1, 2, 3].map((q) => Math.abs([0, 1, 2].reduce((a, k) => a + (m.monthly[`${yy}-${String(q * 3 + k + 1).padStart(2, '0')}`] ?? 0), 0)))));
+                return (
+                  <tr key={y}>
+                    <td className="font-semibold">{y}</td>
+                    {quarters.map((v, q) => {
+                      const a = v == null ? 0 : 0.12 + 0.55 * (Math.abs(v) / qMax);
+                      return (
+                        <td key={q} className="p-0.5">
+                          <div className="rounded px-1 py-1 text-center" title={v == null ? 'No trades' : formatRupees(v)}
+                            style={{ background: v == null ? 'var(--color-raised)' : v >= 0 ? `rgba(10,155,118,${a})` : `rgba(229,72,77,${a})` }}>
                             {v == null ? '' : Math.round(v / 100 / 1000) === 0 ? (v / 100).toFixed(0) : `${(v / 100 / 1000).toFixed(1)}k`}
                           </div>
                         </td>
@@ -250,33 +298,36 @@ function OptionsResults({ data }: { data: OptionsBacktestResponse }) {
 
       <div className="rounded-[12px] border border-line">
         <p className="px-3 py-2 text-[13px] font-extrabold">Trades</p>
-        <table className="num w-full text-[12px]">
-          <thead><tr className="text-[10.5px] font-bold tracking-[0.05em] text-muted uppercase">{['', 'Entry', 'Exit', 'Spot', 'Exit reason', 'Gross', 'Charges', 'Net'].map((h) => <th key={h} className="px-2 py-1 text-right first:text-left">{h}</th>)}</tr></thead>
+        <div className="max-lg:max-h-[70dvh] max-lg:overflow-auto"><table className="num w-full text-[12px]">
+          <thead><tr className="text-[10.5px] font-bold tracking-[0.05em] text-muted uppercase">{['', 'Entry', 'Exit', 'Spot', 'Exit reason', 'Gross', 'Charges', 'Net'].map((h) => <th key={h} className={`px-2 py-1 text-right first:text-left ${['Spot', 'Exit reason', 'Gross', 'Charges'].includes(h) ? 'hidden md:table-cell' : ''}`}>{h}</th>)}</tr></thead>
           <tbody>
             {[...result.trades].reverse().map((t, i) => (
               <Fragment key={t.entryDate + i}>
                 <tr className="cursor-pointer border-t border-line text-right hover:bg-raised" onClick={() => setOpen(open === i ? null : i)}>
                   <td className="px-2 py-1.5 text-left text-muted">{open === i ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td>
-                  <td className="px-2">{fmtDate(t.entryDate)}</td>
-                  <td className="px-2">{fmtDate(t.exitDate)}</td>
-                  <td className="px-2">{fmt(t.spotEntryPaise / 100)} → {fmt(t.spotExitPaise / 100)}</td>
-                  <td className="px-2 font-sans">{REASON[t.exitReason]}</td>
-                  <td className={`px-2 ${tone(t.grossPaise)}`}>{formatRupees(t.grossPaise)}</td>
-                  <td className="px-2">{formatRupees(t.chargesPaise)}</td>
-                  <td className={`px-2 font-semibold ${tone(t.netPaise)}`}>{formatRupees(t.netPaise)}</td>
+                  <td className="px-2 whitespace-nowrap">{fmtDate(t.entryDate)}</td>
+                  <td className="px-2 whitespace-nowrap">{fmtDate(t.exitDate)}</td>
+                  <td className="hidden md:table-cell px-2">{fmt(t.spotEntryPaise / 100)} → {fmt(t.spotExitPaise / 100)}</td>
+                  <td className="hidden md:table-cell px-2 font-sans">{REASON[t.exitReason]}</td>
+                  <td className={`hidden md:table-cell px-2 ${tone(t.grossPaise)}`}>{formatRupees(t.grossPaise)}</td>
+                  <td className="hidden md:table-cell px-2">{formatRupees(t.chargesPaise)}</td>
+                  <td className={`px-2 font-semibold whitespace-nowrap ${tone(t.netPaise)}`}>
+                    {beyond(t) && <span className="mr-1.5 rounded bg-down-soft px-1 py-0.5 font-sans text-[10px] font-bold text-down" title={`Lost more than the ${formatRupees(stopAt(t)!)} stop: stops are checked at the day’s close only`}>past stop</span>}
+                    {formatRupees(t.netPaise)}
+                  </td>
                 </tr>
                 {open === i && t.legs.map((l, j) => (
                   <tr key={j} className="bg-raised text-right text-[11.5px] text-ink-2">
                     <td />
                     <td colSpan={2} className={`px-2 text-left font-sans font-semibold ${l.side === 'BUY' ? 'text-blue' : 'text-down'}`}>{l.side} {l.qty} × {fmtStrike(l.strikePaise)} {l.kind} · {fmtDate(l.expiry).slice(0, 6)}</td>
-                    <td className="px-2">{fmt(l.entryPaise / 100)} → {fmt(l.exitPaise / 100)}</td>
-                    <td colSpan={4} className="px-2 text-muted">{l.settledDays ? `${l.settledDays} day(s) at settlement price` : ''}</td>
+                    <td className="px-2 whitespace-nowrap">{fmt(l.entryPaise / 100)} → {fmt(l.exitPaise / 100)}</td>
+                    <td colSpan={4} className="hidden px-2 text-muted md:table-cell">{l.settledDays ? `${l.settledDays} day(s) at settlement price` : ''}</td>
                   </tr>
                 ))}
               </Fragment>
             ))}
           </tbody>
-        </table>
+        </table></div>
         {!result.trades.length && <p className="px-3 pb-4 text-[13px] text-muted">No trades: the entry rules never fired, or every entry was skipped (see notes).</p>}
       </div>
       <p className="text-[11px] leading-snug text-muted">

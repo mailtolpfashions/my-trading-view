@@ -20,7 +20,7 @@ const tone = (v: number | null) => (v == null || v === 0 ? '' : v > 0 ? 'text-up
 const REASON: Record<string, string> = { stop: 'Stop loss', target: 'Target', signal: 'Exit rule', time: 'Max bars held', 'square-off': 'Square-off', 'end-of-data': 'End of data' };
 
 function chartBase(el: HTMLElement, C: ChartColors): IChartApi {
-  const font = getComputedStyle(document.documentElement).getPropertyValue('--font-jakarta').trim() || 'system-ui';
+  const font = getComputedStyle(document.documentElement).getPropertyValue('--font-outfit').trim() || 'system-ui';
   return createChart(el, {
     autoSize: true,
     layout: { background: { color: C.bg }, textColor: C.text, fontSize: 11, fontFamily: `${font}, system-ui, sans-serif`, panes: { separatorColor: C.line } },
@@ -53,7 +53,7 @@ export function BacktestResults({ data }: { data: BacktestResponse }) {
     createSeriesMarkers(s, markers);
 
     const eq = chartBase(equityEl.current!, C);
-    const area = eq.addSeries(AreaSeries, { lineColor: C.ink, topColor: 'rgba(255,194,26,0.35)', bottomColor: 'rgba(255,194,26,0.02)', lineWidth: 2, priceLineVisible: false });
+    const area = eq.addSeries(AreaSeries, { lineColor: C.ink, topColor: 'rgba(245,154,11,0.32)', bottomColor: 'rgba(245,154,11,0.02)', lineWidth: 2, priceLineVisible: false });
     area.setData(result.equity.map((e) => ({ time: toChart(e.time), value: e.equityPaise / 100 })));
     area.createPriceLine({ price: m.initialCapitalPaise / 100, color: C.zero, lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: 'Start' });
     // Fit after the charts have their real size (autoSize lays out on the next frame), so the whole test period shows.
@@ -79,7 +79,7 @@ export function BacktestResults({ data }: { data: BacktestResponse }) {
         <DataCheck quality={quality} delayed={data.status.delayed} />
       </div>
 
-      <div className="grid grid-cols-4 gap-2 min-[1800px]:grid-cols-8">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 min-[1800px]:grid-cols-8">
         {card('Net P&L', formatRupees(m.netPaise), tone(m.netPaise), 'After all charges')}
         {card('Return', pct(m.returnPct), tone(m.returnPct), `On starting capital ${formatRupees(m.initialCapitalPaise)}`)}
         {card('Buy & hold', pct(m.buyHoldReturnPct), tone(m.buyHoldReturnPct), 'Price change over the same period, for comparison')}
@@ -90,7 +90,7 @@ export function BacktestResults({ data }: { data: BacktestResponse }) {
         {card('Charges paid', formatRupees(m.chargesPaise), '', 'Brokerage, STT, exchange, SEBI, stamp duty and GST', `Gross ${formatRupees(m.grossPaise)}`)}
       </div>
 
-      <div className="grid min-h-[300px] grid-cols-[1.6fr_1fr] gap-2">
+      <div className="grid min-h-[300px] gap-2 md:grid-cols-[1.6fr_1fr]">
         <div className="relative min-h-[300px] overflow-hidden rounded-[12px] border border-line"><div ref={priceEl} className="absolute inset-0" /></div>
         <div className="relative min-h-[300px] overflow-hidden rounded-[12px] border border-line">
           <p className="absolute top-2 left-3 z-10 text-[12px] font-bold">Equity curve</p>
@@ -99,7 +99,7 @@ export function BacktestResults({ data }: { data: BacktestResponse }) {
       </div>
 
       <div className="rounded-[12px] border border-line">
-        <div className="flex items-center gap-3 px-3 py-2 text-[12px]">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[12px]">
           <b className="text-[13px] font-extrabold">Trades</b>
           <span className="text-muted">Avg win <b className="num font-medium text-up">{m.avgWinPaise == null ? '—' : formatRupees(m.avgWinPaise)}</b></span>
           <span className="text-muted">Avg loss <b className="num font-medium text-down">{m.avgLossPaise == null ? '—' : formatRupees(m.avgLossPaise)}</b></span>
@@ -109,30 +109,30 @@ export function BacktestResults({ data }: { data: BacktestResponse }) {
           {m.skippedEntries > 0 && <span className="text-down">{m.skippedEntries} entries skipped (capital too small for one share)</span>}
         </div>
         {result.trades.length ? (
-          <table className="w-full text-[12.5px]">
+          <div className="max-lg:max-h-[70dvh] max-lg:overflow-auto"><table className="w-full text-[12.5px]">
             <thead>
               <tr className="text-[10.5px] font-bold tracking-[0.05em] text-muted uppercase">
-                {['#', 'Entry', 'Exit', 'Side', 'Qty', 'Entry price', 'Exit price', 'Exit reason', 'Gross', 'Charges', 'Net'].map((h) => <th key={h} className="px-3 py-1.5 text-right first:text-left">{h}</th>)}
+                {['#', 'Entry', 'Exit', 'Side', 'Qty', 'Entry price', 'Exit price', 'Exit reason', 'Gross', 'Charges', 'Net'].map((h) => <th key={h} className={`px-3 py-1.5 text-right first:text-left ${['Entry', 'Exit', 'Net'].includes(h) ? '' : 'hidden md:table-cell'}`}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
               {[...result.trades].reverse().map((t, i) => (
                 <tr key={t.entryTime} className="num border-t border-line text-right">
-                  <td className="px-3 py-1.5 text-left text-muted">{result.trades.length - i}</td>
+                  <td className="hidden md:table-cell px-3 py-1.5 text-left text-muted">{result.trades.length - i}</td>
                   <td className="px-3 py-1.5">{istDateTime(t.entryTime, intraday)}</td>
                   <td className="px-3 py-1.5">{istDateTime(t.exitTime, intraday)}</td>
-                  <td className={`px-3 py-1.5 font-sans font-bold ${t.side === 'LONG' ? 'text-blue' : 'text-down'}`}>{t.side}</td>
-                  <td className="px-3 py-1.5">{t.qty}</td>
-                  <td className="px-3 py-1.5">{formatRupees(t.entryPricePaise)}</td>
-                  <td className="px-3 py-1.5">{formatRupees(t.exitPricePaise)}</td>
-                  <td className="px-3 py-1.5 font-sans">{REASON[t.exitReason]}</td>
-                  <td className={`px-3 py-1.5 ${tone(t.grossPaise)}`}>{formatRupees(t.grossPaise)}</td>
-                  <td className="px-3 py-1.5">{formatRupees(t.chargesPaise)}</td>
+                  <td className={`hidden md:table-cell px-3 py-1.5 font-sans font-bold ${t.side === 'LONG' ? 'text-blue' : 'text-down'}`}>{t.side}</td>
+                  <td className="hidden md:table-cell px-3 py-1.5">{t.qty}</td>
+                  <td className="hidden md:table-cell px-3 py-1.5">{formatRupees(t.entryPricePaise)}</td>
+                  <td className="hidden md:table-cell px-3 py-1.5">{formatRupees(t.exitPricePaise)}</td>
+                  <td className="hidden md:table-cell px-3 py-1.5 font-sans">{REASON[t.exitReason]}</td>
+                  <td className={`hidden md:table-cell px-3 py-1.5 ${tone(t.grossPaise)}`}>{formatRupees(t.grossPaise)}</td>
+                  <td className="hidden md:table-cell px-3 py-1.5">{formatRupees(t.chargesPaise)}</td>
                   <td className={`px-3 py-1.5 font-semibold ${tone(t.netPaise)}`}>{formatRupees(t.netPaise)}</td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         ) : <p className="px-3 pb-4 text-[13px] text-muted">No trades: the entry rules never fired in this period.</p>}
       </div>
 

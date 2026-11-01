@@ -130,19 +130,19 @@ function SimView({ r, dayIdx, setDayIdx, underlying, brokerName }: { r: SimResul
         <div className="mt-1.5 max-h-[260px] overflow-auto">
           <table className="num w-full">
             <thead className="sticky top-0 bg-panel text-[10.5px] font-bold tracking-[0.05em] text-muted">
-              <tr><th className="py-1 text-left">DATE</th><th className="text-right">{underlying}</th><th className="text-right">CHG</th><th className="text-right">GROSS</th><th className="text-right">CHARGES</th><th className="text-right">NET IF EXIT</th><th className="text-right">Δ</th><th className="text-right">Θ/DAY</th></tr>
+              <tr><th className="py-1 text-left">DATE</th><th className="text-right">{underlying}</th><th className="text-right">CHG</th><th className="hidden sm:table-cell text-right">GROSS</th><th className="hidden sm:table-cell text-right">CHARGES</th><th className="text-right">NET IF EXIT</th><th className="hidden sm:table-cell text-right">Δ</th><th className="hidden sm:table-cell text-right">Θ/DAY</th></tr>
             </thead>
             <tbody>
               {days.map((x, i) => (
                 <tr key={x.date} onClick={() => setDayIdx(i)} className={`cursor-pointer border-t border-line hover:bg-raised ${i === dayIdx ? 'bg-accent-soft' : ''}`}>
-                  <td className="py-1 font-sans">{fmtDate(x.date)}</td>
+                  <td className="py-1 font-sans whitespace-nowrap">{fmtDate(x.date)}</td>
                   <td className="text-right">{x.spotPaise == null ? '—' : fmt(x.spotPaise / 100)}</td>
                   <td className="text-right text-muted">{i ? pct(x.spotPaise, days[i - 1].spotPaise) : ''}</td>
-                  <td className={`text-right ${tone(x.grossPaise)}`}>{formatRupees(x.grossPaise)}</td>
-                  <td className="text-right text-muted">{formatRupees(x.chargesIfExitPaise)}</td>
+                  <td className={`hidden sm:table-cell text-right ${tone(x.grossPaise)}`}>{formatRupees(x.grossPaise)}</td>
+                  <td className="hidden sm:table-cell text-right text-muted">{formatRupees(x.chargesIfExitPaise)}</td>
                   <td className={`text-right font-semibold ${tone(x.netIfExitPaise)}`}>{formatRupees(x.netIfExitPaise)}</td>
-                  <td className="text-right">{x.openLegs ? x.delta.toFixed(1) : '—'}</td>
-                  <td className="text-right">{x.openLegs ? fmt(x.theta) : '—'}</td>
+                  <td className="hidden sm:table-cell text-right">{x.openLegs ? x.delta.toFixed(1) : '—'}</td>
+                  <td className="hidden sm:table-cell text-right">{x.openLegs ? fmt(x.theta) : '—'}</td>
                 </tr>
               ))}
             </tbody>

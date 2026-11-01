@@ -108,6 +108,14 @@
     outline-offset: 2px;
     border-radius: 8px;
   }
+  /* Every table keeps its header row in view while its rows scroll (inside a panel, or the page on phones). */
+  thead {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--color-panel);
+    box-shadow: 0 1px 0 var(--color-line);
+  }
   ::selection {
     background: var(--color-accent);
     color: var(--color-accent-ink);

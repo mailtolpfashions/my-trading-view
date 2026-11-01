@@ -23,7 +23,8 @@ export function channelOffset(p1: Point, p2: Point, p3: Point): number {
   const base = p1.price + ((p2.price - p1.price) * (p3.time - p1.time)) / (p2.time - p1.time);
   return p3.price - base;
 }
-export const COLORS = ['#2962ff', '#f23645', '#089981', '#ff9800', '#121212'];
+// Drawing colours: cobalt, red, green, saffron and the theme ink ('#121212' is drawn in the current theme's ink).
+export const COLORS = ['#2f5bff', '#e5484d', '#0a9b76', '#f59a0b', '#121212'];
 
 /** Fractional bar index of `t` given ascending bar times. Before the first bar or past the last, extends at the edge interval. */
 export function timeToLogical(times: number[], t: number): number | null {

@@ -36,7 +36,7 @@ export function IndicatorPicker({ quick, onToggleQuick, onAdd, onClose }: { quic
           </label>
           <button type="button" onClick={onClose} className="rounded-full p-1.5 text-muted hover:bg-raised" aria-label="Close"><X size={16} /></button>
         </div>
-        <div className="grid min-h-0 flex-1 grid-cols-[180px_1fr]">
+        <div className="grid min-h-0 flex-1 sm:grid-cols-[180px_1fr]">
           <nav className="overflow-y-auto border-r border-line p-2" aria-label="Categories">
             <p className="eyebrow px-2 pt-1 pb-1.5">Popular</p>
             {STUDIES.map((s) => (

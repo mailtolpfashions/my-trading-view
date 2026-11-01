@@ -45,9 +45,9 @@ export function NiftyResearch() {
       <thead className="sticky top-0 z-10 bg-panel text-[10.5px] font-bold tracking-[0.04em] text-muted">
         <tr className="border-b border-line">
           <th className="py-1.5 text-left">{label}</th><th className="text-right">DAYS</th><th className="text-right">UP</th><th className="text-right">DOWN</th>
-          <th className="text-right">GAP UP</th><th className="text-right">GAP DOWN</th><th className="text-right">GAP ≥1%</th>
-          {MOVE_BUCKETS.map((b) => <th key={b.id} className="text-right">MOVE {b.label}</th>)}
-          <th className="text-right">BEST DAY</th><th className="text-right">WORST DAY</th><th className="text-right">VIX LOW → HIGH</th><th className="text-right">EXPIRY DAYS</th>
+          <th className="hidden md:table-cell text-right">GAP UP</th><th className="hidden md:table-cell text-right">GAP DOWN</th><th className="hidden md:table-cell text-right">GAP ≥1%</th>
+          {MOVE_BUCKETS.map((b) => <th key={b.id} className="hidden md:table-cell text-right">MOVE {b.label}</th>)}
+          <th className="text-right">BEST DAY</th><th className="text-right">WORST DAY</th><th className="hidden md:table-cell text-right">VIX LOW → HIGH</th><th className="hidden md:table-cell text-right">EXPIRY DAYS</th>
         </tr>
       </thead>
       <tbody>
@@ -57,14 +57,14 @@ export function NiftyResearch() {
             <td className="text-right">{r.days}</td>
             <td className="text-right text-up">{of(r.up, r.days)}</td>
             <td className="text-right text-down">{of(r.down, r.days)}</td>
-            <td className="text-right">{r.gapUp}</td>
-            <td className="text-right">{r.gapDown}</td>
-            <td className="text-right">{r.bigGaps}</td>
-            {MOVE_BUCKETS.map((b) => <td key={b.id} className="text-right">{r.moves[b.id]}</td>)}
+            <td className="hidden md:table-cell text-right">{r.gapUp}</td>
+            <td className="hidden md:table-cell text-right">{r.gapDown}</td>
+            <td className="hidden md:table-cell text-right">{r.bigGaps}</td>
+            {MOVE_BUCKETS.map((b) => <td key={b.id} className="hidden md:table-cell text-right">{r.moves[b.id]}</td>)}
             <td className="text-right"><span className="text-up">{pct(r.bestDay?.pct)}</span> <span className="text-[10.5px] text-muted">{r.bestDay?.date.slice(5)}</span></td>
             <td className="text-right"><span className="text-down">{pct(r.worstDay?.pct)}</span> <span className="text-[10.5px] text-muted">{r.worstDay?.date.slice(5)}</span></td>
-            <td className="text-right">{r.vixLow ? `${fmt(r.vixLow.value)} → ${fmt(r.vixHigh!.value)}` : '—'}</td>
-            <td className="text-right">{r.expiryDays || '—'}</td>
+            <td className="hidden md:table-cell text-right">{r.vixLow ? `${fmt(r.vixLow.value)} → ${fmt(r.vixHigh!.value)}` : '—'}</td>
+            <td className="hidden md:table-cell text-right">{r.expiryDays || '—'}</td>
           </tr>
         ))}
       </tbody>
@@ -103,7 +103,7 @@ export function NiftyResearch() {
         {removed > 0 && <span className="text-[11.5px] text-muted">{removed} days left out</span>}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
+      <div className="max-lg:max-h-[75dvh] min-h-0 flex-1 overflow-auto px-3 pb-3">
         {tab === 'Years' && periodTableView(byYear, 'YEAR')}
         {tab === 'Months' && (
           <>
@@ -146,23 +146,23 @@ export function NiftyResearch() {
           <table className="num w-full text-[12px]">
             <thead className="sticky top-0 z-10 bg-panel text-[10.5px] font-bold tracking-[0.04em] text-muted">
               <tr className="border-b border-line">
-                <th className="py-1.5 text-left">DATE</th><th className="text-left">DAY</th><th className="text-right">PREV CLOSE</th><th className="text-right">OPEN</th><th className="text-right">GAP</th>
-                <th className="text-right">HIGH</th><th className="text-right">LOW</th><th className="text-right">CLOSE</th><th className="text-right">CHANGE</th><th className="text-right">RANGE</th><th className="text-right">VIX</th><th className="text-left">EXPIRY</th><th className="text-left">EVENT</th>
+                <th className="py-1.5 text-left">DATE</th><th className="hidden md:table-cell text-left">DAY</th><th className="hidden md:table-cell text-right">PREV CLOSE</th><th className="hidden md:table-cell text-right">OPEN</th><th className="text-right">GAP</th>
+                <th className="hidden md:table-cell text-right">HIGH</th><th className="hidden md:table-cell text-right">LOW</th><th className="text-right">CLOSE</th><th className="text-right">CHANGE</th><th className="hidden md:table-cell text-right">RANGE</th><th className="hidden md:table-cell text-right">VIX</th><th className="hidden md:table-cell text-left">EXPIRY</th><th className="hidden md:table-cell text-left">EVENT</th>
               </tr>
             </thead>
             <tbody>
               {[...rows].reverse().map((r) => (
                 <tr key={r.date} className="border-b border-line hover:bg-raised">
-                  <td className="py-1 font-semibold">{r.date}</td><td className="font-sans text-muted">{r.weekday}</td>
-                  <td className="text-right">{r.prevClose == null ? '—' : fmt(r.prevClose)}</td>
-                  <td className="text-right">{fmt(r.open)}</td>
+                  <td className="py-1 font-semibold whitespace-nowrap">{r.date}</td><td className="hidden md:table-cell font-sans text-muted">{r.weekday}</td>
+                  <td className="hidden md:table-cell text-right">{r.prevClose == null ? '—' : fmt(r.prevClose)}</td>
+                  <td className="hidden md:table-cell text-right">{fmt(r.open)}</td>
                   <td className={`text-right ${tone(r.gapPct)}`}>{r.gapPts == null ? '—' : `${r.gapPts >= 0 ? '+' : '−'}${fmt(Math.abs(r.gapPts))} (${pct(r.gapPct)})`}</td>
-                  <td className="text-right">{fmt(r.high)}</td><td className="text-right">{fmt(r.low)}</td><td className="text-right font-semibold">{fmt(r.close)}</td>
+                  <td className="hidden md:table-cell text-right">{fmt(r.high)}</td><td className="hidden md:table-cell text-right">{fmt(r.low)}</td><td className="text-right font-semibold">{fmt(r.close)}</td>
                   <td className={`text-right font-semibold ${tone(r.changePct)}`}>{pct(r.changePct)}</td>
-                  <td className="text-right text-muted">{r.rangePct == null ? '—' : `${r.rangePct.toFixed(2)}%`}</td>
-                  <td className="text-right">{r.vixClose == null ? '—' : fmt(r.vixClose)}</td>
-                  <td className="font-sans text-[11px]">{r.expiryDay == null ? <span className="text-muted">no F&amp;O data</span> : r.expiryDay ? 'expiry' : ''}</td>
-                  <td className="font-sans text-[11px]">{r.events.map((id) => data.events.find((e) => e.id === id)?.name ?? id).join(', ')}</td>
+                  <td className="hidden md:table-cell text-right text-muted">{r.rangePct == null ? '—' : `${r.rangePct.toFixed(2)}%`}</td>
+                  <td className="hidden md:table-cell text-right">{r.vixClose == null ? '—' : fmt(r.vixClose)}</td>
+                  <td className="hidden md:table-cell font-sans text-[11px]">{r.expiryDay == null ? <span className="text-muted">no F&amp;O data</span> : r.expiryDay ? 'expiry' : ''}</td>
+                  <td className="hidden md:table-cell font-sans text-[11px]">{r.events.map((id) => data.events.find((e) => e.id === id)?.name ?? id).join(', ')}</td>
                 </tr>
               ))}
             </tbody>

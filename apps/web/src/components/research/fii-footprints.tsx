@@ -36,8 +36,8 @@ export function FiiFootprints() {
       <thead className="sticky top-0 z-10 bg-panel text-[10.5px] font-bold tracking-[0.04em] text-muted">
         <tr className="border-b border-line">
           <th className="py-1.5 text-left">{label}</th><th className="text-right">DAYS</th>
-          <th className="text-right">FII INDEX FUT NET: FIRST → LAST DAY</th><th className="text-right">FII LONG SHARE: LOW → HIGH</th>
-          <th className="text-right">FII INDEX FUT BUY − SELL (TOTAL)</th><th className="text-right">FPI EQUITY NET (TOTAL, NSDL)</th><th className="text-right">NIFTY: FIRST → LAST CLOSE</th>
+          <th className="text-right">FII INDEX FUT NET: FIRST → LAST DAY</th><th className="hidden md:table-cell text-right">FII LONG SHARE: LOW → HIGH</th>
+          <th className="hidden md:table-cell text-right">FII INDEX FUT BUY − SELL (TOTAL)</th><th className="hidden md:table-cell text-right">FPI EQUITY NET (TOTAL, NSDL)</th><th className="text-right">NIFTY: FIRST → LAST CLOSE</th>
         </tr>
       </thead>
       <tbody>
@@ -46,9 +46,9 @@ export function FiiFootprints() {
             <td className="py-1.5 font-sans font-bold">{r.period}</td>
             <td className="text-right">{r.days}</td>
             <td className="text-right"><span className={tone(r.fiiNetStart)}>{int(r.fiiNetStart)}</span> → <span className={`font-semibold ${tone(r.fiiNetEnd)}`}>{int(r.fiiNetEnd)}</span></td>
-            <td className="text-right">{r.longPctLow ? <>{pct(r.longPctLow.pct)} <span className="text-[10.5px] text-muted">{r.longPctLow.date.slice(5)}</span> → {pct(r.longPctHigh!.pct)} <span className="text-[10.5px] text-muted">{r.longPctHigh!.date.slice(5)}</span></> : '—'}</td>
-            <td className={`text-right ${tone(r.fiiIndexFutNetCrTotal)}`}>{crore(r.fiiIndexFutNetCrTotal)}</td>
-            <td className={`text-right ${tone(r.fpiEquityNetCrTotal)}`}>{crore(r.fpiEquityNetCrTotal)}</td>
+            <td className="hidden md:table-cell text-right">{r.longPctLow ? <>{pct(r.longPctLow.pct)} <span className="text-[10.5px] text-muted">{r.longPctLow.date.slice(5)}</span> → {pct(r.longPctHigh!.pct)} <span className="text-[10.5px] text-muted">{r.longPctHigh!.date.slice(5)}</span></> : '—'}</td>
+            <td className={`hidden md:table-cell text-right ${tone(r.fiiIndexFutNetCrTotal)}`}>{crore(r.fiiIndexFutNetCrTotal)}</td>
+            <td className={`hidden md:table-cell text-right ${tone(r.fpiEquityNetCrTotal)}`}>{crore(r.fpiEquityNetCrTotal)}</td>
             <td className="text-right">{r.niftyStart == null ? '—' : `${fmt(r.niftyStart)} → ${fmt(r.niftyEnd!)}`}</td>
           </tr>
         ))}
@@ -69,33 +69,33 @@ export function FiiFootprints() {
         <span className="ml-auto text-[11px] text-muted">Positions from {coverage.positions} · FII statistics from {coverage.stats} · NSDL flows from {coverage.flows} · history still downloading</span>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
+      <div className="max-lg:max-h-[75dvh] min-h-0 flex-1 overflow-auto px-3 pb-3">
         {tab === 'Days' && (
           <table className="num w-full text-[12px]">
             <thead className="sticky top-0 z-10 bg-panel text-[10.5px] font-bold tracking-[0.04em] text-muted">
               <tr className="border-b border-line">
-                <th className="py-1.5 text-left">DATE</th><th className="text-right">NIFTY</th><th className="text-right">CHG</th>
+                <th className="py-1.5 text-left">DATE</th><th className="hidden md:table-cell text-right">NIFTY</th><th className="text-right"><span className="md:hidden">NIFTY</span><span className="hidden md:inline">CHG</span></th>
                 <th className="text-right" title="Index futures: contracts long − short">FII FUT NET</th><th className="text-right">DAY CHG</th><th className="text-right" title="Long ÷ (long + short)">FII LONG %</th>
-                <th className="text-right" title="Index calls bought − sold">FII CALLS NET</th><th className="text-right" title="Index puts bought − sold">FII PUTS NET</th>
-                {PARTICIPANTS.filter((p) => p !== 'FII').map((p) => <th key={p} className="text-right">{p.toUpperCase()} FUT NET</th>)}
-                <th className="text-right" title="NSE FII statistics: index futures bought − sold, ₹ crore">FII FUT BUY−SELL</th>
-                <th className="text-right" title="NSDL: FPI equity net investment (reporting date)">FPI EQUITY NET</th>
+                <th className="hidden md:table-cell text-right" title="Index calls bought − sold">FII CALLS NET</th><th className="hidden md:table-cell text-right" title="Index puts bought − sold">FII PUTS NET</th>
+                {PARTICIPANTS.filter((p) => p !== 'FII').map((p) => <th key={p} className="hidden md:table-cell text-right">{p.toUpperCase()} FUT NET</th>)}
+                <th className="hidden md:table-cell text-right" title="NSE FII statistics: index futures bought − sold, ₹ crore">FII FUT BUY−SELL</th>
+                <th className="hidden md:table-cell text-right" title="NSDL: FPI equity net investment (reporting date)">FPI EQUITY NET</th>
               </tr>
             </thead>
             <tbody>
               {[...rows].reverse().map((r) => (
                 <tr key={r.date} className="border-b border-line hover:bg-raised">
-                  <td className="py-1 font-semibold">{r.date}</td>
-                  <td className="text-right">{r.nifty ? fmt(r.nifty.close) : '—'}</td>
+                  <td className="py-1 font-semibold whitespace-nowrap">{r.date}</td>
+                  <td className="hidden md:table-cell text-right">{r.nifty ? fmt(r.nifty.close) : '—'}</td>
                   <td className={`text-right ${tone(r.nifty?.changePct)}`}>{r.nifty?.changePct == null ? '—' : `${r.nifty.changePct >= 0 ? '+' : ''}${r.nifty.changePct.toFixed(2)}%`}</td>
                   <td className={`text-right font-semibold ${tone(r.fii?.futNet)}`}>{int(r.fii?.futNet)}</td>
                   <td className={`text-right ${tone(r.fiiFutNetChange)}`}>{int(r.fiiFutNetChange)}</td>
                   <td className="text-right">{pct(r.fii?.longPct)}</td>
-                  <td className={`text-right ${tone(r.fii?.callNet)}`}>{int(r.fii?.callNet)}</td>
-                  <td className={`text-right ${tone(r.fii?.putNet)}`}>{int(r.fii?.putNet)}</td>
-                  {(['DII', 'Pro', 'Client'] as const).map((p) => <td key={p} className={`text-right ${tone(r.others[p]?.futNet)}`}>{int(r.others[p]?.futNet)}</td>)}
-                  <td className={`text-right ${tone(r.fiiIndexFutNetCr)}`}>{crore(r.fiiIndexFutNetCr)}</td>
-                  <td className={`text-right ${tone(r.fpiEquityNetCr)}`}>{crore(r.fpiEquityNetCr)}</td>
+                  <td className={`hidden md:table-cell text-right ${tone(r.fii?.callNet)}`}>{int(r.fii?.callNet)}</td>
+                  <td className={`hidden md:table-cell text-right ${tone(r.fii?.putNet)}`}>{int(r.fii?.putNet)}</td>
+                  {(['DII', 'Pro', 'Client'] as const).map((p) => <td key={p} className={`hidden md:table-cell text-right ${tone(r.others[p]?.futNet)}`}>{int(r.others[p]?.futNet)}</td>)}
+                  <td className={`hidden md:table-cell text-right ${tone(r.fiiIndexFutNetCr)}`}>{crore(r.fiiIndexFutNetCr)}</td>
+                  <td className={`hidden md:table-cell text-right ${tone(r.fpiEquityNetCr)}`}>{crore(r.fpiEquityNetCr)}</td>
                 </tr>
               ))}
             </tbody>

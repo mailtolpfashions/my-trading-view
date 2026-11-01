@@ -9,6 +9,7 @@ import {
   HistogramSeries,
   LineSeries,
   LineStyle,
+  PriceScaleMode,
   createChart,
   createTextWatermark,
   type IChartApi,
@@ -33,6 +34,8 @@ import { CHART_COLORS, chartThemeOptions, useTheme } from '@/lib/theme';
 import { DrawingRail } from './drawing-rail';
 
 export type ChartType = 'candles' | 'bars' | 'ha' | 'line' | 'area';
+/** Right price scale: plain prices, logarithmic, or % change from the first visible bar. */
+export type ScaleMode = 'normal' | 'log' | 'percent';
 
 const IST = 5.5 * 3600;
 // lightweight-charts renders timestamps as UTC, so bars are shifted to IST wall-clock time for display.
@@ -66,6 +69,9 @@ type Props = {
   libStudies?: LibStudy[];
   onRemoveLib?: (uid: string) => void;
   onEditLib?: (uid: string) => void;
+  scaleMode?: ScaleMode;
+  /** Set to a function returning the chart (all panes, with drawings) as a canvas, for saving an image. */
+  shotRef?: { current: (() => HTMLCanvasElement) | null };
 };
 
 type LibResult = { plots: Record<string, { time: number; value: number; color?: string }[]> };
@@ -107,8 +113,8 @@ export function ChartView(p: Props) {
       layout: {
         ...themed.layout,
         fontSize: 11,
-        // Canvas text can't read CSS variables, so resolve next/font's generated family name for Plus Jakarta Sans.
-        fontFamily: `${getComputedStyle(document.documentElement).getPropertyValue('--font-jakarta').trim() || 'system-ui'}, system-ui, sans-serif`,
+        // Canvas text can't read CSS variables, so resolve next/font's generated family name for Outfit.
+        fontFamily: `${getComputedStyle(document.documentElement).getPropertyValue('--font-outfit').trim() || 'system-ui'}, system-ui, sans-serif`,
       },
       grid: themed.grid,
       crosshair: {
@@ -121,6 +127,7 @@ export function ChartView(p: Props) {
       localization: { priceFormatter: (v: number) => fmt(v) },
     });
     chartRef.current = chart;
+    if (p.shotRef) p.shotRef.current = () => chart.takeScreenshot();
     // Re-apply the font once web fonts finish loading so the scales don't stay on the fallback font.
     document.fonts?.ready.then(() => chartRef.current?.applyOptions({ layout: { fontFamily: chart.options().layout.fontFamily } }));
     volRef.current = chart.addSeries(HistogramSeries, { priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
@@ -138,10 +145,24 @@ export function ChartView(p: Props) {
     return () => {
       ro.disconnect();
       chart.unsubscribeCrosshairMove(onMove);
+      libRenderers.current.clear();
+      libResults.current.clear();
       chart.remove();
       chartRef.current = null;
+      if (p.shotRef) p.shotRef.current = null;
+      // These belonged to the removed chart; the effects below rebuild them on the next chart.
+      mainRef.current = null;
+      volRef.current = null;
+      builtRef.current = [];
+      builtKey.current = '';
     };
   }, []);
+
+  // ---- price scale mode ----
+  useEffect(() => {
+    const mode = p.scaleMode === 'log' ? PriceScaleMode.Logarithmic : p.scaleMode === 'percent' ? PriceScaleMode.Percentage : PriceScaleMode.Normal;
+    chartRef.current?.priceScale('right').applyOptions({ mode });
+  }, [p.scaleMode, p.loadKey]);
 
   // ---- theme: repaint the existing chart ----
   useEffect(() => { chartRef.current?.applyOptions(chartThemeOptions(colors)); layer.current.set({ ink: colors.ink }); }, [colors]);
@@ -177,7 +198,7 @@ export function ChartView(p: Props) {
     );
     const hasVolume = c.some((b) => b.volume > 0); // Yahoo has no volume for indices
     volRef.current!.applyOptions({ visible: hasVolume });
-    volRef.current!.setData(hasVolume ? c.map((b) => ({ time: toChart(b.time), value: b.volume, color: b.close >= b.open ? 'rgba(8,153,129,0.28)' : 'rgba(242,54,69,0.28)' })) : []);
+    volRef.current!.setData(hasVolume ? c.map((b) => ({ time: toChart(b.time), value: b.volume, color: b.close >= b.open ? 'rgba(10,155,118,0.28)' : 'rgba(229,72,77,0.28)' })) : []);
 
     // Rebuild indicator series only when the selection changes; otherwise just refresh their data.
     const key = p.studies.join(',');
@@ -551,12 +572,12 @@ export function ChartView(p: Props) {
         </form>
       )}
       {bar && (
-        <div className="pointer-events-none absolute top-1.5 left-2.5 z-10 flex flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-x-2 text-[13px] whitespace-nowrap">
+        <div className="pointer-events-none absolute top-1.5 right-16 left-2.5 z-10 flex flex-col gap-1 sm:right-auto">
+          <div className="flex flex-wrap items-center gap-x-2 text-[13px] sm:whitespace-nowrap">
             <b className="font-bold">{p.name} · {tfLabel(p.tf)} · {p.exchange}</b>
             <span title="NSE official end-of-day data" className="rounded border border-line bg-raised px-1 text-[10px] font-bold tracking-[0.03em] text-ink-2">NSE EOD</span>
             <span className={`num text-[12.5px] ${tone}`}>
-              O<span className="mr-1.5 ml-0.5">{fmt(bar.open)}</span>H<span className="mr-1.5 ml-0.5">{fmt(bar.high)}</span>L<span className="mr-1.5 ml-0.5">{fmt(bar.low)}</span>C<span className="mr-1.5 ml-0.5">{fmt(bar.close)}</span>
+              O<span className="mr-1.5 ml-0.5">{fmt(bar.open)}</span><wbr />H<span className="mr-1.5 ml-0.5">{fmt(bar.high)}</span><wbr />L<span className="mr-1.5 ml-0.5">{fmt(bar.low)}</span><wbr />C<span className="mr-1.5 ml-0.5">{fmt(bar.close)}</span><wbr />
               {ch >= 0 ? '+' : ''}{fmt(ch)} ({ch >= 0 ? '+' : ''}{fmt(prev.close ? (ch / prev.close) * 100 : 0)}%)
             </span>
           </div>

@@ -45,10 +45,10 @@ export function DataCheck({ quality, delayed }: { quality: DataQuality | null; d
           aria-expanded={open}
           className="flex items-center gap-1.5 rounded-full bg-up-soft px-2.5 py-1 text-[11.5px] font-semibold text-up"
         >
-          <ShieldCheck size={13} aria-hidden="true" /> {verified ? `Verified with NSE · ${off!.verified} days` : 'Data check passed'}
+          <ShieldCheck size={13} aria-hidden="true" /> <span className="hidden sm:inline">{verified ? `Verified with NSE · ${off!.verified} days` : 'Data check passed'}</span>
         </button>
         {open && (
-          <div className="absolute top-8 right-0 z-30 w-[360px] rounded-[14px] whitespace-normal bg-panel p-4 text-[12.5px] leading-relaxed text-ink-2 shadow-[var(--shadow-pop)]">
+          <div className="absolute top-8 right-0 z-30 w-[min(360px,calc(100vw-32px))] rounded-[14px] whitespace-normal bg-panel p-4 text-[12.5px] leading-relaxed text-ink-2 shadow-[var(--shadow-pop)]">
             <p className="font-bold text-ink">Every bar passed the session-grid check</p>
             <p className="mt-1">No missing, frozen, invalid or off-grid bars in the loaded history.</p>
             {officialNote}
@@ -77,7 +77,7 @@ export function DataCheck({ quality, delayed }: { quality: DataQuality | null; d
         <ShieldAlert size={13} aria-hidden="true" /> Data check: {issues.join(' · ')} bars
       </button>
       {open && (
-        <div className="absolute top-8 right-0 z-30 w-[380px] rounded-[14px] whitespace-normal bg-panel p-4 text-[12.5px] leading-relaxed text-ink-2 shadow-[var(--shadow-pop)]">
+        <div className="absolute top-8 right-0 z-30 w-[min(380px,calc(100vw-32px))] rounded-[14px] whitespace-normal bg-panel p-4 text-[12.5px] leading-relaxed text-ink-2 shadow-[var(--shadow-pop)]">
           <p className="font-bold text-ink">This chart&rsquo;s data is not complete</p>
           <p className="mt-1">
             Indicator values near these bars may be off. We never fill gaps with made-up prices.

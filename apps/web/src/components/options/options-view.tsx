@@ -231,9 +231,9 @@ export function OptionsView() {
   };
 
   return (
-    <div className="grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(560px,1.15fr)] gap-2">
+    <div className="grid grid-cols-1 content-start gap-2 lg:min-h-0 lg:auto-rows-max lg:overflow-y-auto xl:auto-rows-auto xl:content-stretch xl:overflow-visible xl:grid-cols-[minmax(400px,1fr)_minmax(500px,1.15fr)]">
       {/* chain */}
-      <section className="panel flex min-h-0 flex-col overflow-hidden">
+      <section className="panel flex h-[78dvh] min-h-[420px] flex-col overflow-hidden xl:h-auto xl:min-h-0">
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
           <div className="flex rounded-full bg-raised p-[3px]">
             {(['NIFTY', 'BANKNIFTY'] as const).map((u) => (
@@ -257,7 +257,7 @@ export function OptionsView() {
           {past && <button type="button" onClick={() => pickDate(undefined)} className="rounded-full px-2.5 py-1 text-[12px] font-semibold text-ink-2 hover:bg-raised">Latest</button>}
         </div>
         {chain && (
-          <div className="grid grid-cols-4 gap-1.5 px-3 py-2 text-[11px]">
+          <div className="grid grid-cols-2 gap-1.5 px-3 py-2 text-[11px] sm:grid-cols-4">
             {([['Spot', chain.spotPaise], ['Forward (implied)', chain.forwardPaise], ['ATM', chain.atmStrikePaise]] as const).map(([k, v]) => (
               <div key={k} className="rounded-[10px] bg-raised px-2.5 py-1.5"><p className="text-muted">{k}</p><p className="num text-[13px] font-semibold">{v == null ? '—' : fmt(v / 100)}</p></div>
             ))}
@@ -303,13 +303,13 @@ export function OptionsView() {
       </section>
 
       {/* builder */}
-      <section className="panel flex min-h-0 flex-col overflow-hidden">
-        <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
+      <section className="panel flex flex-col overflow-hidden xl:min-h-0">
+        <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
           <h2 className="text-[14px] font-extrabold tracking-[-0.02em]">Strategy builder</h2>
           <select className="ml-auto h-8 rounded-full bg-raised px-3 text-[12.5px] font-semibold" value={broker.id} onChange={(e) => pickBroker(e.target.value)} aria-label="Broker for charges" title="Brokerage schedule used for charges">
             {BROKERS.map((b) => <option key={b.id} value={b.id}>{b.name} charges</option>)}
           </select>
-          <select className="h-8 w-44 rounded-full bg-raised px-3 text-[12.5px] font-semibold" value={template && template.legs === legs ? template.id : ''} onChange={(e) => void applyTemplate(e.target.value)} aria-label="Strategy template">
+          <select className="h-8 w-full rounded-full bg-raised px-3 text-[12.5px] font-semibold sm:w-44" value={template && template.legs === legs ? template.id : ''} onChange={(e) => void applyTemplate(e.target.value)} aria-label="Strategy template">
             <option value="">Choose a template…</option>
             {TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
@@ -360,7 +360,7 @@ export function OptionsView() {
 
           {summary && chain?.spotPaise && (
             <>
-              <div className="grid grid-cols-4 gap-1.5">
+              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                 {([
                   [summary.netPremiumPaise >= 0 ? 'Net credit' : 'Net debit', formatRupees(Math.abs(summary.netPremiumPaise)), ''],
                   ...(multi
@@ -383,7 +383,7 @@ export function OptionsView() {
               {(() => {
                 if (!m && !margin.loading && !margin.error) return null;
                 return (
-                  <div className="grid grid-cols-3 gap-1.5">
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
                     {margin.error && <p className="col-span-3 rounded-[10px] bg-down-soft px-2.5 py-1.5 text-[12px] font-semibold text-down">Margin: {margin.error}</p>}
                     {!margin.error && ([
                       ['Margin needed', m ? formatRupees(m.marginPaise) : '…', m ? `SPAN ${formatRupees(m.spanPaise)} + exposure ${formatRupees(m.exposurePaise)}` : 'calculating'],

@@ -38,7 +38,7 @@ export function FuturesView() {
   const recent = days ? [...days].reverse().slice(0, 30) : [];
 
   return (
-    <div className="grid min-h-0 grid-rows-[auto_1fr] gap-2 overflow-hidden">
+    <div className="grid min-h-0 grid-rows-[auto_1fr] gap-2 lg:overflow-hidden">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-full bg-panel p-1 shadow-[var(--shadow-panel)]" role="tablist" aria-label="Index">
           {(['NIFTY', 'BANKNIFTY'] as const).map((x) => (
@@ -52,10 +52,10 @@ export function FuturesView() {
         <span className="text-[12px] text-muted">History from NSE&rsquo;s official F&amp;O files{latest ? ` · latest ${fmtDate(latest.date)}` : ''}</span>
       </div>
 
-      <div className="grid min-h-0 grid-cols-[1fr_580px] gap-2">
-        <section className="panel flex min-h-0 flex-col overflow-hidden">
-          <div className="flex items-center gap-4 border-b border-line px-4 py-2.5 text-[12px] text-ink-2">
-            <span className="font-bold text-ink">Near-month future vs spot</span>
+      <div className="grid grid-cols-1 content-start gap-2 lg:min-h-0 lg:auto-rows-max lg:overflow-y-auto xl:auto-rows-auto xl:content-stretch xl:overflow-visible xl:grid-cols-[1fr_580px]">
+        <section className="panel flex h-[60dvh] min-h-[360px] flex-col overflow-hidden xl:h-auto xl:min-h-0">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-4 py-2.5 text-[12px] text-ink-2">
+            <span className="w-full font-bold text-ink sm:w-auto">Near-month future vs spot</span>
             <span className="flex items-center gap-1.5"><i className="inline-block h-0.5 w-4 bg-blue" />Future</span>
             <span className="flex items-center gap-1.5"><i className="inline-block h-0 w-4 border-t-2 border-dashed border-ink-2" />Spot (index close)</span>
             <span className="flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-up" />OI coloured by build-up</span>
@@ -63,7 +63,7 @@ export function FuturesView() {
           {error ? <p className="m-auto text-[13px] font-semibold text-down">{error}</p> : !days ? <p className="m-auto text-[13px] text-muted">Loading…</p> : <FuturesChart days={days} />}
         </section>
 
-        <section className="panel flex min-h-0 flex-col overflow-hidden">
+        <section className="panel flex h-[70dvh] flex-col overflow-hidden xl:h-auto xl:min-h-0">
           <div className="border-b border-line px-4 py-2.5">
             <p className="text-[13px] font-bold">Daily build-up (near month)</p>
             <p className="text-[11.5px] text-muted">Each day compares the same contract with its own previous close and open interest.</p>
@@ -71,18 +71,18 @@ export function FuturesView() {
           <div className="min-h-0 flex-1 overflow-y-auto">
             <table className="num w-full text-[12px]">
               <thead className="sticky top-0 z-10 bg-panel text-[10.5px] text-muted">
-                <tr className="text-right"><th className="py-1.5 pl-3 text-left font-semibold">Date</th><th className="font-semibold">Future</th><th className="font-semibold">Chg</th><th className="font-semibold">Basis</th><th className="font-semibold">OI</th><th className="font-semibold">OI chg</th><th className="pr-3 pl-3 text-left font-semibold">Build-up</th></tr>
+                <tr className="text-right"><th className="py-1.5 pl-3 text-left font-semibold">Date</th><th className="font-semibold">Future</th><th className="font-semibold">Chg</th><th className="hidden font-semibold sm:table-cell">Basis</th><th className="hidden font-semibold sm:table-cell">OI</th><th className="font-semibold">OI chg</th><th className="pr-3 pl-2 text-left font-semibold">Build-up</th></tr>
               </thead>
               <tbody>
                 {recent.map((d) => (
                   <tr key={d.date} className="border-t border-line text-right">
-                    <td className="py-1.5 pl-3 text-left font-sans" title={d.near ? `Contract expiring ${fmtDate(d.near.expiry)} · rollover ${pct(d.rolloverPct, 1).replace('+', '')}` : undefined}>{fmtDate(d.date).slice(0, 6)}</td>
+                    <td className="py-1.5 pl-3 text-left font-sans whitespace-nowrap" title={d.near ? `Contract expiring ${fmtDate(d.near.expiry)} · rollover ${pct(d.rolloverPct, 1).replace('+', '')}` : undefined}>{fmtDate(d.date).slice(0, 6)}</td>
                     <td>{rupees(d.near?.closePaise)}</td>
                     <td className={tone(d.near?.changePaise)}>{signedRupees(d.near?.changePaise)}</td>
-                    <td className={tone(d.near?.basisPaise)} title={d.near?.premiumPct != null ? `${pct(d.near.premiumPct)} premium · carry ${carry(d.near.carryPct, d.near.daysToExpiry)} a year` : undefined}>{signedRupees(d.near?.basisPaise)}</td>
-                    <td>{lakh(d.near?.oi)}</td>
+                    <td className={`hidden sm:table-cell ${tone(d.near?.basisPaise)}`} title={d.near?.premiumPct != null ? `${pct(d.near.premiumPct)} premium · carry ${carry(d.near.carryPct, d.near.daysToExpiry)} a year` : undefined}>{signedRupees(d.near?.basisPaise)}</td>
+                    <td className="hidden sm:table-cell">{lakh(d.near?.oi)}</td>
                     <td className={tone(d.near?.oiChange)}>{signedLakh(d.near?.oiChange)}</td>
-                    <td className="pr-3 pl-3 text-left">{d.near && <BuildUpPill b={d.near.buildUp} />}</td>
+                    <td className="pr-3 pl-2 text-left whitespace-nowrap">{d.near && <BuildUpPill b={d.near.buildUp} />}</td>
                   </tr>
                 ))}
               </tbody>
@@ -103,7 +103,7 @@ function FuturesChart({ days }: { days: FuturesDay[] }) {
       autoSize: true,
       layout: {
         background: { color: C.bg }, textColor: C.text, fontSize: 11,
-        fontFamily: `${getComputedStyle(document.documentElement).getPropertyValue('--font-jakarta').trim() || 'system-ui'}, system-ui, sans-serif`,
+        fontFamily: `${getComputedStyle(document.documentElement).getPropertyValue('--font-outfit').trim() || 'system-ui'}, system-ui, sans-serif`,
         panes: { separatorColor: C.line },
       },
       grid: { vertLines: { color: C.grid }, horzLines: { color: C.grid } },
