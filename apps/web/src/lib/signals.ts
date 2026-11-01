@@ -37,8 +37,6 @@ async function json<T>(res: Response, fallback: string): Promise<T> {
   return body as T;
 }
 
-export const fetchSignals = async () => json<{ strategies: StrategySummary[]; date: string | null; signals: LatestSignal[] }>(await feedFetch(`${FEED_URL}/api/signals`), 'Signals are unavailable');
-export const fetchSignal = async (id: string) => json<StrategyDetail>(await feedFetch(`${FEED_URL}/api/signals/${encodeURIComponent(id)}`), 'Signal strategy not found');
 export const runScanApi = async (rules: RuleSet) =>
   json<ScanResult>(await feedFetch(`${FEED_URL}/api/scan`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules }) }), 'Scan failed');
 export const fetchEodStatus = async () => json<{ savedDays: number; from: string | null; to: string | null; stocks: number; universe: number; running: boolean }>(await feedFetch(`${FEED_URL}/api/eod/status`), 'Status unavailable');

@@ -32,7 +32,7 @@ export function SymbolSearch({ open, onClose, onPick, title = 'Symbol search' }:
       ref={dialog}
       onClose={onClose}
       onClick={(e) => e.target === dialog.current && onClose()}
-      className="m-auto w-[min(560px,94vw)] rounded-[18px] bg-panel p-0 shadow-[var(--shadow-pop)] backdrop:bg-ink/30"
+      className="m-auto w-[min(560px,94vw)] rounded-[18px] bg-panel p-0 shadow-[var(--shadow-pop)] backdrop:bg-scrim"
       aria-label={title}
     >
       <div className="flex items-center justify-between px-5 pt-4 pb-3">

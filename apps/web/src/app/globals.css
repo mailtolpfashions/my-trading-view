@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
-/* Horizon Pro design tokens (approved 2026-10-26, design/horizon-pro). Light theme only. */
+/*
+ * Horizon Pro design tokens (approved 2026-10-26, design/horizon-pro). Light is the default; dark (2026-11-01) is the
+ * user's choice, set as <html data-theme="dark"> and redefined below from the same roles, not inverted.
+ * Components use these tokens only: no hard-coded colours, so both themes stay correct.
+ */
 @theme {
   --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
   /* Numbers: Plus Jakarta Sans with tabular figures (the `num` utility), matching the Kicko CRM. */
@@ -18,6 +22,7 @@
   --color-accent-ink: #3d2c00;
   --color-accent-soft: #fff4cc;
   --color-accent-deep: #b07d00; /* accent as text, large headings only (about 2.9:1 on canvas) */
+  --color-accent-label: #3d2c00; /* small labels next to amber chart marks */
 
   /* Market colours match TradingView so charts and tables agree. */
   --color-up: #089981;
@@ -26,14 +31,67 @@
   --color-down-soft: #fde8ea;
   --color-blue: #2962ff;
 
+  /* Primary buttons and selected pills: the strongest surface, which flips with the theme. */
+  --color-inverse: #121212;
+  --color-inverse-hover: #000000;
+  --color-on-inverse: #ffffff;
+  /* Always-dark surfaces with white text in both themes: tooltips, the selected watchlist row, icon tiles. */
+  --color-deep: #121212;
+  --color-scrim: rgb(18 18 18 / 0.3);
+  /* Charts */
+  --color-grid: #f3f2ee;
+  --color-zero: #b9b8b0;
+  --color-cross: #9598a1;
+  --color-watermark: rgb(18 18 18 / 0.06);
+  /* In-the-money side of the option chain */
+  --color-itm: #fbf8ee;
+
   --radius-panel: 14px;
   --shadow-panel: 0 1px 0 rgb(18 18 18 / 0.04), 0 8px 24px -12px rgb(18 18 18 / 0.16);
   --shadow-pop: 0 1px 0 rgb(18 18 18 / 0.04), 0 24px 48px -16px rgb(18 18 18 / 0.28);
 }
 
+/* Dark: warm near-black canvas, lifted panels, the same amber accent. Market colours are TradingView's dark ones. */
+:root[data-theme='dark'] {
+  --color-canvas: #0f0f0d;
+  --color-panel: #1a1a17;
+  --color-raised: #24241f;
+  --color-ink: #f1f0ea;
+  --color-ink-2: #c3c2b9;
+  --color-muted: #8f8e85;
+  --color-line: #2c2c27;
+
+  --color-accent-soft: #3a300f;
+  --color-accent-deep: #ffd257;
+  --color-accent-label: #ffd257;
+
+  --color-up: #22ab94;
+  --color-up-soft: #10302a;
+  --color-down: #f7525f;
+  --color-down-soft: #3b1a1e;
+  --color-blue: #3d7bff;
+
+  --color-inverse: #f1f0ea;
+  --color-inverse-hover: #ffffff;
+  --color-on-inverse: #121212;
+  --color-deep: #2e2d28;
+  --color-scrim: rgb(0 0 0 / 0.55);
+  --color-grid: #23231f;
+  --color-zero: #56554e;
+  --color-cross: #6f7280;
+  --color-watermark: rgb(241 240 234 / 0.05);
+  --color-itm: #221f14;
+
+  --shadow-panel: 0 1px 0 rgb(0 0 0 / 0.3), 0 8px 24px -12px rgb(0 0 0 / 0.6);
+  --shadow-pop: 0 1px 0 rgb(0 0 0 / 0.3), 0 24px 48px -16px rgb(0 0 0 / 0.75);
+}
+
 @layer base {
   html {
     color-scheme: light;
+  }
+  html[data-theme='dark'] {
+    color-scheme: dark;
   }
   body {
     background: var(--color-canvas);

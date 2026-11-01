@@ -38,11 +38,19 @@ const IST = 5.5 * 3600;
 export const dayTime = (date: string) => Date.parse(`${date}T09:15:00Z`) / 1000 - IST;
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-/** Adjustments (and actions that could not be applied) for bars in date order. Actions are matched by the symbol each bar traded under. */
-export function findAdjustments(bars: RawBar[], actions: CorporateAction[]): { adjustments: Adjustment[]; unhandled: UnhandledAction[] } {
+/**
+ * Adjustments (and actions that could not be applied) for bars in date order. Actions are matched by the symbol each
+ * bar traded under. `faceValue` is the stock's face value today (NSE equity list); rights issues need the face value
+ * on their ex-date, which is the "from" value of the first later split or consolidation, if any.
+ */
+export function findAdjustments(bars: RawBar[], actions: CorporateAction[], faceValue: number | null = null): { adjustments: Adjustment[]; unhandled: UnhandledAction[] } {
   const adjustments: Adjustment[] = [];
   const unhandled: UnhandledAction[] = [];
   const seen = new Set<string>();
+  const fvChanges = actions
+    .flatMap((a) => parsePurpose(a.purpose).flatMap((p) => (p.kind === 'adjust' && p.type !== 'bonus' ? [{ exDate: a.exDate, fromFv: p.fromFv }] : [])))
+    .sort((x, y) => (x.exDate < y.exDate ? -1 : 1));
+  const faceValueOn = (exDate: string) => fvChanges.find((c) => c.exDate > exDate)?.fromFv ?? faceValue;
   for (const a of actions) {
     const key = `${a.symbol}|${a.exDate}|${a.purpose}`;
     if (seen.has(key)) continue; // the file lists EQ and BE rows, and the same action on several days
@@ -54,6 +62,11 @@ export function findAdjustments(bars: RawBar[], actions: CorporateAction[]): { a
     for (const p of parsePurpose(a.purpose)) {
       if (p.kind === 'adjust') factor *= p.factor;
       else if (p.kind === 'unhandled') unhandled.push({ ...a, reason: p.reason });
+      else if (p.kind === 'rights') {
+        const fv = faceValueOn(a.exDate);
+        if (fv == null) { unhandled.push({ ...a, reason: `rights issue: face value unknown: ${a.purpose}` }); continue; }
+        factor *= rightsFactor(bars[i - 1].closePaise / 100, fv + p.premium, p.newShares, p.held);
+      }
     }
     if (factor === 1) continue;
     const implied = bars[i].openPaise / bars[i - 1].closePaise;
@@ -69,6 +82,17 @@ export function findAdjustments(bars: RawBar[], actions: CorporateAction[]): { a
   const days = (x: string, y: string) => Math.abs(Date.parse(y) - Date.parse(x)) / 86400_000;
   const kept = adjustments.filter((a) => !adjustments.some((o) => o !== a && o.purpose === a.purpose && days(o.exDate, a.exDate) <= 10 && (miss(o) < miss(a) || (miss(o) === miss(a) && o.date < a.date))));
   return { adjustments: kept, unhandled };
+}
+
+/**
+ * NSE's rights adjustment (as for F&O contracts): P = close on the last cum-rights day, S = issue price, a new shares
+ * per b held. Benefit E = (P − S)·a/(a+b); factor = (P − E)/P, the theoretical ex-rights price over P. No benefit when
+ * S ≥ P, so no adjustment.
+ */
+export function rightsFactor(cumClose: number, issuePrice: number, newShares: number, held: number): number {
+  if (!(cumClose > 0) || issuePrice >= cumClose) return 1;
+  const benefit = ((cumClose - issuePrice) * newShares) / (newShares + held);
+  return (cumClose - benefit) / cumClose;
 }
 
 /**
@@ -93,4 +117,25 @@ export function adjustedCandles(bars: RawBar[], adjustments: Adjustment[]): Cand
     if (ex !== undefined) factor *= ex; // bars before this ex-date take this action's factor
   }
   return out;
+}
+
+/** A trading day where the adjusted series is not continuous with the day before (see findBreaks). */
+export type DataBreak = { date: string; reason: string };
+
+const MAX_GAP = 0.5;
+/** See DailyHistory.breaks. One entry per break day, with every reason found. */
+export function findBreaks(bars: (RawBar & { isin: string })[], candles: Candle[], adjustments: Adjustment[], unhandled: UnhandledAction[]): DataBreak[] {
+  const adjusted = new Set(adjustments.map((a) => a.date));
+  const reasons = new Map<string, string[]>();
+  const add = (date: string, why: string) => (reasons.get(date) ?? reasons.set(date, []).get(date)!).push(why);
+  for (let i = 1; i < bars.length; i++) {
+    if (bars[i].isin !== bars[i - 1].isin && !adjusted.has(bars[i].date)) add(bars[i].date, `ISIN changed ${bars[i - 1].isin} → ${bars[i].isin} with no recorded split or bonus`);
+    const gap = candles[i].open / candles[i - 1].close - 1;
+    if (Math.abs(gap) > MAX_GAP) add(bars[i].date, `opening gap ${(gap * 100).toFixed(1)}% after adjustments`);
+  }
+  for (const u of unhandled) {
+    const day = bars.find((b) => b.date >= u.exDate);
+    if (day && day !== bars[0]) add(day.date, `not adjusted: ${u.purpose}`);
+  }
+  return [...reasons].sort(([a], [b]) => (a < b ? -1 : 1)).map(([date, why]) => ({ date, reason: why.join('; ') }));
 }

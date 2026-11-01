@@ -48,7 +48,7 @@ export function BacktestView() {
   }
 
   return (
-    <main className="grid min-h-0 grid-cols-[400px_1fr] gap-2">
+    <div className="grid min-h-0 grid-cols-[400px_1fr] gap-2">
       <section className="panel flex min-h-0 flex-col overflow-hidden">
         <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
           <FlaskConical size={16} aria-hidden="true" />
@@ -60,13 +60,13 @@ export function BacktestView() {
         {error && <p role="alert" className="m-3 rounded-[10px] bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">{error}</p>}
         {data ? <BacktestResults data={data} /> : !error && (
           <div className="m-auto max-w-[360px] px-4 text-center">
-            <span className="mx-auto grid h-11 w-11 place-items-center rounded-[12px] bg-ink text-accent"><FlaskConical size={20} aria-hidden="true" /></span>
+            <span className="mx-auto grid h-11 w-11 place-items-center rounded-[12px] bg-deep text-accent"><FlaskConical size={20} aria-hidden="true" /></span>
             <h3 className="mt-3 text-[15px] font-extrabold tracking-[-0.02em]">Test a strategy on real history</h3>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-ink-2">Pick a preset or build your own rules, then run. Daily history goes back years; intraday history up to 60 days (5m–30m) or 2 years (1h).</p>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-ink-2">Pick a preset or build your own rules, then run. Backtests use NSE&rsquo;s official end-of-day data (daily, weekly or monthly bars), back to 2011 as the history download completes.</p>
           </div>
         )}
       </section>
       <SymbolSearch open={picking} title="Backtest symbol" onClose={() => setPicking(false)} onPick={(i) => setSymbol(i.symbol)} />
-    </main>
+    </div>
   );
 }

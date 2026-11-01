@@ -56,7 +56,7 @@ export function ScannerView({ compact, onOpenChart }: { compact?: boolean; onOpe
       <div className="flex min-h-0 flex-1 flex-col px-2.5 pb-2.5">
         <div className="flex gap-1.5">
           {select}
-          <button type="button" onClick={() => run()} disabled={busy} className="flex h-9 items-center gap-1 rounded-full bg-ink px-3 text-[12.5px] font-bold text-white disabled:opacity-50"><Play size={13} />{busy ? '…' : 'Scan'}</button>
+          <button type="button" onClick={() => run()} disabled={busy} className="flex h-9 items-center gap-1 rounded-full bg-inverse px-3 text-[12.5px] font-bold text-on-inverse disabled:opacity-50"><Play size={13} />{busy ? '…' : 'Scan'}</button>
         </div>
         <div className="mt-1.5 px-1">{error ? <p className="text-[12px] font-semibold text-down">{error}</p> : summary}</div>
         <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
@@ -74,7 +74,7 @@ export function ScannerView({ compact, onOpenChart }: { compact?: boolean; onOpe
   }
 
   return (
-    <main className="grid min-h-0 grid-cols-[360px_1fr] gap-2">
+    <div className="grid min-h-0 grid-cols-[360px_1fr] gap-2">
       <section className="panel min-h-0 space-y-3 overflow-y-auto p-4">
         <div>
           <p className="eyebrow">Scanner</p>
@@ -82,7 +82,7 @@ export function ScannerView({ compact, onOpenChart }: { compact?: boolean; onOpe
         </div>
         {select}
         <Rules title="Conditions" rules={rules} onChange={(r) => { setRules(r); setPresetId('custom'); }} />
-        <button type="button" onClick={() => run()} disabled={busy} className="flex h-10 w-full items-center justify-center gap-1.5 rounded-full bg-ink font-bold text-white disabled:opacity-50">
+        <button type="button" onClick={() => run()} disabled={busy} className="flex h-10 w-full items-center justify-center gap-1.5 rounded-full bg-inverse font-bold text-on-inverse disabled:opacity-50">
           <Play size={15} /> {busy ? 'Scanning…' : 'Run scan'}
         </button>
         {error && <p role="alert" className="rounded-[10px] bg-down-soft px-3 py-2 text-[12.5px] font-semibold text-down">{error}</p>}
@@ -116,6 +116,6 @@ export function ScannerView({ compact, onOpenChart }: { compact?: boolean; onOpe
           )}
         </div>
       </section>
-    </main>
+    </div>
   );
 }

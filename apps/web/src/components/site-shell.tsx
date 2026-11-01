@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { Logo } from '@/components/logo';
 import { SiteFooter } from '@/components/site-footer';
 import { getSession } from '@/lib/auth';
+import { PAID_PLANS } from '@/lib/site-mode';
+import { ThemeToggle } from '@/components/theme-toggle';
 
 /** Header and footer for the public and account pages. */
 export async function SiteShell({ children }: { children: React.ReactNode }) {
@@ -12,17 +14,17 @@ export async function SiteShell({ children }: { children: React.ReactNode }) {
         <Link href="/" aria-label="My Trading View home" className="mr-auto">
           <Logo />
         </Link>
-        <Link href="/chart" className="rounded-full px-4 py-2 text-[13.5px] font-semibold text-ink-2 hover:bg-panel hover:text-ink">Free charts</Link>
-        <Link href="/pricing" className="rounded-full px-4 py-2 text-[13.5px] font-semibold text-ink-2 hover:bg-panel hover:text-ink">Pricing</Link>
+        <ThemeToggle />
+        {PAID_PLANS && <Link href="/pricing" className="rounded-full px-4 py-2 text-[13.5px] font-semibold text-ink-2 hover:bg-panel hover:text-ink">Pricing</Link>}
         {session ? (
           <>
             <Link href="/account" className="rounded-full px-4 py-2 text-[13.5px] font-semibold text-ink-2 hover:bg-panel hover:text-ink">Account</Link>
-            <Link href="/terminal" className="rounded-full bg-ink px-5 py-2.5 text-[13.5px] font-bold text-white hover:bg-black">Open terminal</Link>
+            <Link href="/dashboard" className="rounded-full bg-inverse px-5 py-2.5 text-[13.5px] font-bold text-on-inverse hover:bg-inverse-hover">Open dashboard</Link>
           </>
         ) : (
           <>
             <Link href="/login" className="rounded-full px-4 py-2 text-[13.5px] font-semibold text-ink-2 hover:bg-panel hover:text-ink">Sign in</Link>
-            <Link href="/signup" className="rounded-full bg-ink px-5 py-2.5 text-[13.5px] font-bold text-white hover:bg-black">Start free</Link>
+            <Link href="/dashboard" className="rounded-full bg-inverse px-5 py-2.5 text-[13.5px] font-bold text-on-inverse hover:bg-inverse-hover">Open dashboard</Link>
           </>
         )}
       </header>

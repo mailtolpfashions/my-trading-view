@@ -6,6 +6,7 @@ import { formatRupees } from '@mtv/paper';
 import type { BacktestResponse } from '@/lib/backtest';
 import { DOWN, UP } from '@/lib/chart/studies';
 import { DataCheck } from '@/components/terminal/data-check';
+import { CHART_COLORS, useTheme, type ChartColors } from '@/lib/theme';
 import { fmt, tfLabel } from '@/lib/format';
 
 const IST = 5.5 * 3600;
@@ -18,15 +19,15 @@ const pct = (v: number | null, digits = 2) => (v == null ? '—' : `${v >= 0 ? '
 const tone = (v: number | null) => (v == null || v === 0 ? '' : v > 0 ? 'text-up' : 'text-down');
 const REASON: Record<string, string> = { stop: 'Stop loss', target: 'Target', signal: 'Exit rule', time: 'Max bars held', 'square-off': 'Square-off', 'end-of-data': 'End of data' };
 
-function chartBase(el: HTMLElement): IChartApi {
+function chartBase(el: HTMLElement, C: ChartColors): IChartApi {
   const font = getComputedStyle(document.documentElement).getPropertyValue('--font-jakarta').trim() || 'system-ui';
   return createChart(el, {
     autoSize: true,
-    layout: { background: { color: '#ffffff' }, textColor: '#131722', fontSize: 11, fontFamily: `${font}, system-ui, sans-serif`, panes: { separatorColor: '#ecebe6' } },
-    grid: { vertLines: { color: '#f3f2ee' }, horzLines: { color: '#f3f2ee' } },
-    rightPriceScale: { borderColor: '#ecebe6' },
+    layout: { background: { color: C.bg }, textColor: C.text, fontSize: 11, fontFamily: `${font}, system-ui, sans-serif`, panes: { separatorColor: C.line } },
+    grid: { vertLines: { color: C.grid }, horzLines: { color: C.grid } },
+    rightPriceScale: { borderColor: C.line },
     // Years of daily bars must fit the panel: allow sub-pixel spacing so fitContent can show the whole test period.
-    timeScale: { borderColor: '#ecebe6', timeVisible: true, minBarSpacing: 0.05 },
+    timeScale: { borderColor: C.line, timeVisible: true, minBarSpacing: 0.05 },
     localization: { priceFormatter: (v: number) => fmt(v) },
   });
 }
@@ -34,12 +35,13 @@ function chartBase(el: HTMLElement): IChartApi {
 export function BacktestResults({ data }: { data: BacktestResponse }) {
   const { result, candles, quality, tf } = data;
   const m = result.metrics;
-  const intraday = tf !== 'D' && tf !== 'W';
+  const intraday = tf !== 'D' && tf !== 'W' && tf !== 'M';
   const priceEl = useRef<HTMLDivElement>(null);
   const equityEl = useRef<HTMLDivElement>(null);
+  const C = CHART_COLORS[useTheme()];
 
   useEffect(() => {
-    const chart = chartBase(priceEl.current!);
+    const chart = chartBase(priceEl.current!, C);
     const s = chart.addSeries(CandlestickSeries, { upColor: UP, downColor: DOWN, wickUpColor: UP, wickDownColor: DOWN, borderVisible: false });
     s.setData(candles.map((c) => ({ time: toChart(c.time), open: c.open, high: c.high, low: c.low, close: c.close })));
     const long = result.trades[0]?.side !== 'SHORT';
@@ -50,15 +52,15 @@ export function BacktestResults({ data }: { data: BacktestResponse }) {
     ] as SeriesMarker<Time>[]).sort((a, b) => (a.time as number) - (b.time as number));
     createSeriesMarkers(s, markers);
 
-    const eq = chartBase(equityEl.current!);
-    const area = eq.addSeries(AreaSeries, { lineColor: '#121212', topColor: 'rgba(255,194,26,0.35)', bottomColor: 'rgba(255,194,26,0.02)', lineWidth: 2, priceLineVisible: false });
+    const eq = chartBase(equityEl.current!, C);
+    const area = eq.addSeries(AreaSeries, { lineColor: C.ink, topColor: 'rgba(255,194,26,0.35)', bottomColor: 'rgba(255,194,26,0.02)', lineWidth: 2, priceLineVisible: false });
     area.setData(result.equity.map((e) => ({ time: toChart(e.time), value: e.equityPaise / 100 })));
-    area.createPriceLine({ price: m.initialCapitalPaise / 100, color: '#8b8a83', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: 'Start' });
+    area.createPriceLine({ price: m.initialCapitalPaise / 100, color: C.zero, lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: 'Start' });
     // Fit after the charts have their real size (autoSize lays out on the next frame), so the whole test period shows.
     const fit = () => { chart.timeScale().fitContent(); eq.timeScale().fitContent(); };
     const raf = requestAnimationFrame(() => requestAnimationFrame(fit));
     return () => { cancelAnimationFrame(raf); chart.remove(); eq.remove(); };
-  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, C]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const card = (label: string, value: string, cls = '', hint?: string, sub?: string) => (
     <div className="min-w-0 rounded-[12px] bg-raised px-3 py-2" title={hint}>

@@ -16,7 +16,7 @@ export function LibSettings({ ind, inputs, onSave, onClose }: { ind: LibIndicato
   const groups = [...new Set(ind.inputConfig.filter(editable).map((i) => i.group ?? ''))];
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/30 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-label={`${ind.name} settings`}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-scrim p-4" onClick={onClose} role="dialog" aria-modal="true" aria-label={`${ind.name} settings`}>
       <form className="panel flex max-h-[85dvh] w-full max-w-[440px] flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => { e.preventDefault(); onSave(vals); onClose(); }}>
         <div className="flex items-center justify-between border-b border-line px-5 py-3">
@@ -60,7 +60,7 @@ export function LibSettings({ ind, inputs, onSave, onClose }: { ind: LibIndicato
         </div>
         <div className="flex justify-between gap-2 border-t border-line px-5 py-3">
           <button type="button" onClick={() => setVals(Object.fromEntries(ind.inputConfig.map((i) => [i.id, i.defval])))} className="rounded-full px-4 py-2 text-[13px] font-semibold text-ink-2 hover:bg-raised">Reset to defaults</button>
-          <button type="submit" className="rounded-full bg-ink px-5 py-2 text-[13px] font-bold text-white hover:bg-black">Apply</button>
+          <button type="submit" className="rounded-full bg-inverse px-5 py-2 text-[13px] font-bold text-on-inverse hover:bg-inverse-hover">Apply</button>
         </div>
       </form>
     </div>

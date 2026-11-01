@@ -5,11 +5,11 @@
 import { prisma } from '@mtv/db';
 import type { Candle } from '@mtv/shared';
 import { NotPublished, nseGet } from '../nse-http';
-import { indexCloseUrl, parseIndexClose, unzipFirstCsv } from '../official/nse-files';
+import { indexCloseUrl, officialIndexCloses, parseIndexClose, unzipFirstCsv } from '../official/nse-files';
 import { datesToFetch } from '../fno/store';
-import { INDICES } from '../symbols';
+import { INDICES, faceValueOf } from '../symbols';
 import { unzipSync, strFromU8 } from 'fflate';
-import { adjustedCandles, dayTime, findAdjustments, type Adjustment, type CorporateAction, type RawBar, type UnhandledAction } from './adjust';
+import { adjustedCandles, dayTime, findAdjustments, findBreaks, type Adjustment, type CorporateAction, type RawBar, type UnhandledAction } from './adjust';
 import { CM_UDIFF_FROM, cmBhavcopyUrl, parseOldCm, parseUdiffCm, type EquityDay } from './bhavcopy';
 import { findBcFile, parseBc, parsePurpose, prBundleUrl, type CorporateActionRow } from './corporate';
 
@@ -58,6 +58,10 @@ function addDate(d: string) {
   if (i < 0) dates.push(d); else if (dates[i] !== d) dates.splice(i, 0, d);
 }
 
+let loaded = false;
+/** True once all stored history (and corporate actions) is in memory; before that, answers would be partial. */
+export const eodLoaded = () => loaded;
+
 /** Loads all stored history into memory, a month at a time. */
 export async function loadEod(log: (m: string) => void): Promise<void> {
   const all = (await prisma.eodFetch.findMany({ where: { status: 'saved' }, select: { date: true }, orderBy: { date: 'asc' } })).map((f) => f.date);
@@ -72,6 +76,7 @@ export async function loadEod(log: (m: string) => void): Promise<void> {
     chunk.forEach(addDate);
   }
   for (const a of await prisma.corporateAction.findMany({ select: { symbol: true, exDate: true, purpose: true } })) addAction(a);
+  loaded = true;
   log(`NSE end-of-day history: ${dates.length} days, ${bySymbol.size} stocks in memory`);
 }
 
@@ -81,11 +86,13 @@ export async function fetchEodDay(date: string): Promise<{ day: EquityDay; indic
   const zip = new Uint8Array(await (await nseGet(cmBhavcopyUrl(date))).arrayBuffer());
   const csv = unzipFirstCsv(zip);
   const day = date >= CM_UDIFF_FROM ? parseUdiffCm(csv, date) : parseOldCm(csv, date);
-  const closes = parseIndexClose(await (await nseGet(indexCloseUrl(date))).text());
   if (day.rows.length < 500) throw new Error(`${date}: equity file looks incomplete (${day.rows.length} stocks)`);
+  let prFiles: Record<string, Uint8Array> | null = null;
+  const prBundle = async () => (prFiles ??= unzipSync(new Uint8Array(await (await nseGet(prBundleUrl(date))).arrayBuffer())));
+  const closes = await officialIndexCloses(date, nseGet, prBundle, (e) => e instanceof NotPublished);
   if (!closes.has('NIFTY 50')) throw new Error(`${date}: index file has no NIFTY 50`);
   const indices = new Map([...closes].map(([name, b]) => [name, { date, openPaise: toPaise(b.open), highPaise: toPaise(b.high), lowPaise: toPaise(b.low), closePaise: toPaise(b.close) }]));
-  const pr = unzipSync(new Uint8Array(await (await nseGet(prBundleUrl(date))).arrayBuffer()));
+  const pr = await prBundle();
   const bcName = findBcFile(Object.keys(pr));
   if (!bcName) throw new Error(`${date}: PR bundle format changed: no corporate action (Bc) file`);
   return { day, indices, actions: parseBc(strFromU8(pr[bcName])) };
@@ -195,7 +202,14 @@ function lineage(symbol: string): MemBar[] {
   return earlier ? [...lineage(earlier[0].symbol).filter((b) => b.date < first.date), ...own] : own;
 }
 
-export type DailyHistory = { candles: Candle[]; adjustments: Adjustment[]; unhandled: UnhandledAction[]; from: string; to: string };
+/**
+ * `breaks`: trading days where the adjusted series is not continuous with the day before, so no study or backtest
+ * should measure across them: an ISIN change with no recorded split or bonus that day (NSE's corporate-action file
+ * does not list every action, e.g. SHRIRAMFIN's split of Jan 2025), a corporate action we cannot adjust (capital
+ * reduction, demerger, rights without a price), or an opening gap over 50% after all adjustments.
+ */
+import type { DataBreak } from './adjust';
+export type DailyHistory = { candles: Candle[]; adjustments: Adjustment[]; unhandled: UnhandledAction[]; breaks: DataBreak[]; from: string; to: string };
 
 /** Adjusted daily candles for a stock, or for one of our indices. Null if we hold no history for it. */
 export function dailyHistory(symbol: string): DailyHistory | null {
@@ -204,13 +218,22 @@ export function dailyHistory(symbol: string): DailyHistory | null {
     const list = index.nseName ? indexByName.get(index.nseName) : undefined;
     if (!list?.length) return null;
     const candles = list.map((b) => ({ time: dayTime(b.date), open: b.openPaise / 100, high: b.highPaise / 100, low: b.lowPaise / 100, close: b.closePaise / 100, volume: 0 }));
-    return { candles, adjustments: [], unhandled: [], from: list[0].date, to: list[list.length - 1].date };
+    return { candles, adjustments: [], unhandled: [], breaks: [], from: list[0].date, to: list[list.length - 1].date };
   }
   const bars = lineage(symbol);
   if (!bars.length) return null;
   const actions = [...new Set(bars.map((b) => b.symbol))].flatMap((s) => actionsBySymbol.get(s) ?? []);
-  const { adjustments, unhandled } = findAdjustments(bars, actions);
-  return { candles: adjustedCandles(bars, adjustments), adjustments, unhandled, from: bars[0].date, to: bars[bars.length - 1].date };
+  const { adjustments, unhandled } = findAdjustments(bars, actions, faceValueOf(symbol));
+  const candles = adjustedCandles(bars, adjustments);
+  return { candles, adjustments, unhandled, breaks: findBreaks(bars, candles, adjustments, unhandled), from: bars[0].date, to: bars[bars.length - 1].date };
+}
+
+/** ISIN of ordinary equity shares: INE + issuer (4) + security type 01 + serial (3); excludes ETFs and mutual-fund units (INF…), rights entitlements (type 20) and partly paid shares (IN9…). */
+export const isEquityShareIsin = (isin: string) => /^INE[A-Z0-9]{4}01[A-Z0-9]{3}$/.test(isin);
+
+/** Every symbol with stored history whose latest ISIN is an ordinary equity share, including ones no longer traded. */
+export function allEquityShareSymbols(): string[] {
+  return [...bySymbol].filter(([, l]) => isEquityShareIsin(l[l.length - 1].isin)).map(([s]) => s).sort();
 }
 
 /** Stocks that traded on the latest stored day. */

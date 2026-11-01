@@ -1,212 +1,148 @@
+// My Trading View data service: NSE end-of-day data for research, backtesting and strategy building. The product
+// publishes no live or delayed prices: charts, quotes and backtests read only NSE's official daily files, stored as
+// published (apps/feed/src/eod). Zerodha Kite is the owner's personal connection for internal research scripts only.
+
 import cors from '@fastify/cors';
-import websocket from '@fastify/websocket';
 import Fastify, { type FastifyRequest } from 'fastify';
-import type { WebSocket } from 'ws';
-import { BacktestError, OptionsBacktestError, runBacktest, runOptionsBacktest, validateStrategy, type OptionsStrategy, type RuleSet, type Strategy } from '@mtv/backtest';
+import { BacktestError, OptionsBacktestError, STUDY_HORIZONS, SimError, StudyTally, breakIndices, findEvents, runBacktest, runOptionsBacktest, simulatePosition, type OptionsStrategy, type SimInput, type RuleSet, type Strategy, type StudyEvent } from '@mtv/backtest';
 import { prisma } from '@mtv/db';
-import { toPaise, type PlaceOrderInput } from '@mtv/paper';
-import { NEEDS_BROKER, TIMEFRAMES, marketSession, type Candle, type ClientMessage, type DataStatus, type Quote, type ServerMessage, type Timeframe } from '@mtv/shared';
-import { verifyFeedToken, type FeedClaims, type Plan } from '@mtv/shared/feed-token';
-import { DelayBuffer, LiveUsageRecorder, delayCandles, delayCandlesWithPartial, delayedQuoteFromBars } from './access';
-import { PaperEngine } from './paper/engine';
-import { PrismaPaperRepo } from './paper/repo';
-import { FreeProvider } from './providers/free';
-import { KiteProvider, LIVE_CHAIN_UNDERLYINGS, type LiveChainUnderlying } from './providers/kite/provider';
-import { activeSession, clearSession, createSession, kiteConfigured, loadSession, loginUrl } from './providers/kite/session';
-import { SwitchProvider } from './providers/switch';
-import { NotFoundError, type MarketDataProvider } from './providers/types';
-import { officialAttempts, startOfficialJob } from './official/job';
-import { applyOfficial, loadOfficialStore, storedDays } from './official/store';
+import { positionMargin } from '@mtv/options';
+import { EOD_TIMEFRAMES, type DataStatus, type EodTimeframe, type Quote } from '@mtv/shared';
+import { verifyFeedToken, type FeedClaims } from '@mtv/shared/feed-token';
+import { activeSession, clearSession, createSession, kiteConfigured, loginUrl } from './providers/kite/session';
 import { FNO_UNDERLYINGS, type FnoUnderlying } from './fno/bhavcopy';
 import { getChain, latestFnoDate } from './fno/chain';
-import { SPAN_UNDERLYINGS, spanToday } from './fno/span';
-import { positionMargin } from '@mtv/options';
 import { prismaOptionsData } from './fno/data';
+import { futuresHistory } from './fno/futures';
+import { startParticipantSync } from './fno/participants';
+import { startFiiStatsSync } from './fno/fii-stats';
+import { startNsdlDaily } from './fno/fpi-flows';
+import { SPAN_UNDERLYINGS, spanOn, spanToday } from './fno/span';
+import { brokerById } from '@mtv/paper';
 import { fnoStatus, startFnoSync } from './fno/store';
-import { classifyBuildUp, futuresHistory, previousOi } from './fno/futures';
-import { ALERT_LIMITS, AlertEngine, planOf } from './alerts/engine';
-import { StudyError, catalog as studyCatalog, computeStudy, encodeNonFinite } from './studies/library';
-import { ALERT_TIMEFRAMES, type PriceParams, type RulesParams } from './alerts/logic';
+import { allEquityShareSymbols, dailyHistory, eodLoaded, eodStatus, startEodSync } from './eod/store';
+import { eodCandles, eodSeries, lastCloseQuote } from './eod/timeframes';
 import { auditCandles } from './quality';
-import { dailyHistory, eodStatus, onEodReady, startEodSync } from './eod/store';
-import { publishStrategies, latestSignals, runSignals, signalDetail, signalsOverview } from './signals/runner';
+import { MARKET_EVENTS, niftyDays } from './research/nifty-days';
+import { OVERVIEW_INDICES, breadth, indexCard, indexMembers, moveOn, movers, type StockMove } from './research/overview';
 import { ScanError, runScan } from './signals/scanner';
-import { INDICES, allEquitySymbols, findInstrument, loadEquities, searchInstruments } from './symbols';
+import { StudyError, catalog as studyCatalog, computeStudy, encodeNonFinite } from './studies/library';
+import { findInstrument, loadEquities, searchInstruments } from './symbols';
+import { COUNTED_ROUTES, VisitorQuota } from './visitor-quota';
 
 const PORT = Number(process.env.FEED_PORT ?? 4001);
 const WEB_ORIGIN = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 const TOKEN_SECRET = process.env.FEED_TOKEN_SECRET ?? '';
-const MAX_SUBSCRIPTIONS = 100;
+const MAX_SYMBOLS = 100;
+/** Free runs a day for a visitor who hasn't signed in (per visitor id), and from one IP address. */
+const VISITOR_DAILY_RUNS = Number(process.env.VISITOR_DAILY_RUNS ?? 5);
+const VISITOR_DAILY_RUNS_PER_IP = Number(process.env.VISITOR_DAILY_RUNS_PER_IP ?? VISITOR_DAILY_RUNS * 4);
 if (TOKEN_SECRET.length < 32) throw new Error('FEED_TOKEN_SECRET (32+ characters, shared with the web app) must be set in .env');
 
-const app = Fastify({ logger: { level: 'info' } });
+// Behind a reverse proxy (production), set TRUST_PROXY=1 so req.ip is the visitor's address, not the proxy's.
+const app = Fastify({ logger: { level: 'info' }, trustProxy: process.env.TRUST_PROXY === '1' });
 
 declare module 'fastify' {
   interface FastifyRequest { user?: FeedClaims }
 }
 
-// Kite when DATA_PROVIDER=kite and logged in today; the free delayed source otherwise.
-const wantKite = process.env.DATA_PROVIDER === 'kite';
-const dirty = new Set<string>(); // symbols with new live ticks, flushed to browsers every 500 ms
-const kite = new KiteProvider((m) => app.log.info(m), (symbols) => symbols.forEach((s) => dirty.add(s)));
-const provider: MarketDataProvider = new SwitchProvider(new FreeProvider(), kite, wantKite);
-if (wantKite && !kiteConfigured()) app.log.warn('DATA_PROVIDER=kite but KITE_API_KEY / KITE_API_SECRET are not set; using free delayed data.');
-
-// A failed background job (database restarting, NSE unreachable) must never take the price feed down: log it loudly.
+// A failed background job (database restarting, NSE unreachable) must never take the service down: log it loudly.
 process.on('unhandledRejection', (e) => app.log.error({ err: e }, 'Unhandled background error'));
-// The website calls PATCH and DELETE too (pause/delete alerts, cancel paper orders): the default only allows GET/HEAD/POST.
-await app.register(cors, { origin: [WEB_ORIGIN], methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'] });
-// An empty body sent as JSON (e.g. a DELETE from a client that always sets the header) means "no body", not an error.
+await app.register(cors, { origin: [WEB_ORIGIN], methods: ['GET', 'HEAD', 'POST'], exposedHeaders: ['X-Visitor-Remaining'] });
+// An empty body sent as JSON means "no body", not an error.
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
   const text = String(body ?? '');
   if (!text.trim()) return done(null, undefined);
   try { done(null, JSON.parse(text)); } catch { const e = new Error('Invalid JSON body') as Error & { statusCode: number }; e.statusCode = 400; done(e, undefined); }
 });
-await app.register(websocket);
 
-const now = () => Math.floor(Date.now() / 1000);
+/** NSE end-of-day status: the last trading day held. */
+const status = (): DataStatus => {
+  const nifty = dailyHistory('NIFTY');
+  return { provider: 'nse-eod', delayed: false, asOf: nifty?.to };
+};
 
-// ---- access control and entitlements ----
+// ---- access control ----
 const tokenFrom = (req: FastifyRequest) => {
   const h = req.headers.authorization;
   if (h?.startsWith('Bearer ')) return h.slice(7);
   return (req.query as { token?: string } | undefined)?.token;
 };
-const plans = new Map<string, Plan>(); // last known plan per user (from their tokens); unknown = FREE
-const liveSource = () => !provider.status.delayed;
-const isLive = (plan: Plan | undefined) => plan === 'LIVE';
-const statusFor = (plan: Plan | undefined): DataStatus => ({ ...provider.status, delayed: provider.status.delayed || !isLive(plan) });
-const delayBuffer = new DelayBuffer();
-const liveUsage = new LiveUsageRecorder(
-  (userId, month) => prisma.liveUsage.upsert({ where: { userId_month: { userId, month } }, create: { userId, month }, update: {} }).then(() => undefined),
-  (m) => app.log.warn(m),
-);
-
-// 1-minute bars per symbol, refreshed at most once a minute, for Free users' delayed prices on a live source
-// (the tick buffer only has data once the feed has been live for 15 minutes).
-const oneMinute = new Map<string, { bars: Candle[]; at: number; loading: boolean }>();
-function oneMinuteBars(symbol: string): Candle[] {
-  const e = oneMinute.get(symbol);
-  if (!e || (!e.loading && Date.now() - e.at > 60_000)) {
-    const entry = e ?? { bars: [], at: 0, loading: false };
-    entry.loading = true;
-    oneMinute.set(symbol, entry);
-    provider.candles(symbol, '1').then(
-      (bars) => { entry.bars = bars; entry.at = Date.now(); },
-      (err) => app.log.warn(`1-minute bars for ${symbol} failed: ${(err as Error).message}`),
-    ).finally(() => { entry.loading = false; });
-  }
-  return e?.bars ?? [];
-}
-async function oneMinuteBarsNow(symbol: string): Promise<Candle[]> {
-  const e = oneMinute.get(symbol);
-  if (e && Date.now() - e.at <= 60_000) return e.bars;
-  const bars = await provider.candles(symbol, '1');
-  oneMinute.set(symbol, { bars, at: Date.now(), loading: false });
-  return bars;
-}
-
-/** The quote a user may see: live for the Live plan; 15 minutes old for Free when the source is live. */
-const quoteFor = (q: Quote, plan: Plan | undefined): Quote | null => {
-  if (!liveSource() || isLive(plan)) return q;
-  return delayBuffer.delayed(q.symbol, now()) ?? delayedQuoteFromBars(q, oneMinuteBars(q.symbol), now());
-};
-/** Bars a user may see: Free users on a live source get data 15+ minutes old, including the bar in progress then. */
-async function candlesFor(symbol: string, candles: Candle[], tf: Timeframe, plan: Plan | undefined): Promise<Candle[]> {
-  if (!liveSource() || isLive(plan)) return candles;
-  try {
-    const [minutes, daily] = await Promise.all([oneMinuteBarsNow(symbol), tf === 'W' ? provider.candles(symbol, 'D') : Promise.resolve([])]);
-    return delayCandlesWithPartial(candles, tf, now(), minutes, daily);
-  } catch (e) {
-    app.log.warn(`Delayed partial bar for ${symbol} unavailable: ${(e as Error).message}`);
-    return delayCandles(candles, tf, now()); // still never newer than the cutoff
-  }
-}
-/** Every live quote from the provider passes through here so the delay buffer stays complete. */
-const remember = (quotes: Quote[]) => {
-  for (const q of quotes) {
-    lastQuotes.set(q.symbol, q);
-    if (liveSource()) delayBuffer.push(q);
-  }
-};
-
-// Public: health, and the Kite login redirects (a browser navigation cannot carry the token; Zerodha only accepts the
-// app owner's own Kite account). Everything else under /api needs a valid feed token.
-const PUBLIC = new Set(['/api/kite/status', '/api/kite/login', '/api/kite/callback']);
-/** What a visitor without an account (public chart page) may read: delayed chart data, nothing else. */
-const VISITOR = new Set(['/api/search', '/api/candles', '/api/quotes', '/api/studies/catalog', '/api/studies/compute']);
+// Public: the owner's Kite login redirects (a browser navigation cannot carry the token). Everything else under /api
+// needs a valid feed token.
+const PUBLIC = new Set(['/api/kite/login', '/api/kite/callback']);
+/** Routes that read the in-memory NSE history. */
+const NEEDS_HISTORY = new Set(['/api/dashboard', '/api/research/study', '/api/research/fii', '/api/candles', '/api/quotes', '/api/backtest', '/api/options-backtest', '/api/studies/compute', '/api/research/nifty-days', '/api/eod/history', '/api/scan']);
+// Visitors without an account may use everything (owner routes check `admin` themselves), with a daily allowance
+// of runs (COUNTED_ROUTES). A run is counted only when it succeeds, so a rejected rule doesn't use one up.
+const quota = new VisitorQuota(VISITOR_DAILY_RUNS, VISITOR_DAILY_RUNS_PER_IP);
+const counted = (req: FastifyRequest) => !!req.user?.anon && COUNTED_ROUTES.has(req.url.split('?')[0]);
 app.addHook('onRequest', async (req, reply) => {
   const path = req.url.split('?')[0];
   if (!path.startsWith('/api/') || PUBLIC.has(path)) return;
   const claims = verifyFeedToken(tokenFrom(req), TOKEN_SECRET);
   if (!claims) return reply.code(401).send({ error: 'unauthorised', message: 'Please sign in again' });
-  if (claims.anon && !VISITOR.has(path)) return reply.code(403).send({ error: 'sign_up_required', message: 'Create a free account to use this feature' });
   req.user = claims;
-  if (!claims.anon) plans.set(claims.uid, claims.plan); // visitors are always Free (the default); don't accumulate their ids
+  if (counted(req) && quota.remaining(claims.uid, req.ip) <= 0) {
+    reply.header('X-Visitor-Remaining', '0');
+    return reply.code(429).send({ error: 'visitor_limit', message: `You've used today's ${VISITOR_DAILY_RUNS} free runs. Sign in with Google (free) for unlimited use.` });
+  }
+  // Never answer from a half-loaded history (the feed loads years of NSE data into memory at start).
+  if (!eodLoaded() && NEEDS_HISTORY.has(path)) return reply.code(503).send({ error: 'loading', message: 'NSE history is loading. Please try again in a moment.' });
 });
 
-app.get('/health', async () => ({ ok: true, status: provider.status, session: marketSession(now()) }));
+app.addHook('onSend', async (req, reply, payload) => {
+  if (counted(req) && reply.statusCode < 400) reply.header('X-Visitor-Remaining', String(quota.take(req.user!.uid, req.ip) ?? 0));
+  return payload;
+});
 
+app.get('/health', async () => ({ ok: true, status: status() }));
 app.get<{ Querystring: { q?: string } }>('/api/search', async (req) => searchInstruments(req.query.q ?? ''));
 
-/** Daily and intraday history with the data audit, NSE official corrections (daily) and the user's entitlement applied. */
-async function history(symbol: string, tf: Timeframe, deep: boolean, plan: Plan | undefined) {
-  let raw = await provider.candles(symbol, tf, deep);
-  let official;
-  if (tf === 'D') ({ candles: raw, official } = applyOfficial(symbol, raw)); // NSE's official record wins
-  const audited = auditCandles(raw, tf);
-  if (official) audited.quality.official = official;
-  return { candles: await candlesFor(symbol, audited.candles, tf, plan), quality: audited.quality };
+const isEodTf = (tf: string): tf is EodTimeframe => (EOD_TIMEFRAMES as string[]).includes(tf);
+
+/** NSE end-of-day candles (corporate-action adjusted) with the data audit; null when we hold no history. */
+function history(symbol: string, tf: EodTimeframe) {
+  const raw = eodCandles(symbol, tf);
+  return raw ? auditCandles(raw, tf) : null;
 }
 
 app.get<{ Querystring: { symbol?: string; tf?: string } }>('/api/candles', async (req, reply) => {
   const symbol = (req.query.symbol ?? '').toUpperCase();
-  const tf = (req.query.tf ?? '5') as Timeframe;
-  if (!TIMEFRAMES.includes(tf)) return reply.code(400).send({ error: 'bad_timeframe' });
+  const tf = req.query.tf ?? 'D';
+  if (!isEodTf(tf)) return reply.code(400).send({ error: 'bad_timeframe', message: 'End-of-day data: D, W or M' });
   const instrument = findInstrument(symbol);
   if (!instrument) return reply.code(404).send({ error: 'unknown_symbol' });
-  try {
-    const { candles, quality } = await history(symbol, tf, false, req.user!.plan);
-    if (!quality.ok) req.log.warn({ symbol, tf, missing: quality.missing.length, invalid: quality.invalid.length, misaligned: quality.misaligned.length }, 'candle data quality issues');
-    return { instrument, tf, status: statusFor(req.user!.plan), quality, candles };
-  } catch (e) {
-    if (e instanceof NotFoundError) return reply.code(404).send({ error: 'no_data' });
-    req.log.error(e);
-    return reply.code(502).send({ error: 'upstream_failed' });
-  }
+  const h = history(symbol, tf);
+  if (!h) return reply.code(404).send({ error: 'no_data', message: `No NSE history for ${symbol} yet` });
+  return { instrument, tf, status: status(), quality: h.quality, candles: h.candles };
 });
 
-app.get<{ Querystring: { symbols?: string } }>('/api/quotes', async (req, reply) => {
-  const symbols = (req.query.symbols ?? '').split(',').map((s) => s.trim().toUpperCase()).filter((s) => findInstrument(s));
-  try {
-    const quotes = await provider.quotes(symbols.slice(0, MAX_SUBSCRIPTIONS));
-    remember(quotes);
-    return quotes.map((q) => quoteFor(q, req.user!.plan)).filter((q): q is Quote => !!q);
-  } catch (e) {
-    req.log.error(e);
-    return reply.code(502).send({ error: 'upstream_failed' });
-  }
+/** Last NSE close per symbol, dated (`time` = that trading day). */
+app.get<{ Querystring: { symbols?: string } }>('/api/quotes', async (req) => {
+  const symbols = (req.query.symbols ?? '').split(',').map((s) => s.trim().toUpperCase()).filter((s) => findInstrument(s)).slice(0, MAX_SYMBOLS);
+  return symbols.map(lastCloseQuote).filter((q): q is Quote => !!q);
 });
 
 // ---- backtesting ----
 app.post<{ Body: { symbol?: string; tf?: string; strategy?: Strategy } }>('/api/backtest', async (req, reply) => {
   const symbol = String(req.body?.symbol ?? '').toUpperCase();
-  const tf = (req.body?.tf ?? 'D') as Timeframe;
+  const tf = String(req.body?.tf ?? 'D');
   const instrument = findInstrument(symbol);
   if (!instrument) return reply.code(404).send({ error: 'unknown_symbol', message: `Unknown symbol ${symbol}` });
-  if (!TIMEFRAMES.includes(tf)) return reply.code(400).send({ error: 'bad_timeframe', message: 'Unknown timeframe' });
+  if (!isEodTf(tf)) return reply.code(400).send({ error: 'bad_timeframe', message: 'Backtests run on end-of-day data: D, W or M' });
   if (!req.body?.strategy) return reply.code(400).send({ error: 'bad_strategy', message: 'Missing strategy' });
+  const h = history(symbol, tf);
+  if (!h) return reply.code(404).send({ error: 'no_data', message: `No NSE history for ${symbol} yet` });
   try {
-    const { candles, quality } = await history(symbol, tf, true, req.user!.plan);
     const started = performance.now();
-    const result = runBacktest(candles, tf, req.body.strategy);
-    req.log.info({ symbol, tf, bars: candles.length, trades: result.trades.length, ms: Math.round(performance.now() - started) }, 'backtest');
-    return { instrument, tf, status: statusFor(req.user!.plan), quality, result, candles };
+    const result = runBacktest(h.candles, tf, req.body.strategy);
+    req.log.info({ symbol, tf, bars: h.candles.length, trades: result.trades.length, ms: Math.round(performance.now() - started) }, 'backtest');
+    return { instrument, tf, status: status(), quality: h.quality, result, candles: h.candles };
   } catch (e) {
     if (e instanceof BacktestError) return reply.code(400).send({ error: 'bad_strategy', message: e.message });
-    if (e instanceof NotFoundError) return reply.code(404).send({ error: 'no_data', message: `No data for ${symbol}` });
     req.log.error(e);
-    return reply.code(502).send({ error: 'upstream_failed', message: 'Market data is unavailable right now' });
+    return reply.code(500).send({ error: 'failed', message: 'Backtest failed' });
   }
 });
 
@@ -215,11 +151,11 @@ app.post<{ Body: { strategy?: OptionsStrategy } }>('/api/options-backtest', asyn
   if (!s || !(FNO_UNDERLYINGS as readonly string[]).includes(s.underlying)) return reply.code(400).send({ error: 'bad_strategy', message: 'Options backtests cover NIFTY and BANKNIFTY' });
   try {
     const usesSignals = s.entry.when === 'signal' || !!s.exit.signal;
-    const daily = usesSignals ? (await history(s.underlying, 'D', true, req.user!.plan)).candles : [];
+    const daily = usesSignals ? (history(s.underlying, 'D')?.candles ?? []) : [];
     const started = performance.now();
     const result = await runOptionsBacktest(s, prismaOptionsData, daily);
     req.log.info({ name: s.name, trades: result.trades.length, skipped: result.skipped.length, ms: Math.round(performance.now() - started) }, 'options backtest');
-    return { status: statusFor(req.user!.plan), fno: await fnoStatus(), result };
+    return { status: status(), fno: await fnoStatus(), result };
   } catch (e) {
     if (e instanceof OptionsBacktestError) return reply.code(400).send({ error: 'bad_strategy', message: e.message });
     req.log.error(e);
@@ -228,64 +164,80 @@ app.post<{ Body: { strategy?: OptionsStrategy } }>('/api/options-backtest', asyn
 });
 
 // Margin for an F&O position: SPAN from NSE Clearing's start-of-day file + exposure margin (packages/options/margin.ts).
-type MarginBody = { underlying?: string; spotPaise?: number; legs?: { kind: 'FUT' | 'CE' | 'PE'; expiry: string; strikePaise: number; qty: number; pricePaise?: number }[] };
+// `date` (a past trading day, for the options simulator) uses that day's file from NSE's archive instead.
+type MarginBody = { underlying?: string; spotPaise?: number; date?: string; legs?: { kind: 'FUT' | 'CE' | 'PE'; expiry: string; strikePaise: number; qty: number; pricePaise?: number }[] };
 app.post<{ Body: MarginBody }>('/api/margin', async (req, reply) => {
-  const { underlying, legs, spotPaise } = req.body ?? {};
+  const { underlying, legs, spotPaise, date } = req.body ?? {};
+  if (date != null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.code(400).send({ error: 'bad_date', message: 'Date must be YYYY-MM-DD' });
   if (!underlying || !(SPAN_UNDERLYINGS as readonly string[]).includes(underlying)) return reply.code(400).send({ error: 'bad_underlying', message: `Margin covers ${SPAN_UNDERLYINGS.join(', ')}` });
   const valid = Array.isArray(legs) && legs.length > 0 && legs.length <= 20 && legs.every((l) =>
     ['FUT', 'CE', 'PE'].includes(l.kind) && /^\d{4}-\d{2}-\d{2}$/.test(l.expiry) && Number.isSafeInteger(l.qty) && l.qty !== 0 && Number.isSafeInteger(l.strikePaise) && (l.pricePaise == null || Number.isSafeInteger(l.pricePaise)));
   if (!valid) return reply.code(400).send({ error: 'bad_legs', message: 'Send 1–20 legs with kind, expiry, strike, signed quantity' });
   try {
-    const span = await spanToday();
+    const today = await spanToday();
+    const past = date != null && date !== today?.tradeDate;
+    const span = past ? await spanOn(date, underlying) : today;
     const d = span?.data[underlying];
-    if (!span || !d) return reply.code(503).send({ error: 'no_span', message: 'NSE margin file is not available right now' });
+    if (!span || !d) return reply.code(503).send({ error: 'no_span', message: past ? `NSE's margin file for ${date} is not available` : 'NSE margin file is not available right now' });
     const marginLegs = legs!.map((l) => ({ kind: l.kind, expiry: l.expiry, strike: l.strikePaise / 100, qty: l.qty, pricePaise: l.pricePaise }));
     const spot = Number.isSafeInteger(spotPaise) && spotPaise! > 0 ? spotPaise! : Math.round(d.spot * 100);
-    return { ...positionMargin(d, marginLegs, spot, span.tradeDate), file: d.file, created: d.created, tradeDate: span.tradeDate };
+    return { ...positionMargin(d, marginLegs, spot, span.tradeDate), file: d.file, created: d.created, tradeDate: span.tradeDate, historical: past };
   } catch (e) {
     req.log.error(e);
     return reply.code(502).send({ error: 'failed', message: 'Margin calculation failed' });
   }
 });
 
-// ---- Kite Connect login (owner's personal app, local development only; Zerodha expires the session at 6 AM IST) ----
-const kiteStatus = () => {
-  const s = activeSession();
-  return { selected: wantKite, configured: kiteConfigured(), loggedIn: !!s, userName: s?.userName ?? null, expiresAt: s?.expiresAt ?? null, live: kite.ticker.connected, ready: kite.ready };
-};
-app.get('/api/kite/status', async () => kiteStatus());
-app.get('/api/kite/login', async (_req, reply) => {
-  if (!kiteConfigured()) return reply.code(400).send({ error: 'not_configured', message: 'Add KITE_API_KEY and KITE_API_SECRET to .env' });
-  return reply.redirect(loginUrl());
-});
-app.get<{ Querystring: { request_token?: string; status?: string } }>('/api/kite/callback', async (req, reply) => {
-  const back = (result: string) => reply.redirect(`${WEB_ORIGIN}/terminal?kite=${result}`);
-  if (!req.query.request_token || req.query.status === 'cancelled') return back('cancelled');
+// Options simulator: a position built on a past day, followed on NSE's closes to expiry (packages/backtest/simulate.ts).
+type SimBody = Omit<SimInput, 'broker'> & { broker?: string };
+app.post<{ Body: SimBody }>('/api/options-sim', async (req, reply) => {
+  const b = req.body;
+  if (!b || !(FNO_UNDERLYINGS as readonly string[]).includes(b.underlying)) return reply.code(400).send({ error: 'bad_position', message: 'The simulator covers NIFTY and BANKNIFTY' });
   try {
-    const s = await createSession(req.query.request_token);
-    await startKite();
-    app.log.info(`Kite connected for ${s.userId}`);
-    return back('connected');
+    const started = performance.now();
+    const result = await simulatePosition({ underlying: b.underlying, entryDate: b.entryDate, legs: b.legs, broker: brokerById(b.broker) }, prismaOptionsData);
+    req.log.info({ entry: b.entryDate, legs: b.legs?.length, days: result.days.length, ms: Math.round(performance.now() - started) }, 'options simulation');
+    return result;
   } catch (e) {
-    app.log.error(e, 'Kite login failed');
-    return back('failed');
+    if (e instanceof SimError) return reply.code(400).send({ error: 'bad_position', message: e.message });
+    req.log.error(e);
+    return reply.code(502).send({ error: 'failed', message: 'Simulation failed' });
   }
 });
-app.post('/api/kite/logout', async (req, reply) => {
-  if (!req.user?.admin) return reply.code(403).send({ error: 'forbidden', message: 'Only the site owner can disconnect Kite' });
-  kite.ticker.stop();
-  await clearSession();
-  broadcastStatus();
-  return { ok: true };
-});
 
-async function startKite() {
-  await kite.loadInstruments();
-  kite.ticker.start();
-  // Record the whole market, not just what someone is watching, so Free users' delayed replay is complete.
-  kite.streamAlways([...INDICES.map((i) => i.symbol), ...allEquitySymbols()]);
-  broadcastStatus();
-}
+// Dashboard: the last NSE session at a glance (research/overview.ts). Cached per session; it reads ~500 histories.
+let overviewCache: { key: string; at: number; body: unknown } | null = null;
+app.get('/api/dashboard', async (req, reply) => {
+  const indices = OVERVIEW_INDICES.map((s) => indexCard(s, dailyHistory(s)?.candles)).filter((c) => c != null);
+  const asOf = indices.find((c) => c.symbol === 'NIFTY')?.date;
+  if (!asOf) return reply.code(503).send({ error: 'loading', message: 'NSE history is loading. Please try again in a moment.' });
+  if (overviewCache?.key === asOf && Date.now() - overviewCache.at < 15 * 60_000) return overviewCache.body;
+  const lists = await Promise.allSettled([indexMembers('NIFTY 50'), indexMembers('NIFTY 500')]);
+  const n50 = lists[0].status === 'fulfilled' ? lists[0].value : null, n500 = lists[1].status === 'fulfilled' ? lists[1].value : null;
+  const moves = new Map<string, StockMove | null>();
+  for (const sym of new Set([...(n50?.symbols ?? []), ...(n500?.symbols ?? [])])) moves.set(sym, moveOn(sym, dailyHistory(sym)?.candles, asOf));
+  const [fii, fpi] = await Promise.all([
+    prisma.participantOi.findMany({ where: { kind: 'oi', participant: 'FII' }, orderBy: { date: 'desc' }, take: 2 }),
+    prisma.fpiFlow.findFirst({ where: { category: 'Equity', route: 'Sub-total' }, orderBy: { reportDate: 'desc' } }),
+  ]);
+  const pos = (r: (typeof fii)[number]) => ({ date: r.date, futLong: Number(r.futIdxLong), futShort: Number(r.futIdxShort), callLong: Number(r.optIdxCallLong), callShort: Number(r.optIdxCallShort), putLong: Number(r.optIdxPutLong), putShort: Number(r.optIdxPutShort) });
+  const body = {
+    asOf,
+    indices,
+    nifty50: n50 && { listFetched: n50.fetched, breadth: breadth(n50.symbols, moves), ...movers(n50.symbols.map((x) => moves.get(x)).filter((m): m is StockMove => !!m)) },
+    nifty500: n500 && { listFetched: n500.fetched, breadth: breadth(n500.symbols, moves) },
+    fii: fii.length ? { latest: pos(fii[0]), previous: fii[1] ? pos(fii[1]) : null } : null,
+    fpi: fpi && { reportDate: fpi.reportDate, netCr: Number(fpi.netCr) },
+    sources: {
+      prices: 'NSE end-of-day files (bhavcopy and index closes), corporate-action adjusted',
+      members: 'NSE index constituent lists (nsearchives content/indices), current membership',
+      fii: 'NSE participant-wise open interest, index futures and options, contracts',
+      fpi: 'NSDL Daily Trends in FPI Investments, equity (covers the previous trading day)',
+    },
+  };
+  if (n50 && n500) overviewCache = { key: asOf, at: Date.now(), body };
+  return body;
+});
 
 // ---- F&O end-of-day data ----
 app.get('/api/fno/status', async () => fnoStatus());
@@ -297,67 +249,128 @@ app.get<{ Querystring: { underlying?: string; date?: string; expiry?: string } }
   const chain = await getChain(u as FnoUnderlying, date, req.query.expiry);
   return chain ?? reply.code(404).send({ error: 'no_data', message: `No options for ${u} on ${date}` });
 });
-// ---- TradingView-equivalent indicator library: calculated here, drawn in the browser ----
-app.get('/api/studies/catalog', async (_req, reply) => {
-  reply.header('Cache-Control', 'private, max-age=3600');
-  return { indicators: await studyCatalog() };
-});
-app.post<{ Body: { symbol?: string; tf?: string; id?: string; inputs?: Record<string, unknown> } }>('/api/studies/compute', async (req, reply) => {
-  const symbol = String(req.body?.symbol ?? '').toUpperCase();
-  const tf = String(req.body?.tf ?? '') as Timeframe;
-  if (!findInstrument(symbol)) return reply.code(404).send({ error: 'unknown_symbol', message: `Unknown symbol ${symbol}` });
-  if (!TIMEFRAMES.includes(tf)) return reply.code(400).send({ error: 'bad_timeframe', message: 'Unknown timeframe' });
-  try {
-    const { candles } = await history(symbol, tf, false, req.user!.plan); // the same (entitled) candles the chart shows
-    const result = await computeStudy(String(req.body?.id ?? ''), candles, req.body?.inputs ?? {});
-    reply.header('Content-Type', 'application/json');
-    return JSON.stringify({ result }, encodeNonFinite);
-  } catch (e) {
-    if (e instanceof StudyError) return reply.code(400).send({ error: 'bad_study', message: e.message });
-    if (e instanceof NotFoundError) return reply.code(404).send({ error: 'no_data', message: `No data for ${symbol}` });
-    req.log.error(e);
-    return reply.code(502).send({ error: 'failed', message: 'Indicator could not be calculated' });
-  }
-});
-
-// ---- index futures: history from NSE's files for every signed-in user; live (Kite) for admin / Live plan ----
 app.get<{ Querystring: { underlying?: string; days?: string } }>('/api/futures/history', async (req, reply) => {
   const u = String(req.query.underlying ?? 'NIFTY').toUpperCase();
   if (!(FNO_UNDERLYINGS as readonly string[]).includes(u)) return reply.code(400).send({ error: 'bad_underlying', message: 'Futures cover NIFTY and BANKNIFTY' });
   const days = Math.min(750, Math.max(5, Number(req.query.days) || 250));
   return { underlying: u, days: await futuresHistory(u as FnoUnderlying, days) };
 });
-app.get<{ Querystring: { underlying?: string } }>('/api/futures/live', async (req, reply) => {
-  const u = String(req.query.underlying ?? 'NIFTY').toUpperCase() as LiveChainUnderlying;
-  if (!(LIVE_CHAIN_UNDERLYINGS as readonly string[]).includes(u)) return reply.code(400).send({ error: 'bad_underlying', message: 'Futures cover NIFTY and BANKNIFTY' });
-  if (!liveSource() || !kite.ready) return reply.code(503).send({ error: NEEDS_BROKER, message: 'Live futures need a live data connection' });
-  if (!isLive(req.user!.plan) && !req.user!.admin) return reply.code(403).send({ error: 'live_plan_required', message: 'Live futures are on the Live plan. End-of-day futures data is shown below.' });
+
+// ---- research: NIFTY day by day (rows only; tables are built from them in the browser) ----
+let expiryCache: { at: number; expiries: Set<string>; fnoDates: Set<string> } | null = null;
+app.get('/api/research/nifty-days', async (_req, reply) => {
+  const nifty = dailyHistory('NIFTY'), vix = dailyHistory('INDIAVIX');
+  if (!nifty) return reply.code(503).send({ error: 'no_data', message: 'NIFTY history is not loaded yet' });
+  if (!expiryCache || Date.now() - expiryCache.at > 3600_000) {
+    const [ex, days] = await Promise.all([
+      prisma.$queryRawUnsafe<{ expiry: string }[]>(`select distinct expiry from "FnoEod" where underlying = 'NIFTY' and kind = 'CE'`),
+      prisma.fnoDayMeta.findMany({ where: { underlying: 'NIFTY' }, select: { date: true } }),
+    ]);
+    expiryCache = { at: Date.now(), expiries: new Set(ex.map((e) => e.expiry)), fnoDates: new Set(days.map((d) => d.date)) };
+  }
+  const rows = niftyDays(nifty.candles, vix?.candles ?? [], expiryCache.expiries, expiryCache.fnoDates);
+  return { source: 'NSE official index closes (ind_close_all; PR bundle Pd before 2013)', from: rows[0]?.date ?? null, to: rows.at(-1)?.date ?? null, events: MARKET_EVENTS, rows };
+});
+
+// ---- research engine: every bar where a condition holds, and what happened next (packages/backtest/study.ts) ----
+type StudyBody = { symbol?: string; tf?: string; rules?: RuleSet; horizons?: number[]; fromYear?: string; toYear?: string; excludeEvents?: string[] };
+app.post<{ Body: StudyBody }>('/api/research/study', async (req, reply) => {
+  const b = req.body ?? {};
+  const tf = String(b.tf ?? 'D');
+  if (!isEodTf(tf)) return reply.code(400).send({ error: 'bad_timeframe', message: 'End-of-day data: D, W or M' });
+  const rules = b.rules;
+  if (!rules?.conditions?.length || !['all', 'any'].includes(rules.match)) return reply.code(400).send({ error: 'bad_rules', message: 'Add at least one condition' });
+  const horizons = (Array.isArray(b.horizons) && b.horizons.length ? b.horizons : STUDY_HORIZONS).filter((h) => Number.isInteger(h) && h >= 1 && h <= 250).slice(0, 6);
+  const all = String(b.symbol ?? '').toUpperCase() === 'ALL';
+  // "All" = every ordinary equity share with history, delisted ones included (no ETFs, rights entitlements, partly paid).
+  const symbols = all ? allEquityShareSymbols() : [String(b.symbol ?? '').toUpperCase()];
+  if (!all && !findInstrument(symbols[0])) return reply.code(404).send({ error: 'unknown_symbol', message: `Unknown symbol ${symbols[0]}` });
+  // Excluded events by id or group prefix ('covid', 'election', 'budget' leave out every event of that kind).
+  const excluded = MARKET_EVENTS.filter((e) => (b.excludeEvents ?? []).some((x) => e.id === x || e.id.startsWith(`${x}-`)));
+  const keep = (d: string) => (!b.fromYear || d.slice(0, 4) >= b.fromYear) && (!b.toYear || d.slice(0, 4) <= b.toYear) && !excluded.some((e) => d >= e.from && d <= e.to);
+  const years = new StudyTally(horizons, (d) => d.slice(0, 4), keep), months = new StudyTally(horizons, (d) => d.slice(0, 7), keep);
+  const latest: StudyEvent[] = [];
+  const breaksHit: { symbol: string; date: string; reason: string }[] = [];
+  let total = 0, scanned = 0, breakCount = 0;
+  const started = performance.now();
   try {
-    const today = new Date((now() + 5.5 * 3600) * 1000).toISOString().slice(0, 10);
-    const [live, prev] = await Promise.all([kite.liveFutures(u), previousOi(u, today)]);
-    const total = live.contracts.reduce((s, c) => s + c.oi, 0);
-    const contracts = live.contracts.map((c) => {
-      const prevOi = prev?.oi.get(c.expiry);
-      const change = c.prevClosePaise > 0 && c.ltpPaise > 0 ? c.ltpPaise - c.prevClosePaise : null;
-      const oiChange = prevOi != null ? c.oi - prevOi : null;
-      const basis = live.spotPaise != null && c.ltpPaise > 0 ? c.ltpPaise - live.spotPaise : null;
-      const dte = Math.max(0, Math.round((Date.parse(`${c.expiry}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400_000));
-      return {
-        ...c, changePaise: change, oiChange, oiBaseDate: prev?.date ?? null, buildUp: classifyBuildUp(change, oiChange), basisPaise: basis, daysToExpiry: dte,
-        premiumPct: basis != null && live.spotPaise ? (basis / live.spotPaise) * 100 : null,
-        carryPct: basis != null && live.spotPaise && dte > 0 ? (basis / live.spotPaise) * (365 / dte) * 100 : null,
-      };
-    });
-    return { underlying: u, asOf: now(), spotPaise: live.spotPaise, lot: live.lot, totalOi: total, rolloverPct: total > 0 && contracts.length > 1 ? ((total - contracts[0].oi) / total) * 100 : null, contracts };
+    for (const s of symbols) {
+      const series = eodSeries(s, tf);
+      if (!series || series.candles.length < 2) continue;
+      scanned++;
+      const c = series.candles;
+      const brk = breakIndices(c, series.breaks.map((x) => x.date));
+      for (const x of series.breaks) { if (!keep(x.date)) continue; breakCount++; breaksHit.push({ symbol: s, ...x }); }
+      years.addBaseline(c, brk); months.addBaseline(c, brk);
+      for (const e of findEvents(s, c, rules, horizons, brk)) {
+        if (!keep(e.date)) continue;
+        total++;
+        years.addEvent(e); months.addEvent(e);
+        latest.push(e);
+      }
+      if (latest.length > 4000) { latest.sort((x, y) => (x.date < y.date ? 1 : -1)); latest.length = 2000; }
+    }
   } catch (e) {
     req.log.error(e);
-    return reply.code(502).send({ error: 'upstream_failed', message: 'Live futures are unavailable right now' });
+    return reply.code(400).send({ error: 'bad_rules', message: 'These conditions could not be evaluated' });
+  }
+  latest.sort((x, y) => (x.date < y.date ? 1 : x.date > y.date ? -1 : x.symbol < y.symbol ? -1 : 1));
+  req.log.info({ symbols: scanned, tf, events: total, ms: Math.round(performance.now() - started) }, 'research study');
+  breaksHit.sort((x, y) => (x.date < y.date ? 1 : -1));
+  return { tf, horizons, symbols: scanned, totalEvents: total, years: years.rows(), months: months.rows(), events: latest.slice(0, 2000), excluded: excluded.map((e) => e.name), dataBreaks: { count: breakCount, latest: breaksHit.slice(0, 200) } };
+});
+
+// ---- research: FII footprints, day by day (NSE participant OI, NSE FII derivatives statistics, NSDL FPI flows) ----
+app.get('/api/research/fii', async () => {
+  const [oi, stats, flows] = await Promise.all([
+    prisma.participantOi.findMany({ where: { kind: 'oi' }, orderBy: { date: 'asc' } }),
+    prisma.fiiDerivStat.findMany({ where: { segment: { in: ['INDEX FUTURES', 'INDEX OPTIONS', 'NIFTY FUTURES', 'NIFTY OPTIONS', 'BANKNIFTY FUTURES', 'STOCK FUTURES'] } }, orderBy: { date: 'asc' } }),
+    prisma.fpiFlow.findMany({ where: { OR: [{ category: 'Equity', route: 'Sub-total' }, { category: 'Total' }] }, orderBy: { reportDate: 'asc' } }),
+  ]);
+  const n = (v: bigint) => Number(v);
+  type Positions = { futLong: number; futShort: number; callLong: number; callShort: number; putLong: number; putShort: number };
+  const days = new Map<string, { date: string; positions: Partial<Record<string, Positions>>; stats: Record<string, { buyContracts: number; buyCr: number; sellContracts: number; sellCr: number; oiContracts: number; oiCr: number }>; fpiEquityNetCr: number | null; fpiTotalNetCr: number | null }>();
+  const day = (date: string) => days.get(date) ?? days.set(date, { date, positions: {}, stats: {}, fpiEquityNetCr: null, fpiTotalNetCr: null }).get(date)!;
+  for (const r of oi) day(r.date).positions[r.participant] = { futLong: n(r.futIdxLong), futShort: n(r.futIdxShort), callLong: n(r.optIdxCallLong), callShort: n(r.optIdxCallShort), putLong: n(r.optIdxPutLong), putShort: n(r.optIdxPutShort) };
+  for (const s of stats) day(s.date).stats[s.segment] = { buyContracts: n(s.buyContracts), buyCr: Number(s.buyCr), sellContracts: n(s.sellContracts), sellCr: Number(s.sellCr), oiContracts: n(s.oiContracts), oiCr: Number(s.oiCr) };
+  for (const f of flows) { const d = day(f.reportDate); if (f.category === 'Equity') d.fpiEquityNetCr = Number(f.netCr); else d.fpiTotalNetCr = Number(f.netCr); }
+  // NIFTY's official close and change on each date, for context.
+  const nifty = new Map((dailyHistory('NIFTY')?.candles ?? []).map((c, i, all) => [new Date((c.time + 5.5 * 3600) * 1000).toISOString().slice(0, 10), { close: c.close, changePct: i ? ((c.close - all[i - 1].close) / all[i - 1].close) * 100 : null }]));
+  const rows = [...days.values()].sort((a, b) => (a.date < b.date ? -1 : 1)).map((d) => ({ ...d, nifty: nifty.get(d.date) ?? null }));
+  return {
+    sources: {
+      positions: 'NSE participant-wise open interest (content/nsccl/fao_participant_oi_*), index futures and index options, contracts',
+      stats: 'NSE FII derivatives statistics (content/fo/fii_stats_*.xls)',
+      flows: 'NSDL Daily Trends in FPI Investments (reporting date; covers FPI trades of the previous trading day)',
+    },
+    rows,
+  };
+});
+
+// ---- indicator library: calculated here, drawn in the browser ----
+app.get('/api/studies/catalog', async (_req, reply) => {
+  reply.header('Cache-Control', 'private, max-age=3600');
+  return { indicators: await studyCatalog() };
+});
+app.post<{ Body: { symbol?: string; tf?: string; id?: string; inputs?: Record<string, unknown> } }>('/api/studies/compute', async (req, reply) => {
+  const symbol = String(req.body?.symbol ?? '').toUpperCase();
+  const tf = String(req.body?.tf ?? '');
+  if (!findInstrument(symbol)) return reply.code(404).send({ error: 'unknown_symbol', message: `Unknown symbol ${symbol}` });
+  if (!isEodTf(tf)) return reply.code(400).send({ error: 'bad_timeframe', message: 'End-of-day data: D, W or M' });
+  const h = history(symbol, tf); // the same candles the chart shows
+  if (!h) return reply.code(404).send({ error: 'no_data', message: `No data for ${symbol}` });
+  try {
+    const result = await computeStudy(String(req.body?.id ?? ''), h.candles, req.body?.inputs ?? {});
+    reply.header('Content-Type', 'application/json');
+    return JSON.stringify({ result }, encodeNonFinite);
+  } catch (e) {
+    if (e instanceof StudyError) return reply.code(400).send({ error: 'bad_study', message: e.message });
+    req.log.error(e);
+    return reply.code(502).send({ error: 'failed', message: 'Indicator could not be calculated' });
   }
 });
 
-app.get('/api/official/status', async () => ({ days: storedDays(), attempts: officialAttempts() }));
-
-// ---- NSE end-of-day history, scanner and signals (all from NSE's official files) ----
+// ---- NSE end-of-day history and scanner ----
 app.get('/api/eod/status', async () => eodStatus());
 app.get<{ Querystring: { symbol?: string } }>('/api/eod/history', async (req, reply) => {
   const h = dailyHistory(String(req.query.symbol ?? '').toUpperCase());
@@ -372,306 +385,44 @@ app.post<{ Body: { rules?: RuleSet } }>('/api/scan', async (req, reply) => {
     return reply.code(500).send({ error: 'scan_failed', message: 'Scan failed' });
   }
 });
-app.get('/api/signals', async () => ({ strategies: signalsOverview(), ...(await latestSignals()) }));
-app.get<{ Params: { id: string } }>('/api/signals/:id', async (req, reply) => (await signalDetail(req.params.id)) ?? reply.code(404).send({ error: 'not_found' }));
-// Live option chain from the live source. With the owner's personal Kite connection it is for the owner (admin) and
-// Live-plan testing only: Kite's data is licensed for personal use. Subscribers get it from the licensed vendor.
-app.get<{ Querystring: { underlying?: string; expiry?: string } }>('/api/option-chain', async (req, reply) => {
-  const u = String(req.query.underlying ?? 'NIFTY').toUpperCase() as LiveChainUnderlying;
-  if (!(LIVE_CHAIN_UNDERLYINGS as readonly string[]).includes(u)) return reply.code(400).send({ error: 'bad_underlying', message: 'Live option chain covers NIFTY and BANKNIFTY' });
-  if (!liveSource() || !kite.ready) return reply.code(503).send({ error: NEEDS_BROKER, message: 'The live option chain needs a live data connection' });
-  if (!isLive(req.user!.plan) && !req.user!.admin) return reply.code(403).send({ error: 'live_plan_required', message: 'The live option chain is on the Live plan. The end-of-day chain is in the Option chain module.' });
+
+// ---- Kite Connect login: the owner's personal app, for internal research scripts only (never shown to users).
+// Zerodha expires the session at 6 AM IST. ----
+app.get('/api/kite/status', async (req, reply) => {
+  if (!req.user?.admin) return reply.code(403).send({ error: 'forbidden' });
+  const s = activeSession();
+  return { configured: kiteConfigured(), loggedIn: !!s, userName: s?.userName ?? null, expiresAt: s?.expiresAt ?? null };
+});
+app.get('/api/kite/login', async (_req, reply) => {
+  if (!kiteConfigured()) return reply.code(400).send({ error: 'not_configured', message: 'Add KITE_API_KEY and KITE_API_SECRET to .env' });
+  return reply.redirect(loginUrl());
+});
+app.get<{ Querystring: { request_token?: string; status?: string } }>('/api/kite/callback', async (req, reply) => {
+  const back = (result: string) => reply.redirect(`${WEB_ORIGIN}/admin?kite=${result}`);
+  if (!req.query.request_token || req.query.status === 'cancelled') return back('cancelled');
   try {
-    const chain = await kite.liveChain(u, req.query.expiry);
-    return chain ? { ...chain, live: true, asOf: now() } : reply.code(404).send({ error: 'no_data', message: `No ${u} options found` });
+    const s = await createSession(req.query.request_token);
+    app.log.info(`Kite connected for ${s.userId} (research scripts)`);
+    return back('connected');
   } catch (e) {
-    req.log.error(e);
-    return reply.code(502).send({ error: 'upstream_failed', message: 'Live option chain is unavailable right now' });
+    app.log.error(e, 'Kite login failed');
+    return back('failed');
   }
 });
-
-// ---- paper trading (one account per user) ----
-const lastQuotes = new Map<string, Quote>();
-const ltpPaise = (q?: Quote | null) => (q ? toPaise(q.ltp.toFixed(2)) : undefined);
-const IST = 5.5 * 3600;
-const paper = new PaperEngine({
-  repo: new PrismaPaperRepo(),
-  ltp: (s, uid) => { const q = lastQuotes.get(s); return q ? ltpPaise(quoteFor(q, plans.get(uid))) : undefined; },
-  freshLtp: async (s, uid) => {
-    const quotes = await provider.quotes([s]);
-    remember(quotes);
-    return quotes[0] ? ltpPaise(quoteFor(quotes[0], plans.get(uid))) : undefined;
-  },
-  // Close of the 15:15–15:20 bar (the price at 15:20 IST) on `date`, or the last bar before it.
-  squareOffPrice: async (s, date) => {
-    const cutoff = Date.parse(`${date}T15:15:00Z`) / 1000 - IST;
-    const day = Date.parse(`${date}T00:00:00Z`) / 1000 - IST;
-    const bar = (await provider.candles(s, '5')).filter((c) => c.time >= day && c.time <= cutoff).at(-1);
-    return bar ? toPaise(bar.close.toFixed(2)) : undefined;
-  },
-  isTradable: (s) => findInstrument(s)?.kind === 'EQUITY',
-  session: () => marketSession(now()),
-  now,
-  onChange: (uid) => void broadcastPaper(uid),
-  log: (m) => app.log.info(m),
-});
-
-const paperError = (reply: { code: (n: number) => { send: (b: unknown) => unknown } }, e: unknown) => {
-  app.log.error(e);
-  return reply.code(503).send({ error: 'paper_unavailable', message: 'Paper trading is unavailable. Is the database running (npm run db:start)?' });
-};
-
-app.get('/api/paper', async (req, reply) => {
-  try { return await paper.snapshot(req.user!.uid); } catch (e) { return paperError(reply, e); }
-});
-app.post<{ Body: PlaceOrderInput }>('/api/paper/orders', async (req, reply) => {
-  try { return await paper.placeOrder(req.user!.uid, req.body); } catch (e) { return paperError(reply, e); }
-});
-app.delete<{ Params: { id: string } }>('/api/paper/orders/:id', async (req, reply) => {
-  try {
-    return (await paper.cancelOrder(req.user!.uid, req.params.id)) ? { ok: true } : reply.code(409).send({ error: 'not_open', message: 'Order is no longer open' });
-  } catch (e) { return paperError(reply, e); }
-});
-app.post<{ Body: { startingCash: string | number } }>('/api/paper/reset', async (req, reply) => {
-  try {
-    await paper.reset(req.user!.uid, req.body.startingCash);
-    return { ok: true };
-  } catch (e) {
-    if (e instanceof Error && /Starting funds/.test(e.message)) return reply.code(400).send({ error: 'bad_amount', message: e.message });
-    return paperError(reply, e);
-  }
-});
-
-// ---- alerts ----
-const alerts = new AlertEngine({
-  priceFor: (symbol, plan) => {
-    const live = lastQuotes.get(symbol);
-    const q = live ? quoteFor(live, plan) : liveSource() && !isLive(plan) ? delayBuffer.delayed(symbol, now()) : null;
-    return q ? { price: q.ltp, time: q.time } : null;
-  },
-  candles: (symbol, tf) => provider.candles(symbol, tf),
-  liveSource,
-  notify: (userId, event) => { for (const [ws, c] of clients) if (c.claims.uid === userId) send(ws, { type: 'alert', event }); },
-  now,
-  log: (m) => app.log.info(m),
-});
-
-type AlertBody = { symbol?: string; kind?: string; params?: { op?: string; value?: number; tf?: string; rules?: RuleSet }; note?: string; repeat?: string };
-
-/** Checks a new alert; returns the row to store, or an error message. */
-function validateAlert(b: AlertBody): { symbol: string; kind: 'PRICE' | 'RULES'; params: PriceParams | RulesParams; note: string | null; repeat: 'once' | 'every' } | string {
-  const symbol = String(b.symbol ?? '').toUpperCase();
-  if (!findInstrument(symbol)) return 'Unknown symbol';
-  const repeat = b.repeat === 'every' ? 'every' : 'once';
-  const note = b.note ? String(b.note).slice(0, 200) : null;
-  if (b.kind === 'PRICE') {
-    const op = b.params?.op, value = Number(b.params?.value);
-    if (op !== 'crossesAbove' && op !== 'crossesBelow') return 'Choose "crosses above" or "crosses below"';
-    if (!(value > 0) || !Number.isFinite(value)) return 'Enter a price above zero';
-    return { symbol, kind: 'PRICE', params: { op, valuePaise: Math.round(value * 100) }, note, repeat };
-  }
-  if (b.kind === 'RULES') {
-    const tf = b.params?.tf as Timeframe, rules = b.params?.rules;
-    if (!ALERT_TIMEFRAMES.includes(tf)) return 'Choose a timeframe: 5 min, 15 min, 1 hour or daily';
-    if (!rules?.conditions?.length || rules.conditions.length > 5) return 'Use between 1 and 5 conditions';
-    const invalid = validateStrategy({ name: 'alert', direction: 'LONG', product: 'CNC', entry: rules, sizing: { mode: 'qty', qty: 1 }, initialCapitalPaise: 1 }, false);
-    if (invalid) return invalid;
-    return { symbol, kind: 'RULES', params: { tf, rules: { match: rules.match === 'any' ? 'any' : 'all', conditions: rules.conditions } }, note, repeat };
-  }
-  return 'Choose a price alert or an indicator alert';
-}
-
-app.get('/api/alerts', async (req) => {
-  const uid = req.user!.uid;
-  const [list, events, plan] = await Promise.all([
-    prisma.alert.findMany({ where: { userId: uid }, orderBy: { createdAt: 'desc' } }),
-    prisma.alertEvent.findMany({ where: { userId: uid }, orderBy: { triggeredAt: 'desc' }, take: 50, include: { alert: { select: { symbol: true } } } }),
-    planOf(uid),
-  ]);
-  return {
-    alerts: list, limit: ALERT_LIMITS[plan], used: list.filter((a) => a.status !== 'TRIGGERED').length, emailEnabled: !!(process.env.RESEND_API_KEY && process.env.ALERT_EMAIL_FROM),
-    events: events.map((e) => ({ id: e.id, alertId: e.alertId, symbol: e.alert.symbol, message: e.message, price: e.pricePaise / 100, marketTime: e.marketTime, triggeredAt: e.triggeredAt, emailStatus: e.emailStatus, seen: !!e.seenAt })),
-  };
-});
-app.post<{ Body: AlertBody }>('/api/alerts', async (req, reply) => {
-  const v = validateAlert(req.body ?? {});
-  if (typeof v === 'string') return reply.code(400).send({ error: 'bad_alert', message: v });
-  const uid = req.user!.uid, plan = await planOf(uid);
-  const used = await prisma.alert.count({ where: { userId: uid, status: { in: ['ACTIVE', 'PAUSED'] } } });
-  if (used >= ALERT_LIMITS[plan]) return reply.code(409).send({ error: 'limit', message: `Your plan allows ${ALERT_LIMITS[plan]} alerts. Delete one, or upgrade to Live for ${ALERT_LIMITS.LIVE}.` });
-  const row = await prisma.alert.create({ data: { userId: uid, symbol: v.symbol, kind: v.kind, params: v.params as object, note: v.note, repeat: v.repeat, status: 'ACTIVE' } });
-  await alerts.reload();
-  return row;
-});
-app.patch<{ Params: { id: string }; Body: { status?: string } }>('/api/alerts/:id', async (req, reply) => {
-  const status = req.body?.status;
-  if (status !== 'ACTIVE' && status !== 'PAUSED') return reply.code(400).send({ error: 'bad_status', message: 'Status must be ACTIVE or PAUSED' });
-  const res = await prisma.alert.updateMany({ where: { id: req.params.id, userId: req.user!.uid }, data: { status } });
-  if (!res.count) return reply.code(404).send({ error: 'not_found', message: 'Alert not found' });
-  await alerts.reload();
+app.post('/api/kite/logout', async (req, reply) => {
+  if (!req.user?.admin) return reply.code(403).send({ error: 'forbidden', message: 'Only the site owner can disconnect Kite' });
+  await clearSession();
   return { ok: true };
 });
-app.delete<{ Params: { id: string } }>('/api/alerts/:id', async (req, reply) => {
-  const res = await prisma.alert.deleteMany({ where: { id: req.params.id, userId: req.user!.uid } });
-  if (!res.count) return reply.code(404).send({ error: 'not_found', message: 'Alert not found' });
-  await alerts.reload();
-  return { ok: true };
-});
-app.post('/api/alerts/seen', async (req) => {
-  await prisma.alertEvent.updateMany({ where: { userId: req.user!.uid, seenAt: null }, data: { seenAt: new Date() } });
-  return { ok: true };
-});
-
-// ---- live quotes over WebSocket ----
-/** `sent`: last delayed price sent per symbol (Free users on a live source), so the replay only sends changes. */
-type Client = { subs: Set<string>; claims: FeedClaims; sent: Map<string, string> };
-const clients = new Map<WebSocket, Client>();
-const send = (ws: WebSocket, msg: ServerMessage) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
-
-app.get('/ws', { websocket: true }, (socket, req) => {
-  const claims = verifyFeedToken((req.query as { token?: string }).token, TOKEN_SECRET);
-  if (!claims) { socket.close(4401, 'unauthorised'); return; }
-  if (!claims.anon) plans.set(claims.uid, claims.plan);
-  clients.set(socket, { subs: new Set(), claims, sent: new Map() });
-  // Close when the token expires: the browser reconnects with a fresh token, so plan changes take effect.
-  const expiry = setTimeout(() => socket.close(4001, 'token expired'), Math.max(1, claims.exp - now()) * 1000);
-  send(socket, { type: 'status', status: statusFor(claims.plan), session: marketSession(now()) });
-  if (!claims.anon) paper.snapshot(claims.uid).then((snapshot) => send(socket, { type: 'paper', snapshot }), () => {});
-  socket.on('message', (raw) => {
-    let msg: ClientMessage;
-    try {
-      msg = JSON.parse(String(raw));
-    } catch {
-      return;
-    }
-    const c = clients.get(socket);
-    if (!c) return;
-    const symbols = (Array.isArray(msg.symbols) ? msg.symbols : []).map((s) => String(s).toUpperCase()).filter((s) => findInstrument(s));
-    if (msg.type === 'subscribe') {
-      symbols.forEach((s) => c.subs.size < MAX_SUBSCRIPTIONS && c.subs.add(s));
-      void pushQuotes([socket]);
-    } else if (msg.type === 'unsubscribe') symbols.forEach((s) => c.subs.delete(s));
-  });
-  socket.on('close', () => { clearTimeout(expiry); clients.delete(socket); });
-});
-
-/** Sends each socket the quotes it watches, as its plan allows; counts Live users who received live data. */
-function deliver(quotes: Quote[], targets: WebSocket[]) {
-  for (const ws of targets) {
-    const c = clients.get(ws);
-    if (!c) continue;
-    if (liveSource() && !isLive(c.claims.plan)) continue; // Free users on a live source get the replay below
-    const mine = quotes.filter((q) => c.subs.has(q.symbol)).map((q) => quoteFor(q, c.claims.plan)).filter((q): q is Quote => !!q);
-    if (!mine.length) continue;
-    send(ws, { type: 'quotes', quotes: mine });
-    if (liveSource() && isLive(c.claims.plan)) liveUsage.record(c.claims.uid, now());
-  }
-}
-
-async function pushQuotes(targets = [...clients.keys()], extra: string[] = []) {
-  const wanted = new Set([...targets.flatMap((ws) => [...(clients.get(ws)?.subs ?? [])]), ...extra]);
-  if (!wanted.size) return;
-  try {
-    const quotes = await provider.quotes([...wanted]);
-    remember(quotes);
-    deliver(quotes, targets);
-  } catch (e) {
-    app.log.warn(`Quote poll failed: ${(e as Error).message}`);
-  }
-}
-
-function broadcastStatus() {
-  for (const [ws, c] of clients) send(ws, { type: 'status', status: statusFor(c.claims.plan), session: marketSession(now()) });
-}
-
-/** Sends a user's paper snapshot to their open sockets (all connected users when `uid` is omitted). */
-async function broadcastPaper(uid?: string) {
-  const users = uid ? [uid] : [...new Set([...clients.values()].filter((c) => !c.claims.anon).map((c) => c.claims.uid))];
-  for (const u of users) {
-    const sockets = [...clients].filter(([, c]) => c.claims.uid === u).map(([ws]) => ws);
-    if (!sockets.length) continue;
-    try {
-      const snapshot = await paper.snapshot(u);
-      for (const ws of sockets) send(ws, { type: 'paper', snapshot });
-    } catch (e) {
-      app.log.warn(`Paper snapshot failed: ${(e as Error).message}`);
-    }
-  }
-}
-
-// Live ticks: push changed symbols to the browsers that watch them, at most every 500 ms.
-setInterval(async () => {
-  if (!dirty.size) return;
-  const symbols = [...dirty];
-  dirty.clear();
-  try {
-    const quotes = await provider.quotes(symbols);
-    remember(quotes);
-    deliver(quotes, [...clients.keys()]);
-  } catch (e) {
-    app.log.warn(`Live tick push failed: ${(e as Error).message}`);
-  }
-}, 500);
-
-// Delayed broadcast for Free users on a live source: every second, the market exactly as it stood 15 minutes ago.
-setInterval(() => {
-  if (!liveSource()) return;
-  for (const [ws, c] of clients) {
-    if (isLive(c.claims.plan) || !c.subs.size) continue;
-    const changed: Quote[] = [];
-    for (const symbol of c.subs) {
-      const live = lastQuotes.get(symbol);
-      const q = live ? quoteFor(live, c.claims.plan) : delayBuffer.delayed(symbol, now());
-      if (!q) continue;
-      const key = `${q.ltp}|${q.time}`;
-      if (c.sent.get(symbol) === key) continue;
-      c.sent.set(symbol, key);
-      changed.push(q);
-    }
-    if (changed.length) send(ws, { type: 'quotes', quotes: changed });
-  }
-}, 1000);
-
-// Poll fast while the market is open, slowly otherwise, and keep clients' session and data-source status current.
-let lastSession = marketSession(now());
-let lastProvider = provider.status.provider;
-async function loop() {
-  const session = marketSession(now());
-  if (session !== lastSession || provider.status.provider !== lastProvider) {
-    lastSession = session;
-    lastProvider = provider.status.provider;
-    broadcastStatus();
-  }
-  // The paper engine needs prices for its open orders and positions even when no browser is watching them.
-  const engineSymbols = await paper.symbols().catch(() => [] as string[]);
-  await pushQuotes([...clients.keys()], [...engineSymbols, ...alerts.symbols()]); // alerts need prices even when nobody watches
-  await paper.tick().catch((e) => app.log.warn(`Paper tick failed: ${(e as Error).message}`));
-  await broadcastPaper(); // refresh live P&L
-  setTimeout(loop, session === 'closed' ? 60_000 : 5_000);
-}
 
 await loadEquities((m) => app.log.info(m));
-if (wantKite && (await loadSession())) {
-  await startKite().catch((e) => app.log.warn(`Kite start failed (log in again): ${(e as Error).message}`));
-}
-app.log.info(`Loaded ${await loadOfficialStore()} days of NSE official data`);
-startOfficialJob((m) => app.log.info(m));
-// Three years of NSE F&O end-of-day history for index options, downloaded politely in the background.
-startFnoSync(process.env.FNO_BACKFILL_FROM ?? '2023-11-01', (m) => app.log.info(m));
-// Every NSE stock's official daily history (for the scanner and signals), then that evening's signals.
-await publishStrategies((m) => app.log.info(m)).catch((e) => app.log.error(e, 'Publishing signal strategies failed'));
-onEodReady(() => runSignals((m) => app.log.info(m)));
+// NSE end-of-day history (stocks, indices, corporate actions), F&O, and participant positions, downloaded politely.
 startEodSync(process.env.EOD_BACKFILL_FROM ?? '2022-01-03', (m) => app.log.info(m));
+startFnoSync(process.env.FNO_BACKFILL_FROM ?? '2023-11-01', (m) => app.log.info(m));
+// FII / DII / Pro / Client positions in F&O: NSE's archive starts in January 2012.
+startParticipantSync(process.env.PARTICIPANT_BACKFILL_FROM ?? '2012-01-02', (m) => app.log.info(m));
+// FII buy / sell / open interest in derivatives: NSE's archive starts around December 2014.
+startFiiStatsSync(process.env.FII_STATS_BACKFILL_FROM ?? '2014-10-01', (m) => app.log.info(m));
+// FPI cash-market flows: NSDL's Daily Trends page, read once a day (it shows only the latest day).
+startNsdlDaily((m) => app.log.info(m));
 await app.listen({ port: PORT, host: '127.0.0.1' });
-void loop();
-// Alerts: load active ones (retrying while the database starts), then check every second.
-void (async function startAlerts() {
-  try {
-    await alerts.reload();
-    setInterval(() => void alerts.tick(), 1000);
-    app.log.info(`Alerts: ${alerts.symbols().length} symbols watched`);
-  } catch (e) {
-    app.log.warn(`Alerts not started yet (${(e as Error).message.split('\n').at(-1)}); retrying in 10 s`);
-    setTimeout(startAlerts, 10_000);
-  }
-})();

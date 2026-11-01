@@ -32,7 +32,7 @@ export default async function SandboxCheckout({ params }: { params: Promise<{ id
         <p className="num text-[34px] font-extrabold">{priceLabel(PLANS.LIVE.pricePaise[interval])}</p>
         <form action={sandboxPayAction}>
           <input type="hidden" name="subscription" value={sub.id} />
-          <button type="submit" className="h-11 w-full rounded-full bg-ink font-bold text-white hover:bg-black">Pay (test)</button>
+          <button type="submit" className="h-11 w-full rounded-full bg-inverse font-bold text-on-inverse hover:bg-inverse-hover">Pay (test)</button>
         </form>
         <Link href="/pricing" className="block text-center text-[13px] font-semibold text-ink-2 underline">Cancel and go back</Link>
       </div>

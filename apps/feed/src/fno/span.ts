@@ -91,12 +91,12 @@ export function parseSpan(xml: string, file: string, wanted: readonly string[] =
 }
 
 /** Downloads one SPAN file; null if NSE has not published it. */
-export async function fetchSpan(date: string, part: string): Promise<Record<string, SpanUnderlying> | null> {
+export async function fetchSpan(date: string, part: string, wanted: readonly string[] = SPAN_UNDERLYINGS): Promise<Record<string, SpanUnderlying> | null> {
   try {
     const zip = unzipSync(new Uint8Array(await (await nseGet(spanUrl(date, part), 120_000)).arrayBuffer()));
     const name = Object.keys(zip).find((n) => n.endsWith('.spn'));
     if (!name) throw new Error(`no .spn file in ${spanUrl(date, part)}`);
-    return parseSpan(strFromU8(zip[name]), name);
+    return parseSpan(strFromU8(zip[name]), name, wanted);
   } catch (e) {
     if (e instanceof NotPublished) return null;
     throw e;
@@ -120,6 +120,34 @@ async function cached(key: string, load: () => Promise<Record<string, SpanUnderl
   const data = await load();
   if (data) { await mkdir(CACHE, { recursive: true }); await writeFile(file, JSON.stringify(data)); }
   return data;
+}
+
+/**
+ * SPAN data in force on a past trading day, for margins in the options simulator: that day's start-of-day file (i1),
+ * else the previous days' end-of-day file (same figures). Downloaded once from NSE's archive, then read from disk.
+ * Only `underlying` is read: older files predate FINNIFTY and MIDCPNIFTY. Null when NSE's archive has neither file.
+ */
+const pastLoads = new Map<string, Promise<SpanDay | null>>();
+export function spanOn(tradeDate: string, underlying: string): Promise<SpanDay | null> {
+  const key = `${tradeDate}|${underlying}`;
+  let p = pastLoads.get(key);
+  if (!p) {
+    p = (async () => {
+      const t = Date.parse(`${tradeDate}T12:00:00Z`);
+      // A damaged file in the archive (some are) moves on to the next candidate rather than failing the day.
+      const attempt = (key: string, date: string, part: string) => cached(key, () => fetchSpan(date, part, [underlying])).catch(() => null);
+      let data = await attempt(`${tradeDate}-i1-${underlying}`, tradeDate, 'i1');
+      for (let back = 1; !data && back <= 7; back++) {
+        const d = new Date(t - back * 86400_000).toISOString().slice(0, 10);
+        data = await attempt(`${d}-s-${underlying}`, d, 's');
+      }
+      return data ? { tradeDate, data } : null;
+    })().catch(() => null);
+    pastLoads.set(key, p);
+    if (pastLoads.size > 200) pastLoads.delete(pastLoads.keys().next().value!);
+    void p.then((v) => { if (!v) pastLoads.delete(key); }); // retry later, NSE may have been unreachable
+  }
+  return p;
 }
 
 /** SPAN data for today's trading: today's start-of-day file, else the latest end-of-day file in the past week. */

@@ -20,7 +20,7 @@ const dayStart = (t: number) => {
  */
 export function auditCandles(input: Candle[], tf: Timeframe): { candles: Candle[]; quality: DataQuality } {
   const invalid: number[] = [], misaligned: number[] = [], missing: number[] = [];
-  const intraday = tf !== 'D' && tf !== 'W';
+  const intraday = tf !== 'D' && tf !== 'W' && tf !== 'M';
   const span = intraday ? Number(tf) * 60 : 0;
   const seen = new Set<number>();
   const candles: Candle[] = [];

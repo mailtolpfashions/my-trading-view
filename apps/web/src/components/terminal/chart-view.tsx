@@ -29,6 +29,7 @@ import { computeLib, fetchCatalog, type LibIndicator, type LibStudy } from '@/li
 import { COLORS, TWO_POINT, channelOffset, hitTest, loadDrawings, logicalToTime, measureText, newId, saveDrawings, timeToLogical, type Drawing, type Point, type Tool } from '@/lib/chart/drawings/model';
 import { DOWN, UP, studyById, type PointColors } from '@/lib/chart/studies';
 import { fmt, tfLabel } from '@/lib/format';
+import { CHART_COLORS, chartThemeOptions, useTheme } from '@/lib/theme';
 import { DrawingRail } from './drawing-rail';
 
 export type ChartType = 'candles' | 'bars' | 'ha' | 'line' | 'area';
@@ -48,11 +49,13 @@ type Props = {
   tf: Timeframe;
   chartType: ChartType;
   studies: string[];
-  delayed: boolean;
+  /** Old live-data flag; the site now shows NSE end-of-day data only. */
+  delayed?: boolean;
   /** Seconds of history to show after a load (from the range bar); defaults to the last 150 bars. */
   visibleSeconds?: number;
   onRemoveStudy: (id: string) => void;
-  onTrade: (side: 'BUY' | 'SELL') => void;
+  /** Practice mode: show SELL / BUY buttons on the chart. */
+  onTrade?: (side: 'BUY' | 'SELL') => void;
   /** Open paper positions in this symbol, drawn as average-price lines like TradingView's position lines. */
   positions?: { product: string; qty: number; avgPricePaise: number }[];
   /** Active price alerts on this symbol, drawn as dashed lines. */
@@ -93,27 +96,28 @@ export function ChartView(p: Props) {
   const [hover, setHover] = useState<number | null>(null);
   const [paneTops, setPaneTops] = useState<number[]>([]);
   const [, setVersion] = useState(0);
+  const theme = useTheme();
+  const colors = CHART_COLORS[theme];
 
   // ---- create the chart once ----
   useEffect(() => {
+    const themed = chartThemeOptions(colors);
     const chart = createChart(host.current!, {
       autoSize: true,
       layout: {
-        background: { color: '#ffffff' },
-        textColor: '#131722',
+        ...themed.layout,
         fontSize: 11,
         // Canvas text can't read CSS variables, so resolve next/font's generated family name for Plus Jakarta Sans.
         fontFamily: `${getComputedStyle(document.documentElement).getPropertyValue('--font-jakarta').trim() || 'system-ui'}, system-ui, sans-serif`,
-        panes: { separatorColor: '#ecebe6', separatorHoverColor: 'rgba(18,18,18,0.08)' },
       },
-      grid: { vertLines: { color: '#f3f2ee' }, horzLines: { color: '#f3f2ee' } },
+      grid: themed.grid,
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: '#9598a1', style: LineStyle.Dotted, labelBackgroundColor: '#121212' },
-        horzLine: { color: '#9598a1', style: LineStyle.Dotted, labelBackgroundColor: '#121212' },
+        vertLine: { ...themed.crosshair.vertLine, style: LineStyle.Dotted },
+        horzLine: { ...themed.crosshair.horzLine, style: LineStyle.Dotted },
       },
-      rightPriceScale: { borderColor: '#ecebe6', minimumWidth: 72 },
-      timeScale: { borderColor: '#ecebe6', timeVisible: true, rightOffset: 8 },
+      rightPriceScale: { ...themed.rightPriceScale, minimumWidth: 72 },
+      timeScale: { ...themed.timeScale, timeVisible: false, rightOffset: 8 }, // end-of-day bars: dates only
       localization: { priceFormatter: (v: number) => fmt(v) },
     });
     chartRef.current = chart;
@@ -138,6 +142,9 @@ export function ChartView(p: Props) {
       chartRef.current = null;
     };
   }, []);
+
+  // ---- theme: repaint the existing chart ----
+  useEffect(() => { chartRef.current?.applyOptions(chartThemeOptions(colors)); layer.current.set({ ink: colors.ink }); }, [colors]);
 
   // ---- main series follows the chart type ----
   useEffect(() => {
@@ -190,7 +197,7 @@ export function ChartView(p: Props) {
             : chart.addSeries(LineSeries, { ...common, color: ln.color, lineWidth: ln.width ?? 1, crosshairMarkerVisible: st.place === 'pane',
                 autoscaleInfoProvider: st.range ? () => ({ priceRange: { minValue: st.range![0], maxValue: st.range![1] } }) : undefined }, pane);
         });
-        st.levels?.forEach((price) => series[0].createPriceLine({ price, color: '#b2b5be', lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false }));
+        st.levels?.forEach((price) => series[0].createPriceLine({ price, color: colors.level, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false }));
         // Bounded oscillators (RSI 0–100) get tight margins so the scale doesn't run past the range.
         if (st.range) series[0].priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.06 } });
         return [{ id, pane, series }];
@@ -304,11 +311,11 @@ export function ChartView(p: Props) {
   useEffect(() => {
     wmRef.current?.applyOptions({
       lines: [
-        { text: `${p.symbol}, ${tfLabel(p.tf)}`, color: 'rgba(18,18,18,0.06)', fontSize: 72, fontStyle: '600' },
-        { text: p.name, color: 'rgba(18,18,18,0.06)', fontSize: 26 },
+        { text: `${p.symbol}, ${tfLabel(p.tf)}`, color: colors.watermark, fontSize: 72, fontStyle: '600' },
+        { text: p.name, color: colors.watermark, fontSize: 26 },
       ],
     });
-  }, [p.symbol, p.name, p.tf]);
+  }, [p.symbol, p.name, p.tf, colors]);
 
   // ---- drawings: trend lines, rays, horizontal/vertical lines, zones, notes, measure, alert-by-click ----
   const [tool, setTool] = useState<Tool>('cursor');
@@ -547,19 +554,19 @@ export function ChartView(p: Props) {
         <div className="pointer-events-none absolute top-1.5 left-2.5 z-10 flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-x-2 text-[13px] whitespace-nowrap">
             <b className="font-bold">{p.name} · {tfLabel(p.tf)} · {p.exchange}</b>
-            {p.delayed && <span title="Delayed data" className="grid h-4 w-4 place-items-center rounded-full border border-accent bg-accent-soft text-[9px] font-bold text-accent-ink">D</span>}
+            <span title="NSE official end-of-day data" className="rounded border border-line bg-raised px-1 text-[10px] font-bold tracking-[0.03em] text-ink-2">NSE EOD</span>
             <span className={`num text-[12.5px] ${tone}`}>
               O<span className="mr-1.5 ml-0.5">{fmt(bar.open)}</span>H<span className="mr-1.5 ml-0.5">{fmt(bar.high)}</span>L<span className="mr-1.5 ml-0.5">{fmt(bar.low)}</span>C<span className="mr-1.5 ml-0.5">{fmt(bar.close)}</span>
               {ch >= 0 ? '+' : ''}{fmt(ch)} ({ch >= 0 ? '+' : ''}{fmt(prev.close ? (ch / prev.close) * 100 : 0)}%)
             </span>
           </div>
-          {last && (
+          {last && p.onTrade && (
             <div className="pointer-events-auto flex w-fit items-center gap-1">
-              <button type="button" onClick={() => p.onTrade('SELL')} className="flex flex-col items-center rounded-md border border-down bg-white px-2.5 py-0.5 text-[12.5px] leading-tight font-bold text-down hover:bg-down hover:text-white">
+              <button type="button" onClick={() => p.onTrade!('SELL')} className="flex flex-col items-center rounded-md border border-down bg-white px-2.5 py-0.5 text-[12.5px] leading-tight font-bold text-down hover:bg-down hover:text-white">
                 <span className="num">{fmt(last.close)}</span><span className="text-[9.5px] font-semibold">SELL</span>
               </button>
               <span className="num px-0.5 text-[10.5px] text-muted">0.05</span>
-              <button type="button" onClick={() => p.onTrade('BUY')} className="flex flex-col items-center rounded-md border border-blue bg-white px-2.5 py-0.5 text-[12.5px] leading-tight font-bold text-blue hover:bg-blue hover:text-white">
+              <button type="button" onClick={() => p.onTrade!('BUY')} className="flex flex-col items-center rounded-md border border-blue bg-white px-2.5 py-0.5 text-[12.5px] leading-tight font-bold text-blue hover:bg-blue hover:text-white">
                 <span className="num">{fmt(last.close + 0.05)}</span><span className="text-[9.5px] font-semibold">BUY</span>
               </button>
             </div>

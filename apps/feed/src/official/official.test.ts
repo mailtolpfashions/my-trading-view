@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { strToU8, zipSync } from 'fflate';
-import { bhavcopyUrl, indexCloseUrl, parseBhavcopy, parseIndexClose, recentWeekdays, splitCsvLine, unzipFirstCsv } from './nse-files';
-import { applyOfficial, isCorporateActionRatio, type DayRecord } from './store';
+import { bhavcopyUrl, indexCloseUrl, parseBhavcopy, parseIndexClose, recentWeekdays, splitCsvLine, unzipFirstCsv, canonicalIndexName, parsePdIndices } from './nse-files';
 
 // Header layouts as published by NSE (index close file and the UDiFF cash-market bhavcopy).
 const INDEX_CSV = [
@@ -51,52 +50,29 @@ describe('recentWeekdays', () => {
   });
 });
 
-describe('applyOfficial', () => {
-  const t = (d: number) => Date.UTC(2026, 9, d, 9, 15) / 1000 - 5.5 * 3600; // daily bars are stamped 09:15 IST
-  const rec = (date: string, bars: DayRecord['bars']): DayRecord => ({ date, fetchedAt: '', bars });
-  const store: Record<string, DayRecord> = {
-    '2026-10-23': rec('2026-10-23', { RELIANCE: { open: 1180, high: 1192, low: 1175, close: 1190, volume: 5000 } }),
-    '2026-10-26': rec('2026-10-26', { RELIANCE: { open: 1192, high: 1205.4, low: 1188.1, close: 1201.8, volume: 9000 } }),
-  };
-  const lookup = (d: string) => store[d];
-
-  it('keeps matching bars, replaces differing ones with official values and lists what changed', () => {
-    const ours = [
-      { time: t(22), open: 1170, high: 1182, low: 1168, close: 1180, volume: 4000 }, // no official record
-      { time: t(23), open: 1180, high: 1192, low: 1175, close: 1190, volume: 5000 }, // matches
-      { time: t(26), open: 1192, high: 1205.4, low: 1188.1, close: 1201.6, volume: 8800 }, // close and volume differ
-    ];
-    const r = applyOfficial('RELIANCE', ours, lookup, ['2026-10-23', '2026-10-26']);
-    expect(r.candles[0]).toBe(ours[0]);
-    expect(r.candles[1]).toBe(ours[1]);
-    expect(r.candles[2]).toEqual({ time: t(26), open: 1192, high: 1205.4, low: 1188.1, close: 1201.8, volume: 9000 });
-    expect(r.official).toEqual({ verified: 2, corrected: [{ time: t(26), fields: ['close', 'volume'] }], adjusted: [], latest: '2026-10-26' });
+describe('older NSE index files (2011–2016)', () => {
+  it('maps old index names to today\'s, so one series never splits in two', () => {
+    expect(canonicalIndexName('S&P CNX Nifty')).toBe('NIFTY 50');
+    expect(canonicalIndexName('CNX Nifty')).toBe('NIFTY 50');
+    expect(canonicalIndexName('Nifty 50')).toBe('NIFTY 50');
+    expect(canonicalIndexName('BANK Nifty')).toBe('NIFTY BANK');
+    expect(canonicalIndexName('CNX Bank')).toBe('NIFTY BANK');
+    expect(canonicalIndexName('CNX Nifty Junior')).toBe('NIFTY NEXT 50');
+    expect(canonicalIndexName('CNX Midcap')).toBe('NIFTY MIDCAP 100');
+    expect(canonicalIndexName('CNX IT')).toBe('NIFTY IT');
+    expect(canonicalIndexName('S&P CNX 500')).toBe('NIFTY 500');
+    expect(canonicalIndexName('INDIA VIX')).toBe('INDIA VIX');
   });
-  it('adds official bars for dates the free source is missing, in time order', () => {
-    const today = { time: t(27), open: 1200, high: 1210, low: 1195, close: 1205, volume: 100 };
-    const r = applyOfficial('RELIANCE', [today], lookup, ['2026-10-23', '2026-10-26']);
-    expect(r.candles.map((c) => c.time)).toEqual([t(23), t(26), t(27)]);
-    expect(r.candles[0]).toMatchObject({ open: 1180, close: 1190, volume: 5000 });
-    expect(r.official.corrected).toEqual([{ time: t(23), fields: ['added'] }, { time: t(26), fields: ['added'] }]);
-    expect(r.official.verified).toBe(2);
-  });
-  it('does not add anything for a symbol NSE has no record of', () => {
-    expect(applyOfficial('UNKNOWN', [], lookup, ['2026-10-23']).candles).toEqual([]);
-  });
-  it('keeps split/bonus-adjusted bars instead of overwriting them with the unadjusted NSE record', () => {
-    // NSE record before a 1:1 bonus: 2380/2410/2360/2400; the free source now shows it halved
-    const pre = { '2026-10-23': rec('2026-10-23', { XYZ: { open: 2380, high: 2410, low: 2360, close: 2400, volume: 1000 } }) };
-    const ours = [{ time: t(23), open: 1190, high: 1205, low: 1180, close: 1200, volume: 2000 }];
-    const r = applyOfficial('XYZ', ours, (d) => pre[d as keyof typeof pre], ['2026-10-23']);
-    expect(r.candles[0]).toBe(ours[0]);
-    expect(r.official).toMatchObject({ corrected: [], adjusted: [t(23)] });
-  });
-  it('still corrects a genuine error that is not a uniform ratio', () => {
-    expect(isCorporateActionRatio({ open: 1180, high: 1192, low: 1175, close: 1150 }, { open: 1180, high: 1192, low: 1175, close: 1190 })).toBe(false);
-    expect(isCorporateActionRatio({ open: 1180.5, high: 1192, low: 1175, close: 1190 }, { open: 1180, high: 1192, low: 1175, close: 1190 })).toBe(false);
-  });
-  it('ignores float noise below a paisa', () => {
-    const r = applyOfficial('RELIANCE', [{ time: t(23), open: 1180.0000001, high: 1192, low: 1175, close: 1190, volume: 5000 }], lookup, ['2026-10-23']);
-    expect(r.official.corrected).toEqual([]);
+  it('reads index OHLC from the PR bundle Pd file (Pd030111.csv)', () => {
+    const pd = [
+      'MKT,SERIES,SYMBOL,SECURITY,PREV_CL_PR,OPEN_PRICE,HIGH_PRICE,LOW_PRICE,CLOSE_PRICE,NET_TRDVAL,NET_TRDQTY,IND_SEC,CORP_IND,TRADES,HI_52_WK,LO_52_WK',
+      'Y, , ,S&P CNX Nifty,      6134.50,      6177.45,      6178.55,      6147.20,      6157.60,107387732141.67,615343104,Y, ,5402800,      6338.50,      4675.40',
+      'Y, , ,BANK Nifty,     11791.45,     11882.10,     11912.15,     11826.95,     11855.75,0,0,Y, ,0,     13303.60,      8150.45',
+      ' , , ,S&P CNX NIFTY Sec, , , , , , , ,Y, , , , ',
+      'N,EQ,JUNIORBEES,NIFTY JR BENCHMARK ETF,       122.10,       123.00,       123.80,       121.40,       121.84,6660483.91,54385,N, ,296,148.00,96.01',
+    ].join('\n');
+    const m = parsePdIndices(pd);
+    expect([...m.keys()]).toEqual(['NIFTY 50', 'NIFTY BANK']);
+    expect(m.get('NIFTY 50')).toEqual({ open: 6177.45, high: 6178.55, low: 6147.2, close: 6157.6 });
   });
 });

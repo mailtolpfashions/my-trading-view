@@ -4,7 +4,9 @@
 
 import { prisma } from '@mtv/db';
 import { NotPublished, nseGet as download } from '../nse-http';
-import { unzipFirstCsv, indexCloseUrl, parseIndexClose } from '../official/nse-files';
+import { unzipFirstCsv, officialIndexCloses } from '../official/nse-files';
+import { unzipSync } from 'fflate';
+import { prBundleUrl } from '../eod/corporate';
 import { FNO_UNDERLYINGS, UDIFF_FROM, fnoBhavcopyUrl, parseOldFo, parseUdiffFo, type FnoDay, type FnoUnderlying } from './bhavcopy';
 
 const PAUSE_MS = 4000;
@@ -21,7 +23,7 @@ export async function fetchFnoDay(date: string): Promise<FnoDay> {
   const day = date >= UDIFF_FROM ? parseUdiffFo(csv, date) : parseOldFo(csv, date);
   if (date < UDIFF_FROM) {
     await sleep(PAUSE_MS);
-    const closes = parseIndexClose(await (await download(indexCloseUrl(date))).text());
+    const closes = await officialIndexCloses(date, download, async () => unzipSync(new Uint8Array(await (await download(prBundleUrl(date))).arrayBuffer())), (e) => e instanceof NotPublished);
     for (const u of FNO_UNDERLYINGS) day.spot[u] = closes.get(INDEX_NAMES[u])?.close ?? null;
   }
   for (const u of FNO_UNDERLYINGS) {

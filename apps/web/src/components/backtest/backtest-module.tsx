@@ -1,29 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { BacktestView } from './backtest-view';
 import { OptionsBacktest } from './options-backtest';
 
-/** Backtest module: indicator strategies on stocks/indices, or StockMock-style option strategies. */
-export function BacktestModule() {
-  const [mode, setMode] = useState<'stocks' | 'options'>('stocks');
-  useEffect(() => {
-    try { const m = localStorage.getItem('mtv.bt.mode'); if (m === 'options' || m === 'stocks') setMode(m); } catch { /* storage unavailable */ }
-  }, []);
-  const pick = (m: 'stocks' | 'options') => {
-    setMode(m);
-    try { localStorage.setItem('mtv.bt.mode', m); } catch { /* storage unavailable */ }
-  };
+/** Backtest pages: indicator strategies on stocks/indices (/backtest), or StockMock-style option strategies (/backtest/options). */
+export function BacktestModule({ mode }: { mode: 'stocks' | 'options' }) {
   return (
     <div className="grid min-h-0 grid-rows-[auto_1fr] gap-2">
-      <div className="flex items-center gap-2">
-        <div className="flex rounded-full bg-panel p-1 shadow-[var(--shadow-panel)]" role="tablist" aria-label="Backtest type">
-          {([['stocks', 'Stocks & indices · indicators'], ['options', 'Options strategies · StockMock-style']] as const).map(([k, label]) => (
-            <button key={k} type="button" role="tab" aria-selected={mode === k} onClick={() => pick(k)}
-              className={`rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold ${mode === k ? 'bg-ink text-white' : 'text-ink-2 hover:bg-raised'}`}>{label}</button>
-          ))}
-        </div>
-      </div>
+      <nav aria-label="Backtest type" className="flex justify-self-start rounded-full bg-panel p-1 shadow-[var(--shadow-panel)]">
+        {([['stocks', '/backtest', 'Stocks & indices · indicators'], ['options', '/backtest/options', 'Options strategies · StockMock-style']] as const).map(([k, href, label]) => (
+          <Link key={k} href={href} aria-current={mode === k ? 'page' : undefined}
+            className={`rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold ${mode === k ? 'bg-inverse text-on-inverse' : 'text-ink-2 hover:bg-raised'}`}>{label}</Link>
+        ))}
+      </nav>
       {mode === 'stocks' ? <BacktestView /> : <OptionsBacktest />}
     </div>
   );

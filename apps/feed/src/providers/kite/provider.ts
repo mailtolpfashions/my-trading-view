@@ -1,6 +1,7 @@
 // Live NSE data from Zerodha Kite Connect: historical candles (paced at Kite's documented 3 req/s limit, fetched in
 // chunks well under the per-request date limits) and real-time ticks over the Kite WebSocket.
 
+import { monthlyFromDaily, weeklyFromDaily } from '../../eod/timeframes';
 import { yearsToExpiry } from '@mtv/options';
 import type { Candle, Quote, Timeframe } from '@mtv/shared';
 import { TtlCache } from '../../cache';
@@ -34,7 +35,7 @@ export const KITE_INDEX_SYMBOLS: Record<string, { exchange: 'NSE' | 'BSE'; tradi
 };
 
 /** Kite interval, chunk size (kept well below Kite's per-request limits) and default/deep history, in days. */
-const PLAN: Record<Exclude<Timeframe, 'W'>, { interval: string; chunk: number; chart: number; deep: number }> = {
+const PLAN: Record<Exclude<Timeframe, 'W' | 'M'>, { interval: string; chunk: number; chart: number; deep: number }> = {
   '1': { interval: 'minute', chunk: 30, chart: 10, deep: 60 },
   '5': { interval: '5minute', chunk: 60, chart: 40, deep: 365 },
   '15': { interval: '15minute', chunk: 100, chart: 90, deep: 730 },
@@ -52,6 +53,8 @@ export const parseKiteTime = (s: string) => Date.parse(s.replace(/([+-]\d{2})(\d
  * Converts Kite candles. Daily candles (stamped 00:00 IST) are re-stamped 09:15 IST, the convention the rest of the
  * app uses for daily bars (live-bar merging, NSE official-data matching).
  */
+export { weeklyFromDaily } from '../../eod/timeframes';
+
 export function parseKiteCandles(rows: [string, number, number, number, number, number, number?][], daily: boolean): Candle[] {
   return rows.map(([ts, o, h, l, c, v]) => {
     let time = parseKiteTime(ts);
@@ -60,19 +63,6 @@ export function parseKiteCandles(rows: [string, number, number, number, number, 
   });
 }
 
-/** Weekly bars from daily bars, weeks starting Monday (stamped Monday 09:15 IST, even if Monday was a holiday). */
-export function weeklyFromDaily(days: Candle[]): Candle[] {
-  const out: Candle[] = [];
-  for (const d of days) {
-    const local = d.time + IST;
-    const dow = new Date(local * 1000).getUTCDay();
-    const monday = local - (local % DAY) - ((dow + 6) % 7) * DAY + 9 * 3600 + 15 * 60 - IST;
-    const w = out.at(-1);
-    if (w && w.time === monday) { w.high = Math.max(w.high, d.high); w.low = Math.min(w.low, d.low); w.close = d.close; w.volume += d.volume; }
-    else out.push({ ...d, time: monday });
-  }
-  return out;
-}
 
 const kiteDate = (sec: number) => new Date((sec + IST) * 1000).toISOString().slice(0, 19).replace('T', ' ');
 
@@ -174,6 +164,7 @@ export class KiteProvider implements MarketDataProvider {
 
   async candles(symbol: string, tf: Timeframe, deep = false): Promise<Candle[]> {
     if (tf === 'W') return weeklyFromDaily(await this.candles(symbol, 'D', true));
+    if (tf === 'M') return monthlyFromDaily(await this.candles(symbol, 'D', true));
     const plan = PLAN[tf];
     const days = deep ? plan.deep : plan.chart;
     const token = this.token(symbol);

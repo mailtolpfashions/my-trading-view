@@ -35,7 +35,6 @@ async function json<T>(res: Response, fallback: string): Promise<T> {
 
 export const fetchFuturesHistory = async (underlying: string, days: number) =>
   json<{ underlying: string; days: FuturesDay[] }>(await feedFetch(`${FEED_URL}/api/futures/history?underlying=${underlying}&days=${days}`), 'Futures history unavailable');
-export const fetchLiveFutures = async (underlying: string) => json<LiveFutures>(await feedFetch(`${FEED_URL}/api/futures/live?underlying=${underlying}`), 'Live futures unavailable');
 
 export const BUILD_UP: Record<BuildUp, { label: string; hint: string; tone: 'up' | 'up-soft' | 'down' | 'down-soft' | 'neutral' }> = {
   'long-buildup': { label: 'Long build-up', hint: 'Price up, open interest up: new buying', tone: 'up' },

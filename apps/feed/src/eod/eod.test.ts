@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adjustedCandles, findAdjustments, type RawBar } from './adjust';
+import { adjustedCandles, findAdjustments, findBreaks, rightsFactor, type RawBar } from './adjust';
 import { cmBhavcopyUrl, parseOldCm, parseUdiffCm } from './bhavcopy';
 
 // Header and RELIANCE rows exactly as published by NSE (25 Oct 2024 UDiFF; 5 Jul 2024 old layout).
@@ -71,6 +71,31 @@ describe('corporate-action adjustment from NSE corporate action file', () => {
     const b = [bar('2024-01-01', 100000, 100000), bar('2024-01-02', 99000, 99000)];
     expect(findAdjustments(b, [{ symbol: 'RELIANCE', exDate: '2024-01-02', purpose: 'BONUS 1:1' }]).adjustments[0].check).toBe(true);
   });
+  it('rights issue, NSE method: Adani Enterprises 3:25 @ premium ₹1,799 (face value ₹1), ex 17 Nov 2025', () => {
+    // NSE closes: 2,516.80 on 14 Nov (last cum-rights day); ex-day open 2,460.00. S = 1 + 1,799 = 1,800.
+    // E = (2,516.80 − 1,800) × 3/28 = 76.80 → theoretical ex-rights price 2,440.00 → factor 2,440 / 2,516.80.
+    expect(rightsFactor(2516.8, 1800, 3, 25)).toBeCloseTo(2440 / 2516.8, 12);
+    const b = [bar('2025-11-13', 250200, 248820, 1000, 'ADANIENT'), bar('2025-11-14', 250000, 251680, 1000, 'ADANIENT'), bar('2025-11-17', 246000, 246200, 1000, 'ADANIENT')];
+    const acts = [{ symbol: 'ADANIENT', exDate: '2025-11-17', purpose: 'RIGHTS 3:25@PRM RS 1799' }, { symbol: 'ADANIENT', exDate: '2025-12-23', purpose: 'FIRST CL RS 450 PR SH' }];
+    const r = findAdjustments(b, acts, 1);
+    expect(r.unhandled).toEqual([]); // the call is on the partly-paid shares
+    expect(r.adjustments).toHaveLength(1);
+    expect(r.adjustments[0].factor).toBeCloseTo(2440 / 2516.8, 12);
+    expect(adjustedCandles(b, r.adjustments).map((c) => c.close)).toEqual([2412.27, 2440, 2462]);
+  });
+  it('rights: no adjustment when the issue price is at or above the cum price; face value taken from a later split', () => {
+    expect(rightsFactor(100, 120, 1, 4)).toBe(1);
+    const b = [bar('2024-01-01', 10000, 10000), bar('2024-01-02', 9500, 9500), bar('2024-06-03', 2000, 2000)];
+    const acts = [{ symbol: 'RELIANCE', exDate: '2024-01-02', purpose: 'RIGHTS 1:4 @ PRM RS 40/-' }, { symbol: 'RELIANCE', exDate: '2024-06-03', purpose: 'FV SPLT FRM RS 10 TO RS 2' }];
+    // Face value on the rights date is ₹10 (today's ₹2 came with the later split): S = 50; E = (100 − 50)/5 = 10 → 0.9.
+    const rights = findAdjustments(b, acts, 2).adjustments.find((a) => a.date === '2024-01-02')!;
+    expect(rights.factor).toBeCloseTo(0.9, 12);
+  });
+  it('rights without a price, or without a known face value, stay flagged', () => {
+    const plain = [bar('2024-01-01', 10000, 10000), bar('2024-01-02', 10100, 10100)];
+    expect(findAdjustments(plain, [{ symbol: 'RELIANCE', exDate: '2024-01-02', purpose: 'RIGHTS 1:1' }], 10).unhandled[0].reason).toMatch(/without a price/);
+    expect(findAdjustments(plain, [{ symbol: 'RELIANCE', exDate: '2024-01-02', purpose: 'RIGHTS 1:5 @ PRM RS 90' }]).unhandled[0].reason).toMatch(/face value unknown/);
+  });
   it('ignores dividends, reports rights issues, and leaves actions outside the history alone', () => {
     const plain = [bar('2024-01-01', 10000, 10000), bar('2024-01-02', 10100, 10100)];
     const r = findAdjustments(plain, [
@@ -82,5 +107,27 @@ describe('corporate-action adjustment from NSE corporate action file', () => {
     expect(r.adjustments).toEqual([]);
     expect(r.unhandled.map((u) => u.purpose)).toEqual(['RIGHTS 1:5 @ PREMIUM RS 90']);
     expect(adjustedCandles(plain, r.adjustments).map((x) => x.close)).toEqual([100, 101]);
+  });
+});
+
+describe('data breaks (series not continuous across a day)', () => {
+  const b = (date: string, close: number, isin = 'INE721A01013') => ({ ...bar(date, close, close, 1000, 'SHRIRAMFIN'), isin });
+  it('an ISIN change with no recorded split is a break (SHRIRAMFIN, Jan 2025: split missing from NSE\'s file)', () => {
+    const bars = [b('2025-01-09', 280985), b('2025-01-10', 56600, 'INE721A01047')];
+    const br = findBreaks(bars, adjustedCandles(bars, []), [], []);
+    expect(br).toHaveLength(1);
+    expect(br[0].date).toBe('2025-01-10');
+    expect(br[0].reason).toMatch(/ISIN changed INE721A01013 → INE721A01047 with no recorded split/);
+    expect(br[0].reason).toMatch(/opening gap −?-?79\.9%/);
+  });
+  it('a recorded split on the ISIN-change day is adjusted, so no break', () => {
+    const bars = [b('2025-01-09', 280985), b('2025-01-10', 56600, 'INE721A01047')];
+    const { adjustments } = findAdjustments(bars, [{ symbol: 'SHRIRAMFIN', exDate: '2025-01-10', purpose: 'FV SPLT FRM RS 10 TO RS 2' }]);
+    expect(findBreaks(bars, adjustedCandles(bars, adjustments), adjustments, [])).toEqual([]);
+  });
+  it('an action we cannot adjust is a break on its ex-date', () => {
+    const bars = [b('2024-11-21', 10000), b('2024-11-22', 9800)];
+    const br = findBreaks(bars, adjustedCandles(bars, []), [], [{ symbol: 'SHRIRAMFIN', exDate: '2024-11-22', purpose: 'CAPITAL REDUCTION', reason: 'x' }]);
+    expect(br).toEqual([{ date: '2024-11-22', reason: 'not adjusted: CAPITAL REDUCTION' }]);
   });
 });

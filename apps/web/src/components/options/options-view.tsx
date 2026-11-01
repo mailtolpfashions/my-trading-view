@@ -5,8 +5,11 @@ import { Minus, Plus, Trash2 } from 'lucide-react';
 import { legValue, pnlAt, summarise, summariseCurve, summariseNet, yearsToExpiry, type Leg, type ModelLeg } from '@mtv/options';
 import { BROKERS, brokerById, computeOptionCharges, expirySettlementCharges, formatRupees, toPaise, type Charges } from '@mtv/paper';
 import { fmt } from '@/lib/format';
-import { TEMPLATES, fetchChain, fetchMargin, fmtDate, fmtStrike, legGreeks, type BuilderLeg, type Chain, type ChainSide, type MarginResponse } from '@/lib/options';
+import { TEMPLATES, buildSmile, fetchChain, fetchFnoRange, fetchMargin, fmtDate, fmtStrike, legGreeks, type BuilderLeg, type Chain, type ChainSide, type MarginResponse } from '@/lib/options';
 import { PayoffChart } from './payoff-chart';
+import { WhatIf, type WhatIfState } from './what-if';
+import { Simulator } from './simulator';
+import { SPOT_VOL_FIT } from '@mtv/options';
 
 const RATE = 0.065; // matches the feed's model rate; affects estimates only
 const STEP: Record<string, number> = { NIFTY: 50_00, BANKNIFTY: 100_00 };
@@ -16,6 +19,10 @@ let seq = 0;
 export function OptionsView() {
   const [underlying, setUnderlying] = useState<'NIFTY' | 'BANKNIFTY'>('NIFTY');
   const [expiry, setExpiry] = useState<string | undefined>();
+  // "As of": a past trading day to build on (the simulator follows it from there); undefined = the latest day.
+  const [asOfDate, setAsOfDate] = useState<string | undefined>();
+  const [range, setRange] = useState<{ from: string | null; to: string | null }>({ from: null, to: null });
+  useEffect(() => { fetchFnoRange().then(setRange, () => undefined); }, []);
   const [chain, setChain] = useState<Chain | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [legs, setLegs] = useState<BuilderLeg[]>([]);
@@ -29,9 +36,18 @@ export function OptionsView() {
   useEffect(() => {
     let live = true;
     setError(null);
-    fetchChain(underlying, expiry).then((c) => { chainCache.current.set(`${c.underlying}|${c.expiry}`, c); if (live) setChain(c); }, (e: Error) => live && setError(e.message));
+    fetchChain(underlying, expiry, asOfDate).then((c) => { chainCache.current.set(`${c.underlying}|${c.expiry}`, c); if (live) setChain(c); }, (e: Error) => live && setError(e.message));
     return () => { live = false; };
-  }, [underlying, expiry]);
+  }, [underlying, expiry, asOfDate]);
+
+  /** Moves the whole builder to another day: legs priced on one day can't be mixed with another day's chain. */
+  function pickDate(d: string | undefined) {
+    if (d === asOfDate) return;
+    chainCache.current.clear();
+    setAsOfDate(d); setExpiry(undefined);
+    if (legs.length) { setLegs([]); setNotice('Date changed: legs cleared, since prices are per day.'); }
+  }
+  const past = !!(chain && range.to && chain.date < range.to);
 
   useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(null), 3000); return () => clearTimeout(t); }, [notice]);
 
@@ -62,7 +78,7 @@ export function OptionsView() {
     const key = `${underlying}|${l.expiry}`;
     let c = chainCache.current.get(key);
     if (!c) {
-      try { c = await fetchChain(underlying, l.expiry); chainCache.current.set(key, c); } catch { return setNotice(`Could not load the ${fmtDate(l.expiry)} chain.`); }
+      try { c = await fetchChain(underlying, l.expiry, chain?.date); chainCache.current.set(key, c); } catch { return setNotice(`Could not load the ${fmtDate(l.expiry)} chain.`); }
     }
     const strike = l.strikePaise + dir * STEP[underlying];
     const q = c.rows.find((r) => r.strikePaise === strike)?.[l.kind];
@@ -82,7 +98,7 @@ export function OptionsView() {
       if (!chains.has(off)) {
         const exp = chain.expiries[at + off];
         if (!exp) return setNotice('No later expiry is listed for this template.');
-        try { chains.set(off, await fetchChain(underlying, exp)); } catch { return setNotice(`Could not load the ${fmtDate(exp)} chain.`); }
+        try { chains.set(off, await fetchChain(underlying, exp, chain.date)); } catch { return setNotice(`Could not load the ${fmtDate(exp)} chain.`); }
       }
       const c = chains.get(off)!;
       const strike = chain.atmStrikePaise + l.offset * STEP[underlying];
@@ -131,8 +147,17 @@ export function OptionsView() {
   const carry = chain?.forwardPaise && chain.spotPaise && T > 0 ? Math.log(chain.forwardPaise / chain.spotPaise) / T : RATE;
   const tFirst = chain && expiries.length ? yearsToExpiry(asOf, expiries[0]) : 0;
   const modelLegs: ModelLeg[] = useMemo(() => (lot && chain
-    ? legs.map((l) => ({ kind: l.kind, side: l.side, strikePaise: l.strikePaise, pricePaise: l.pricePaise, qty: l.lots * lot, iv: l.iv, years: yearsToExpiry(asOf, l.expiry) }))
-    : []), [legs, lot, asOf]); // eslint-disable-line react-hooks/exhaustive-deps
+    ? legs.map((l) => {
+        const c = chainCache.current.get(`${underlying}|${l.expiry}`);
+        return { kind: l.kind, side: l.side, strikePaise: l.strikePaise, pricePaise: l.pricePaise, qty: l.lots * lot, iv: l.iv, years: yearsToExpiry(asOf, l.expiry), smile: c ? buildSmile(c) : undefined };
+      })
+    : []), [legs, lot, asOf, chain]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // What-if scenario: NIFTY level, days ahead, IV model and shift. Starts at today's spot, next day.
+  const [whatIf, setWhatIf] = useState<WhatIfState | null>(null);
+  const maxDays = Math.max(0, Math.round(tFirst * 365));
+  useEffect(() => { if (chain?.spotPaise) setWhatIf((w) => (w && w.spotPaise && Math.abs(w.spotPaise / chain.spotPaise! - 1) < 0.2 ? w : { spotPaise: chain.spotPaise!, days: 1, model: 'spotvol', shiftPts: 0 })); }, [chain?.spotPaise]);
+  const scenario = whatIf ? { ...whatIf, days: Math.min(whatIf.days, maxDays) } : null;
   const multiOutcome = useMemo(() => {
     if (!multi || !chain?.spotPaise) return null;
     const S0 = chain.spotPaise;
@@ -153,11 +178,11 @@ export function OptionsView() {
     const ctl = new AbortController();
     setMargin((m) => ({ ...m, loading: true }));
     const t = setTimeout(() => {
-      fetchMargin(underlying, chain.spotPaise!, legs.map((l) => ({ kind: l.kind, expiry: l.expiry, strikePaise: l.strikePaise, qty: (l.side === 'BUY' ? 1 : -1) * l.lots * lot, pricePaise: l.pricePaise })), ctl.signal)
+      fetchMargin(underlying, chain.spotPaise!, legs.map((l) => ({ kind: l.kind, expiry: l.expiry, strikePaise: l.strikePaise, qty: (l.side === 'BUY' ? 1 : -1) * l.lots * lot, pricePaise: l.pricePaise })), ctl.signal, past ? chain.date : undefined)
         .then((data) => setMargin({ data, error: null, loading: false }), (e: Error) => { if (e.name !== 'AbortError') setMargin({ data: null, error: e.message, loading: false }); });
     }, 250);
     return () => { clearTimeout(t); ctl.abort(); };
-  }, [legs, lot, underlying, chain?.spotPaise]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [legs, lot, underlying, chain?.spotPaise, past]); // eslint-disable-line react-hooks/exhaustive-deps
   const m = margin.data;
 
   const visible = chain?.atmStrikePaise != null
@@ -174,12 +199,12 @@ export function OptionsView() {
   const cell = (q: ChainSide | null, kind: 'CE' | 'PE', strike: number) => {
     if (!q) return <td colSpan={3} className="text-center text-muted">—</td>;
     const itm = spot != null && (kind === 'CE' ? strike < spot : strike > spot);
-    const oi = <td className={`relative px-2 text-right ${itm ? 'bg-[#fbf8ee]' : ''}`}><i className={`absolute top-1.5 bottom-1.5 ${kind === 'CE' ? 'right-0' : 'left-0'} rounded-full opacity-30 ${kind === 'CE' ? 'bg-down' : 'bg-up'}`} style={{ width: `${(q.oi / maxOi) * 100}%` }} /><span className="relative">{(q.oi / 1e5).toFixed(1)}L</span></td>;
-    const iv = <td className={`px-2 text-right text-muted ${itm ? 'bg-[#fbf8ee]' : ''}`}>{q.iv == null ? '—' : (q.iv * 100).toFixed(1)}</td>;
+    const oi = <td className={`relative px-2 text-right ${itm ? 'bg-itm' : ''}`}><i className={`absolute top-1.5 bottom-1.5 ${kind === 'CE' ? 'right-0' : 'left-0'} rounded-full opacity-30 ${kind === 'CE' ? 'bg-down' : 'bg-up'}`} style={{ width: `${(q.oi / maxOi) * 100}%` }} /><span className="relative">{(q.oi / 1e5).toFixed(1)}L</span></td>;
+    const iv = <td className={`px-2 text-right text-muted ${itm ? 'bg-itm' : ''}`}>{q.iv == null ? '—' : (q.iv * 100).toFixed(1)}</td>;
     // Legs already in the strategy at this strike: net lots, + bought, − sold.
     const held = legs.filter((l) => l.kind === kind && l.strikePaise === strike && l.expiry === chain?.expiry);
     const net = held.reduce((s, l) => s + (l.side === 'BUY' ? l.lots : -l.lots), 0);
-    const tint = !held.length ? (itm ? 'bg-[#fbf8ee]' : '') : net > 0 ? 'bg-blue/10 ring-2 ring-inset ring-blue' : net < 0 ? 'bg-down/10 ring-2 ring-inset ring-down' : 'bg-raised ring-2 ring-inset ring-muted';
+    const tint = !held.length ? (itm ? 'bg-itm' : '') : net > 0 ? 'bg-blue/10 ring-2 ring-inset ring-blue' : net < 0 ? 'bg-down/10 ring-2 ring-inset ring-down' : 'bg-raised ring-2 ring-inset ring-muted';
     const ltp = (
       <td className={`group relative px-2 text-right font-semibold ${tint} ${q.traded ? '' : 'text-muted'}`} title={q.traded ? undefined : 'No trades that day: NSE carried the previous close forward'}>
         {held.length > 0 && (
@@ -194,7 +219,7 @@ export function OptionsView() {
           <button type="button" onClick={() => addLeg(kind, 'SELL', strike)} className="flex-1 rounded-md bg-down text-[11px] font-bold text-white">S</button>
           {held.length > 0 && (
             <button type="button" onClick={() => removeLot(kind, strike)} aria-label={`Remove one lot of ${fmtStrike(strike)} ${kind}`}
-              title={`Remove one lot (${held.at(-1)!.side === 'BUY' ? 'buy' : 'sell'} leg)`} className="flex-1 rounded-md bg-ink text-[13px] leading-none font-bold text-white">−</button>
+              title={`Remove one lot (${held.at(-1)!.side === 'BUY' ? 'buy' : 'sell'} leg)`} className="flex-1 rounded-md bg-inverse text-[13px] leading-none font-bold text-on-inverse">−</button>
           )}
         </span>
       </td>
@@ -203,14 +228,14 @@ export function OptionsView() {
   };
 
   return (
-    <main className="grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(560px,1.15fr)] gap-2">
+    <div className="grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(560px,1.15fr)] gap-2">
       {/* chain */}
       <section className="panel flex min-h-0 flex-col overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
           <div className="flex rounded-full bg-raised p-[3px]">
             {(['NIFTY', 'BANKNIFTY'] as const).map((u) => (
               <button key={u} type="button" onClick={() => { if (u !== underlying) { setUnderlying(u); setExpiry(undefined); setLegs([]); } }}
-                className={`rounded-full px-3 py-1 text-[12.5px] font-bold ${u === underlying ? 'bg-ink text-white' : 'text-ink-2'}`}>{u}</button>
+                className={`rounded-full px-3 py-1 text-[12.5px] font-bold ${u === underlying ? 'bg-inverse text-on-inverse' : 'text-ink-2'}`}>{u}</button>
             ))}
           </div>
           {chain && (
@@ -220,10 +245,13 @@ export function OptionsView() {
             </select>
           )}
           {chain && (
-            <span className="ml-auto text-[11.5px] text-muted">
-              NSE official close · {fmtDate(chain.date)} · not live
-            </span>
+            <label className="ml-auto flex items-center gap-1.5 text-[11.5px] text-muted" title="Build on a past day's NSE close, then simulate it day by day to expiry">
+              As of
+              <input type="date" className="num h-8 rounded-full bg-raised px-2.5 text-[12.5px] font-semibold text-ink" value={chain.date}
+                min={range.from ?? undefined} max={range.to ?? undefined} onChange={(e) => e.target.value && pickDate(e.target.value)} aria-label="Chain date" />
+            </label>
           )}
+          {past && <button type="button" onClick={() => pickDate(undefined)} className="rounded-full px-2.5 py-1 text-[12px] font-semibold text-ink-2 hover:bg-raised">Latest</button>}
         </div>
         {chain && (
           <div className="grid grid-cols-4 gap-1.5 px-3 py-2 text-[11px]">
@@ -233,6 +261,7 @@ export function OptionsView() {
             <div className="rounded-[10px] bg-raised px-2.5 py-1.5"><p className="text-muted">Lot size</p><p className="num text-[13px] font-semibold">{chain.lotSize ?? '—'}</p></div>
           </div>
         )}
+        {chain && asOfDate && chain.date !== asOfDate && <p className="mx-3 text-[11.5px] text-muted">No NSE F&amp;O data for {fmtDate(asOfDate)} (holiday or weekend): showing {fmtDate(chain.date)}.</p>}
         {error && <p className="m-4 rounded-[10px] bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">{error}</p>}
         <div ref={scroller} className="min-h-0 flex-1 overflow-auto px-1.5 pb-2">
           <table className="num w-full text-[12px]">
@@ -385,6 +414,9 @@ export function OptionsView() {
                   {' '}exercise STT on the long leg adds about {formatRupees(Math.round((net.chargesGrow.above ?? net.chargesGrow.below)!.chargeSlope * 100 * 100))} per 100 points the index moves further; max loss above is at the outer strike. Squaring off before expiry avoids it.
                 </p>
               )}
+              {past
+                ? <Simulator underlying={underlying} entryDate={chain.date} legs={legs} brokerId={broker.id} brokerName={broker.name} />
+                : <p className="rounded-[10px] bg-raised px-2.5 py-1.5 text-[11.5px] text-ink-2">To see how a position would have played out, pick an earlier <b>As of</b> date above the chain, build it there, and simulate it day by day to expiry.</p>}
               <details className="rounded-[10px] border border-line px-2.5 py-1.5 text-[12px]">
                 <summary className="cursor-pointer font-semibold">Charges breakdown · {broker.name} · rates in force today</summary>
                 <table className="num mt-1.5 w-full">
@@ -407,7 +439,12 @@ export function OptionsView() {
                 </p>
               </details>
               <PayoffChart legs={modelLegs} spotPaise={chain.spotPaise} rate={RATE} carry={carry} atYears={tFirst} exact={!multi} atLabel={fmtDate(expiries[0] ?? chain.expiry)}
-                breakevens={multi ? (multiOutcome && !multiOutcome.missingIv ? multiOutcome.gross.breakevens : []) : summary.breakevens} />
+                breakevens={multi ? (multiOutcome && !multiOutcome.missingIv ? multiOutcome.gross.breakevens : []) : summary.breakevens}
+                scenario={scenario ? { spotPaise: scenario.spotPaise, t: scenario.days / 365, sc: { model: scenario.model, spot0: chain.spotPaise, shift: scenario.shiftPts / 100, fit: SPOT_VOL_FIT.buckets }, label: scenario.days === 0 ? 'now' : `+${scenario.days}d` } : undefined}
+                onScenarioSpot={(S) => setWhatIf((w) => (w ? { ...w, spotPaise: S } : w))} />
+              {scenario && lot && (
+                <WhatIf state={scenario} onChange={setWhatIf} legs={legs} modelLegs={modelLegs} spotPaise={chain.spotPaise} carry={carry} maxDays={maxDays} chainDate={chain.date} broker={broker} lot={lot} />
+              )}
               {greeks && (
                 <div className="grid grid-cols-3 gap-1.5 text-[12px]">
                   <div className="rounded-[10px] bg-raised px-2.5 py-1.5"><p className="text-[11px] text-muted">Delta (units)</p><p className="num font-semibold">{greeks.delta.toFixed(1)}</p></div>
@@ -422,13 +459,14 @@ export function OptionsView() {
                   : <>Max profit/loss and breakevens are for holding to expiry, after charges, and are exact for these prices.</>}
                 {' '}&ldquo;Today&rdquo; curve, IV and Greeks are Black-76 model estimates. Prices are NSE&rsquo;s official close of {fmtDate(chain.date)}, not live quotes.
                 {m && <> Margin: SPAN computed with NSE Clearing&rsquo;s method from its official start-of-day risk parameter file ({m.file}), plus NSE&rsquo;s exposure margin of 2% of notional on short options and futures (4% on a short option&rsquo;s expiry day). This is the exchange minimum; a broker may block more.</>}
+                {m?.historical && <> <b className="text-ink-2">Past day:</b> SPAN is from that day&rsquo;s NSE file; the exposure margin and expiry-day rules above are today&rsquo;s, and have not yet been checked against the rates NSE applied on {fmtDate(chain.date)}.</>}
                 {' '}Templates illustrate option structures; they are not recommendations. A calculator for your own analysis, not investment advice.
               </p>
             </>
           )}
         </div>
       </section>
-      {notice && <div role="status" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink px-5 py-2.5 text-[13px] font-semibold text-white shadow-[var(--shadow-pop)]">{notice}</div>}
-    </main>
+      {notice && <div role="status" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-inverse px-5 py-2.5 text-[13px] font-semibold text-on-inverse shadow-[var(--shadow-pop)]">{notice}</div>}
+    </div>
   );
 }

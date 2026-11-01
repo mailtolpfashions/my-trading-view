@@ -2,12 +2,14 @@
 
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth';
+import { PAID_PLANS } from '@/lib/site-mode';
 import { BillingError, cancelSubscription, completeSandboxPayment, startCheckout } from '@/server/billing';
 import { currentPlan } from '@/server/entitlements';
 
 const message = (e: unknown) => encodeURIComponent(e instanceof BillingError ? e.message : 'Something went wrong. Please try again.');
 
 export async function checkoutAction(form: FormData) {
+  if (!PAID_PLANS) redirect('/dashboard');
   const interval = form.get('interval') === 'year' ? 'year' : 'month';
   const session = await getSession();
   if (!session) redirect(`/signup?next=${encodeURIComponent('/pricing')}`);

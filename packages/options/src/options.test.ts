@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { black76, bsPrice, impliedVol, normCdf, payoff, pnlAt, summarise, summariseCurve, summariseNet, yearsToExpiry, type Leg, type ModelLeg } from './index';
+import { black76, bsPrice, impliedVol, normCdf, legValue, payoff, pnlAt, scenarioIv, SPOT_VOL_FIT, summarise, summariseCurve, summariseNet, yearsToExpiry, type Leg, type ModelLeg, type Scenario } from './index';
 
 describe('pricing models', () => {
   it('matches the textbook Black-Scholes reference (Hull: S=K=100, T=1, r=5%, σ=20%)', () => {
@@ -118,5 +118,40 @@ describe('multi-expiry model (calendars)', () => {
     expect(s.maxProfitPaise).toBe(1000);
     expect(s.maxLossPaise).toBe(-4000);
     expect(s.breakevens.map((b) => Math.round(b))).toEqual([4000, 6000]);
+  });
+});
+
+describe('what-if IV models', () => {
+  const smile = [{ k: 22000_00, iv: 0.19 }, { k: 22500_00, iv: 0.17 }, { k: 23000_00, iv: 0.155 }, { k: 23500_00, iv: 0.15 }]; // put skew
+  const leg = (kind: 'CE' | 'PE', strike: number, iv: number): ModelLeg => ({ kind, side: 'BUY', strikePaise: strike * 100, pricePaise: 0, qty: 65, years: 7 / 365, iv, smile });
+  const spot0 = 22750_00, carry = 0.065;
+  const sc = (model: Scenario['model'], shift = 0): Scenario => ({ model, spot0, shift, fit: SPOT_VOL_FIT.buckets });
+  it("no move, today, no shift: every model returns the contract's own IV, so today's price", () => {
+    const l = leg('CE', 22750, 0.162);
+    for (const m of ['strike', 'moneyness', 'spotvol'] as const) {
+      expect(scenarioIv(l, spot0, 0, carry, sc(m))).toBeCloseTo(0.162, 12);
+      expect(legValue(l, spot0, 0, 0.065, carry, sc(m))).toBeCloseTo(legValue(l, spot0, 0, 0.065, carry)!, 9);
+    }
+  });
+  it("sticky strike ignores the move; moneyness follows the skew (a rally lowers the strike's moneyness, so higher IV on this skew)", () => {
+    const l = leg('CE', 22750, 0.162);
+    expect(scenarioIv(l, spot0 + 500_00, 0, carry, sc('strike'))).toBe(0.162);
+    expect(scenarioIv(l, spot0 + 500_00, 0, carry, sc('moneyness'))!).toBeGreaterThan(0.162);
+  });
+  it('spot-vol: a fall raises IV more than the same rise lowers it (NSE fit)', () => {
+    const l = leg('PE', 22750, 0.162);
+    const down = scenarioIv(l, spot0 * 0.97, 0, carry, sc('spotvol'))! - scenarioIv(l, spot0 * 0.97, 0, carry, sc('moneyness'))!;
+    const up = scenarioIv(l, spot0 * 1.03, 0, carry, sc('spotvol'))! - scenarioIv(l, spot0 * 1.03, 0, carry, sc('moneyness'))!;
+    expect(down).toBeGreaterThan(0);
+    expect(down).toBeGreaterThan(Math.abs(up));
+  });
+  it('the IV shift adds vol points, and put-call parity holds under every model', () => {
+    expect(scenarioIv(leg('CE', 22750, 0.162), spot0, 0, carry, sc('strike', 0.03))).toBeCloseTo(0.192, 12);
+    const t = 1 / 365, S = spot0 + 500_00, left = 7 / 365 - t;
+    for (const m of ['strike', 'moneyness', 'spotvol'] as const) {
+      const c = legValue(leg('CE', 22750, 0.162), S, t, 0.065, carry, sc(m))!, p = legValue(leg('PE', 22750, 0.162), S, t, 0.065, carry, sc(m))!;
+      const F = S * Math.exp(carry * left);
+      expect(c - p).toBeCloseTo(Math.exp(-0.065 * left) * (F - 22750_00), 4);
+    }
   });
 });

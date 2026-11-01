@@ -12,7 +12,8 @@
   "dependencies": {
     "@mtv/indicators": "*",
     "@mtv/paper": "*",
-    "@mtv/shared": "*"
+    "@mtv/shared": "*",
+    "@mtv/options": "*"
   },
   "devDependencies": {
     "vitest": "^5.0.5"

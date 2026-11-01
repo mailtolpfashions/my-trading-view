@@ -5,6 +5,7 @@ import { prisma } from '@mtv/db';
 import { Banner, SiteShell } from '@/components/site-shell';
 import { getSession } from '@/lib/auth';
 import { PLANS, priceLabel } from '@/lib/plans';
+import { PAID_PLANS } from '@/lib/site-mode';
 import { cancelAction } from '@/server/billing-actions';
 import { currentPlan } from '@/server/entitlements';
 
@@ -28,7 +29,7 @@ export default async function Account({ searchParams }: { searchParams: Promise<
     <SiteShell>
       <div className="mx-auto max-w-[780px] space-y-4 pt-6 pb-10">
         <h1 className="text-[34px] font-extrabold tracking-[-0.035em]">Account</h1>
-        {sp.paid && <Banner tone="good">Payment received. Live data is on: reopen the terminal to switch to real-time prices.</Banner>}
+        {sp.paid && <Banner tone="good">Payment received. Your Pro plan is active.</Banner>}
         {sp.cancelled && <Banner tone="good">Renewal cancelled. You keep Live until the end of the paid period.</Banner>}
         {sp.error && <Banner tone="bad">{sp.error}</Banner>}
 
@@ -42,7 +43,7 @@ export default async function Account({ searchParams }: { searchParams: Promise<
           <h2 className="eyebrow">Plan</h2>
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <span className="text-[22px] font-extrabold">{PLANS[plan].name}</span>
-            <span className={`rounded-full px-2.5 py-0.5 text-[12px] font-bold ${plan === 'LIVE' ? 'bg-up-soft text-up' : 'bg-raised text-ink-2'}`}>{plan === 'LIVE' ? 'Real-time data' : '15-minute delayed data'}</span>
+            <span className={`rounded-full px-2.5 py-0.5 text-[12px] font-bold ${plan === 'LIVE' ? 'bg-up-soft text-up' : 'bg-raised text-ink-2'}`}>{plan === 'LIVE' ? 'Pro' : 'Free'}</span>
           </div>
           {plan === 'LIVE' && until && (
             <p className="mt-2 text-[14px] text-ink-2">
@@ -51,13 +52,13 @@ export default async function Account({ searchParams }: { searchParams: Promise<
           )}
           {sub?.status === 'HALTED' && <p className="mt-2 text-[14px] font-semibold text-down">Your last renewal payment failed. Update your payment method with your bank or UPI app, or subscribe again.</p>}
           <div className="mt-5 flex flex-wrap gap-3">
-            {plan === 'FREE' && <Link href="/pricing" className="rounded-full bg-ink px-5 py-2.5 text-[13.5px] font-bold text-white hover:bg-black">Upgrade to Live</Link>}
+            {PAID_PLANS && plan === 'FREE' && <Link href="/pricing" className="rounded-full bg-inverse px-5 py-2.5 text-[13.5px] font-bold text-on-inverse hover:bg-inverse-hover">Upgrade to Pro</Link>}
             {(renews || sub?.status === 'HALTED') && (
               <form action={cancelAction}>
                 <button type="submit" className="rounded-full bg-raised px-5 py-2.5 text-[13.5px] font-bold hover:bg-line">Cancel renewal</button>
               </form>
             )}
-            <Link href="/terminal" className="rounded-full bg-raised px-5 py-2.5 text-[13.5px] font-bold hover:bg-line">Open terminal</Link>
+            <Link href="/dashboard" className="rounded-full bg-raised px-5 py-2.5 text-[13.5px] font-bold hover:bg-line">Open dashboard</Link>
           </div>
         </section>
 

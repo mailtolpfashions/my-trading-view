@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { LogOut, Sparkles, UserRound } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { PLANS, type PlanId } from '@/lib/plans';
+import { PAID_PLANS } from '@/lib/site-mode';
 
 export type TerminalUser = { name: string; email: string; plan: PlanId; admin: boolean };
 
@@ -34,13 +35,13 @@ export function UserMenu({ user }: { user: TerminalUser }) {
             <div className="truncate text-[13px] font-bold">{user.name}</div>
             <div className="truncate text-[12px] text-muted">{user.email}</div>
           </div>
-          {user.plan === 'FREE' && (
+          {PAID_PLANS && user.plan === 'FREE' && (
             <Link href="/pricing" role="menuitem" className="flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-[12.5px] font-bold text-accent-ink">
-              <Sparkles size={14} aria-hidden="true" /> Upgrade to Live for real-time prices
+              <Sparkles size={14} aria-hidden="true" /> Upgrade to Pro
             </Link>
           )}
           <Link href="/account" role="menuitem" className="mt-1 flex items-center gap-2 rounded-xl px-3 py-2 text-[12.5px] font-semibold text-ink-2 hover:bg-raised">
-            <UserRound size={14} aria-hidden="true" /> Account &amp; billing
+            <UserRound size={14} aria-hidden="true" /> {PAID_PLANS ? <>Account &amp; billing</> : 'Account'}
           </Link>
           <button type="button" role="menuitem" onClick={signOut} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-[12.5px] font-semibold text-ink-2 hover:bg-raised">
             <LogOut size={14} aria-hidden="true" /> Sign out

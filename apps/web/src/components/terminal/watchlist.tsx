@@ -54,7 +54,7 @@ export function Watchlist({ symbols, quotes, active, onSelect, onAdd, onRemove }
                 tabIndex={0}
                 onClick={() => onSelect(s)}
                 onKeyDown={(e) => e.key === 'Enter' && onSelect(s)}
-                className={`grid h-9 cursor-pointer grid-cols-[1fr_84px_64px_62px_18px] items-center gap-1 rounded-[10px] px-2.5 text-right text-[12.5px] ${on ? 'bg-ink text-white' : 'hover:bg-raised'}`}
+                className={`grid h-9 cursor-pointer grid-cols-[1fr_84px_64px_62px_18px] items-center gap-1 rounded-[10px] px-2.5 text-right text-[12.5px] ${on ? 'bg-deep text-white' : 'hover:bg-raised'}`}
               >
                 <b className="truncate text-left font-bold">{s}</b>
                 <span className={`num rounded px-0.5 ${dir === 'up' ? 'flash-up' : dir === 'down' ? 'flash-down' : ''}`}>{q ? fmt(q.ltp) : '—'}</span>

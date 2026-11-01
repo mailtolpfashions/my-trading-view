@@ -18,16 +18,17 @@ const INTERVALS: Record<Timeframe, [interval: string, range: string]> = {
   '60': ['60m', '6mo'],
   D: ['1d', '5y'],
   W: ['1wk', '20y'],
+  M: ['1mo', '20y'],
 };
 
 /**
  * Backtests use the deepest history Yahoo serves at the requested bar size. Never use range=max:
  * Yahoo then silently returns MONTHLY bars for daily and weekly requests.
  */
-const DEEP_RANGES: Record<Timeframe, string> = { '1': '7d', '5': '60d', '15': '60d', '30': '60d', '60': '730d', D: '10y', W: '20y' };
+const DEEP_RANGES: Record<Timeframe, string> = { '1': '7d', '5': '60d', '15': '60d', '30': '60d', '60': '730d', D: '10y', W: '20y', M: '20y' };
 
 /** The bar size Yahoo reports back for each interval we request. */
-const GRANULARITY: Record<string, string> = { '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m', '60m': '1h', '1d': '1d', '1wk': '1wk' };
+const GRANULARITY: Record<string, string> = { '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m', '60m': '1h', '1d': '1d', '1wk': '1wk', '1mo': '1mo' };
 
 /** Refuses a response whose bars are not the size we asked for, instead of mislabelling them. */
 export function checkGranularity(json: YahooChart, interval: string) {

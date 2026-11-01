@@ -2,9 +2,12 @@
 
 import type { PaperSnapshot } from '@mtv/paper';
 
-/** Chart interval: minutes as a string, or D / W for daily and weekly bars. */
-export type Timeframe = '1' | '5' | '15' | '30' | '60' | 'D' | 'W';
-export const TIMEFRAMES: Timeframe[] = ['1', '5', '15', '30', '60', 'D', 'W'];
+/** Bar interval: minutes as a string, or D / W / M for daily, weekly and monthly bars. */
+export type Timeframe = '1' | '5' | '15' | '30' | '60' | 'D' | 'W' | 'M';
+export const TIMEFRAMES: Timeframe[] = ['1', '5', '15', '30', '60', 'D', 'W', 'M'];
+/** The product shows NSE end-of-day data only: daily bars and weeks and months built from them. */
+export type EodTimeframe = 'D' | 'W' | 'M';
+export const EOD_TIMEFRAMES: EodTimeframe[] = ['D', 'W', 'M'];
 
 /** One OHLCV bar. `time` is the bar's open time in UTC epoch seconds. */
 export type Candle = { time: number; open: number; high: number; low: number; close: number; volume: number };
@@ -31,9 +34,12 @@ export type Quote = {
 };
 
 export type DataStatus = {
-  provider: 'free' | 'kite';
+  /** 'nse-eod': NSE end-of-day files only (the product); 'free' | 'kite' remain for internal tools. */
+  provider: 'free' | 'kite' | 'nse-eod';
   /** True when prices are delayed (free sources); the UI shows a badge. */
   delayed: boolean;
+  /** Last NSE trading day held, for end-of-day data. */
+  asOf?: string;
 };
 
 export type MarketSession = 'pre-open' | 'open' | 'closed';

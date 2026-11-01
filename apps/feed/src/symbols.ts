@@ -30,6 +30,26 @@ export function parseEquityList(csv: string): Instrument[] {
     .map(([symbol, name]) => ({ symbol: symbol.trim(), name: name.trim(), exchange: 'NSE' as const, kind: 'EQUITY' as const }));
 }
 
+let faceValues = new Map<string, number>();
+
+/** Face value (rupees) per symbol from the equity list's FACE VALUE column; used to price rights issues. */
+export function parseFaceValues(csv: string): Map<string, number> {
+  const lines = csv.split(/\r?\n/);
+  const header = (lines[0] ?? '').split(',').map((h) => h.trim().toUpperCase());
+  const col = header.indexOf('FACE VALUE');
+  const out = new Map<string, number>();
+  if (col < 0) return out;
+  for (const line of lines.slice(1)) {
+    const c = line.split(',');
+    const fv = Number(c[col]);
+    if (c[0]?.trim() && fv > 0) out.set(c[0].trim(), fv);
+  }
+  return out;
+}
+
+/** Today's face value of an NSE stock, or null if it is not in the current list. */
+export const faceValueOf = (symbol: string) => faceValues.get(symbol) ?? null;
+
 /** Loads the NSE equity list, refreshing the on-disk copy once a day. Falls back to a stale copy if NSE is unreachable. */
 export async function loadEquities(log: (msg: string) => void): Promise<void> {
   const fresh = await stat(CACHE_FILE).then((s) => Date.now() - s.mtimeMs < DAY_MS, () => false);
@@ -45,6 +65,7 @@ export async function loadEquities(log: (msg: string) => void): Promise<void> {
   }
   const csv = await readFile(CACHE_FILE, 'utf8').catch(() => '');
   equities = parseEquityList(csv);
+  faceValues = parseFaceValues(csv);
   log(`Loaded ${equities.length} NSE equities`);
 }
 

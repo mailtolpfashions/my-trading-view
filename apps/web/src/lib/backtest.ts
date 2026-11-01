@@ -41,9 +41,9 @@ export const PRESETS: { id: string; tf: Timeframe; strategy: Strategy }[] = [
     },
   },
   {
-    id: 'supertrend', tf: '15',
+    id: 'supertrend', tf: 'D',
     strategy: {
-      ...base, name: 'Supertrend 10,3 intraday', direction: 'LONG', product: 'MIS', stopLossPct: 1,
+      ...base, name: 'Supertrend 10,3 (positional)', direction: 'LONG', product: 'CNC', stopLossPct: 8,
       entry: { match: 'all', conditions: [cond(close, 'crossesAbove', ind('SUPERTREND', 10, 3))] },
       exit: { match: 'all', conditions: [cond(close, 'crossesBelow', ind('SUPERTREND', 10, 3))] },
     },
@@ -57,11 +57,11 @@ export const PRESETS: { id: string; tf: Timeframe; strategy: Strategy }[] = [
     },
   },
   {
-    id: 'vwap', tf: '5',
+    id: 'golden-cross', tf: 'D',
     strategy: {
-      ...base, name: 'VWAP + RSI momentum intraday', direction: 'LONG', product: 'MIS', stopLossPct: 0.5, targetPct: 1,
-      entry: { match: 'all', conditions: [cond(close, 'crossesAbove', ind('VWAP')), cond(ind('RSI', 14), '>', num(55))] },
-      exit: { match: 'all', conditions: [cond(close, 'crossesBelow', ind('VWAP'))] },
+      ...base, name: 'EMA 50/200 crossover (long term)', direction: 'LONG', product: 'CNC',
+      entry: { match: 'all', conditions: [cond(ind('EMA', 50), 'crossesAbove', ind('EMA', 200))] },
+      exit: { match: 'all', conditions: [cond(ind('EMA', 50), 'crossesBelow', ind('EMA', 200))] },
     },
   },
 ];

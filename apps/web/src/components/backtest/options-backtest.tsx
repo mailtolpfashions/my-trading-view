@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import type { OptionLegSpec, OptionsStrategy } from '@mtv/backtest';
 import { formatRupees } from '@mtv/paper';
 import { fmt } from '@/lib/format';
+import { CHART_COLORS, useTheme } from '@/lib/theme';
 import { fmtDate, fmtStrike } from '@/lib/options';
 import { EXPIRY_LABEL, OPTION_PRESETS, fetchFnoCoverage, runOptionsBacktestApi, type FnoCoverage, type OptionsBacktestResponse } from '@/lib/options-backtest';
 import { Rules } from './strategy-builder';
@@ -73,7 +74,7 @@ export function OptionsBacktest() {
   const num = (v: string) => (v === '' ? undefined : Number(v));
 
   return (
-    <main className="grid min-h-0 grid-cols-[440px_1fr] gap-2">
+    <div className="grid min-h-0 grid-cols-[440px_1fr] gap-2">
       <section className="panel flex min-h-0 flex-col overflow-hidden">
         <form className="flex min-h-0 flex-1 flex-col" onSubmit={(ev) => { ev.preventDefault(); void run(); }}>
           <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
@@ -111,7 +112,7 @@ export function OptionsBacktest() {
                 <div className="flex gap-1">
                   {WEEKDAYS.map(([d, label]) => (
                     <button key={d} type="button" onClick={() => setS({ ...s, entry: { when: 'weekdays', days: e.days.includes(d) ? e.days.filter((x) => x !== d) : [...e.days, d].sort() } })}
-                      className={`flex-1 rounded-full py-1 text-[12px] font-semibold ${e.days.includes(d) ? 'bg-ink text-white' : 'bg-panel text-ink-2'}`}>{label}</button>
+                      className={`flex-1 rounded-full py-1 text-[12px] font-semibold ${e.days.includes(d) ? 'bg-inverse text-on-inverse' : 'bg-panel text-ink-2'}`}>{label}</button>
                   ))}
                 </div>
               )}
@@ -134,7 +135,7 @@ export function OptionsBacktest() {
             </div>
           </div>
           <div className="border-t border-line p-3">
-            <button type="submit" disabled={busy} className="h-11 w-full rounded-full bg-ink font-bold text-white disabled:opacity-50">{busy ? 'Running…' : 'Run options backtest'}</button>
+            <button type="submit" disabled={busy} className="h-11 w-full rounded-full bg-inverse font-bold text-on-inverse disabled:opacity-50">{busy ? 'Running…' : 'Run options backtest'}</button>
           </div>
         </form>
       </section>
@@ -147,7 +148,7 @@ export function OptionsBacktest() {
           </p>
         )}
       </section>
-    </main>
+    </div>
   );
 }
 
@@ -156,22 +157,23 @@ function OptionsResults({ data }: { data: OptionsBacktestResponse }) {
   const m = result.metrics;
   const chartEl = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<number | null>(null);
+  const C = CHART_COLORS[useTheme()];
 
   useEffect(() => {
     const font = getComputedStyle(document.documentElement).getPropertyValue('--font-jakarta').trim() || 'system-ui';
     const chart = createChart(chartEl.current!, {
       autoSize: true,
-      layout: { background: { color: '#ffffff' }, textColor: '#131722', fontSize: 11, fontFamily: `${font}, system-ui, sans-serif` },
-      grid: { vertLines: { color: '#f3f2ee' }, horzLines: { color: '#f3f2ee' } },
-      rightPriceScale: { borderColor: '#ecebe6' }, timeScale: { borderColor: '#ecebe6', minBarSpacing: 0.05 },
+      layout: { background: { color: C.bg }, textColor: C.text, fontSize: 11, fontFamily: `${font}, system-ui, sans-serif` },
+      grid: { vertLines: { color: C.grid }, horzLines: { color: C.grid } },
+      rightPriceScale: { borderColor: C.line }, timeScale: { borderColor: C.line, minBarSpacing: 0.05 },
       localization: { priceFormatter: (v: number) => fmt(v) },
     });
-    const area = chart.addSeries(AreaSeries, { lineColor: '#121212', topColor: 'rgba(255,194,26,0.35)', bottomColor: 'rgba(255,194,26,0.02)', lineWidth: 2, priceLineVisible: false });
+    const area = chart.addSeries(AreaSeries, { lineColor: C.ink, topColor: 'rgba(255,194,26,0.35)', bottomColor: 'rgba(255,194,26,0.02)', lineWidth: 2, priceLineVisible: false });
     area.setData(result.equity.map((e) => ({ time: (Date.parse(e.date + 'T00:00:00Z') / 1000) as UTCTimestamp, value: e.equityPaise / 100 })));
-    area.createPriceLine({ price: 0, color: '#8b8a83', lineStyle: 2, lineWidth: 1, axisLabelVisible: false, title: '' });
+    area.createPriceLine({ price: 0, color: C.zero, lineStyle: 2, lineWidth: 1, axisLabelVisible: false, title: '' });
     const raf = requestAnimationFrame(() => requestAnimationFrame(() => chart.timeScale().fitContent()));
     return () => { cancelAnimationFrame(raf); chart.remove(); };
-  }, [result]);
+  }, [result, C]);
 
   const years = [...new Set(Object.keys(m.monthly).map((k) => k.slice(0, 4)))].sort();
   const maxAbs = Math.max(1, ...Object.values(m.monthly).map(Math.abs));
@@ -218,7 +220,7 @@ function OptionsResults({ data }: { data: OptionsBacktestResponse }) {
                       return (
                         <td key={i} className="p-0.5">
                           <div className="rounded px-1 py-1 text-center" title={v == null ? 'No trades' : formatRupees(v)}
-                            style={{ background: v == null ? '#f5f4f0' : v >= 0 ? `rgba(8,153,129,${a})` : `rgba(242,54,69,${a})` }}>
+                            style={{ background: v == null ? 'var(--color-raised)' : v >= 0 ? `rgba(8,153,129,${a})` : `rgba(242,54,69,${a})` }}>
                             {v == null ? '' : Math.round(v / 100 / 1000) === 0 ? (v / 100).toFixed(0) : `${(v / 100 / 1000).toFixed(1)}k`}
                           </div>
                         </td>

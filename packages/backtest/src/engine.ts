@@ -73,7 +73,7 @@ const toPaise = (rupees: number) => Math.round(rupees * 100);
 export class BacktestError extends Error {}
 
 export function runBacktest(candles: Candle[], tf: Timeframe, s: Strategy): BacktestResult {
-  const intraday = tf !== 'D' && tf !== 'W';
+  const intraday = tf !== 'D' && tf !== 'W' && tf !== 'M';
   const invalid = validateStrategy(s, intraday);
   if (invalid) throw new BacktestError(invalid);
   if (candles.length < 2) throw new BacktestError('Not enough bars to backtest');

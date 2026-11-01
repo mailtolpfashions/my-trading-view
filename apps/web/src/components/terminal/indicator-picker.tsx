@@ -25,7 +25,7 @@ export function IndicatorPicker({ quick, onToggleQuick, onAdd, onClose }: { quic
   const cats = ['All', ...CATEGORY_ORDER.filter((c) => list?.some((i) => i.category === c))];
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/30 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-label="Indicators">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-scrim p-4" onClick={onClose} role="dialog" aria-modal="true" aria-label="Indicators">
       <div className="panel flex h-[min(640px,90dvh)] w-full max-w-[760px] flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3 border-b border-line px-5 py-3">
           <h2 className="text-[17px] font-extrabold tracking-[-0.02em]">Indicators</h2>
@@ -47,7 +47,7 @@ export function IndicatorPicker({ quick, onToggleQuick, onAdd, onClose }: { quic
             <p className="eyebrow px-2 pt-3 pb-1.5">TradingView library</p>
             {cats.map((c) => (
               <button key={c} type="button" onClick={() => setCat(c)} aria-pressed={cat === c}
-                className={`w-full rounded-[8px] px-2 py-1.5 text-left text-[12.5px] ${cat === c ? 'bg-ink font-semibold text-white' : 'hover:bg-raised'}`}>{c}</button>
+                className={`w-full rounded-[8px] px-2 py-1.5 text-left text-[12.5px] ${cat === c ? 'bg-inverse font-semibold text-on-inverse' : 'hover:bg-raised'}`}>{c}</button>
             ))}
           </nav>
           <div className="min-h-0 overflow-y-auto">

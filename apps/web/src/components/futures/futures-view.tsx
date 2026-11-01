@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createChart, HistogramSeries, LineSeries, LineStyle, type IChartApi } from 'lightweight-charts';
 import { fmt } from '@/lib/format';
-import { BUILD_UP, FuturesAccessError, fetchFuturesHistory, fetchLiveFutures, type BuildUp, type FuturesDay, type LiveFutures } from '@/lib/futures';
+import { CHART_COLORS, useTheme } from '@/lib/theme';
+import { BUILD_UP, fetchFuturesHistory, type BuildUp, type FuturesDay } from '@/lib/futures';
 import { fmtDate } from '@/lib/options';
 
 const rupees = (p: number | null | undefined) => (p == null ? '—' : fmt(p / 100));
@@ -22,48 +23,27 @@ function BuildUpPill({ b }: { b: BuildUp }) {
   return <span title={BUILD_UP[b].hint} className={`rounded-full px-2 py-0.5 text-[11px] font-bold whitespace-nowrap ${TONE_CLASS[BUILD_UP[b].tone]}`}>{BUILD_UP[b].label}</span>;
 }
 
-/** Futures module: NIFTY / BANKNIFTY futures vs spot, open interest and build-up. Live strip for admin / Live plan. */
+/** Futures module: NIFTY / BANKNIFTY futures vs spot, open interest and build-up, from NSE's end-of-day F&O files. */
 export function FuturesView() {
   const [u, setU] = useState<'NIFTY' | 'BANKNIFTY'>('NIFTY');
   const [range, setRange] = useState(250);
   const [days, setDays] = useState<FuturesDay[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [live, setLive] = useState<LiveFutures | null>(null);
-  const [liveNote, setLiveNote] = useState<string | null>(null);
-
   useEffect(() => {
     setDays(null);
     fetchFuturesHistory(u, range).then((r) => { setDays(r.days); setError(null); }, (e: Error) => setError(e.message));
   }, [u, range]);
 
-  useEffect(() => {
-    setLive(null);
-    let stop = false;
-    let id: ReturnType<typeof setInterval> | undefined;
-    const load = () => fetchLiveFutures(u).then(
-      (r) => { if (!stop) { setLive(r); setLiveNote(null); } },
-      (e) => {
-        if (stop) return;
-        setLiveNote(e instanceof FuturesAccessError ? e.message : 'Live futures unavailable');
-        // Not on the plan, or no live source: asking again every few seconds won't change that.
-        if (e instanceof FuturesAccessError && ['live_plan_required', 'needs_broker'].includes(e.code)) clearInterval(id);
-      },
-    );
-    void load();
-    id = setInterval(load, 3000);
-    return () => { stop = true; clearInterval(id); };
-  }, [u]);
-
   const latest = days?.at(-1);
   const recent = days ? [...days].reverse().slice(0, 30) : [];
 
   return (
-    <main className="grid min-h-0 grid-rows-[auto_auto_1fr] gap-2 overflow-hidden">
+    <div className="grid min-h-0 grid-rows-[auto_1fr] gap-2 overflow-hidden">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-full bg-panel p-1 shadow-[var(--shadow-panel)]" role="tablist" aria-label="Index">
           {(['NIFTY', 'BANKNIFTY'] as const).map((x) => (
             <button key={x} type="button" role="tab" aria-selected={x === u} onClick={() => setU(x)}
-              className={`rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold ${x === u ? 'bg-ink text-white' : 'text-ink-2 hover:bg-raised'}`}>{x} futures</button>
+              className={`rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold ${x === u ? 'bg-inverse text-on-inverse' : 'text-ink-2 hover:bg-raised'}`}>{x} futures</button>
           ))}
         </div>
         <select className="h-9 rounded-full bg-panel px-3 text-[12.5px] font-semibold shadow-[var(--shadow-panel)]" value={range} onChange={(e) => setRange(Number(e.target.value))} aria-label="History">
@@ -72,13 +52,11 @@ export function FuturesView() {
         <span className="text-[12px] text-muted">History from NSE&rsquo;s official F&amp;O files{latest ? ` · latest ${fmtDate(latest.date)}` : ''}</span>
       </div>
 
-      <LiveStrip live={live} note={liveNote} />
-
       <div className="grid min-h-0 grid-cols-[1fr_580px] gap-2">
         <section className="panel flex min-h-0 flex-col overflow-hidden">
           <div className="flex items-center gap-4 border-b border-line px-4 py-2.5 text-[12px] text-ink-2">
             <span className="font-bold text-ink">Near-month future vs spot</span>
-            <span className="flex items-center gap-1.5"><i className="inline-block h-0.5 w-4 bg-[#2962ff]" />Future</span>
+            <span className="flex items-center gap-1.5"><i className="inline-block h-0.5 w-4 bg-blue" />Future</span>
             <span className="flex items-center gap-1.5"><i className="inline-block h-0 w-4 border-t-2 border-dashed border-ink-2" />Spot (index close)</span>
             <span className="flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-up" />OI coloured by build-up</span>
           </div>
@@ -112,39 +90,6 @@ export function FuturesView() {
           </div>
         </section>
       </div>
-    </main>
-  );
-}
-
-function LiveStrip({ live, note }: { live: LiveFutures | null; note: string | null }) {
-  if (!live) {
-    return note ? <p className="rounded-[14px] bg-panel px-4 py-2.5 text-[12.5px] text-ink-2 shadow-[var(--shadow-panel)]">{note}</p> : <p className="px-1 text-[12px] text-muted">Loading live futures…</p>;
-  }
-  const label = ['Near month', 'Next month', 'Far month'];
-  return (
-    <div className="grid grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,0.8fr)] gap-2">
-      {live.contracts.map((c, i) => (
-        <div key={c.expiry} className="panel px-4 py-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[12px] font-bold text-ink-2">{label[i]} · {fmtDate(c.expiry)}</span>
-            <BuildUpPill b={c.buildUp} />
-          </div>
-          <div className="num mt-1 flex items-baseline gap-2">
-            <span className="text-[20px] font-extrabold tracking-[-0.02em]">{rupees(c.ltpPaise)}</span>
-            <span className={`text-[12.5px] font-semibold ${tone(c.changePaise)}`}>{signedRupees(c.changePaise)}</span>
-          </div>
-          <div className="num mt-1 grid grid-cols-3 gap-1 text-[11.5px] text-ink-2">
-            <span><span className="block text-[10.5px] text-muted">Basis</span><span className={tone(c.basisPaise)}>{signedRupees(c.basisPaise)}</span></span>
-            <span><span className="block text-[10.5px] text-muted">OI</span>{lakh(c.oi)}</span>
-            <span title={c.oiBaseDate ? `vs ${fmtDate(c.oiBaseDate)} close` : undefined}><span className="block text-[10.5px] text-muted">OI chg</span><span className={tone(c.oiChange)}>{signedLakh(c.oiChange)}</span></span>
-          </div>
-        </div>
-      ))}
-      <div className="panel px-4 py-3">
-        <span className="flex items-center gap-1.5 text-[12px] font-bold text-ink-2"><span className="live-dot h-2 w-2 rounded-full bg-up" />Live · spot</span>
-        <p className="num mt-1 text-[20px] font-extrabold tracking-[-0.02em]">{rupees(live.spotPaise)}</p>
-        <p className="num mt-1 text-[11.5px] text-ink-2">Rollover {live.rolloverPct == null ? '—' : `${live.rolloverPct.toFixed(1)}%`} · lot {live.lot ?? '—'}</p>
-      </div>
     </div>
   );
 }
@@ -152,30 +97,31 @@ function LiveStrip({ live, note }: { live: LiveFutures | null; note: string | nu
 function FuturesChart({ days }: { days: FuturesDay[] }) {
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const C = CHART_COLORS[useTheme()];
   useEffect(() => {
     const chart = createChart(host.current!, {
       autoSize: true,
       layout: {
-        background: { color: '#ffffff' }, textColor: '#131722', fontSize: 11,
+        background: { color: C.bg }, textColor: C.text, fontSize: 11,
         fontFamily: `${getComputedStyle(document.documentElement).getPropertyValue('--font-jakarta').trim() || 'system-ui'}, system-ui, sans-serif`,
-        panes: { separatorColor: '#ecebe6' },
+        panes: { separatorColor: C.line },
       },
-      grid: { vertLines: { color: '#f3f2ee' }, horzLines: { color: '#f3f2ee' } },
-      rightPriceScale: { borderColor: '#ecebe6', minimumWidth: 72 },
-      timeScale: { borderColor: '#ecebe6' },
+      grid: { vertLines: { color: C.grid }, horzLines: { color: C.grid } },
+      rightPriceScale: { borderColor: C.line, minimumWidth: 72 },
+      timeScale: { borderColor: C.line },
       localization: { priceFormatter: (v: number) => fmt(v) },
     });
     chartRef.current = chart;
     const withNear = days.filter((d) => d.near);
     chart.addSeries(LineSeries, { color: '#2962ff', lineWidth: 2, title: 'Future' })
       .setData(withNear.map((d) => ({ time: d.date, value: d.near!.closePaise / 100 })));
-    chart.addSeries(LineSeries, { color: '#45453f', lineWidth: 1, lineStyle: LineStyle.Dashed, title: 'Spot', lastValueVisible: false, priceLineVisible: false })
+    chart.addSeries(LineSeries, { color: C.ink2, lineWidth: 1, lineStyle: LineStyle.Dashed, title: 'Spot', lastValueVisible: false, priceLineVisible: false })
       .setData(days.filter((d) => d.spotPaise != null).map((d) => ({ time: d.date, value: d.spotPaise! / 100 })));
     const oi = chart.addSeries(HistogramSeries, { title: 'Near OI (lakh)', lastValueVisible: false, priceLineVisible: false }, 1);
     oi.setData(withNear.map((d) => ({ time: d.date, value: d.near!.oi / 1e5, color: OI_COLOR[d.near!.buildUp] })));
     chart.panes()[1]?.setHeight(140);
     chart.timeScale().fitContent();
     return () => { chart.remove(); chartRef.current = null; };
-  }, [days]);
+  }, [days, C]);
   return <div ref={host} className="min-h-0 flex-1" />;
 }

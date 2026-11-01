@@ -1,6 +1,5 @@
-// Subscription plans. PRICES ARE PLACEHOLDERS: set them before launch. The live tier must cover NSE's per-user
-// exchange fees (₹875/user/month each for cash and F&O L1 in a charting application, from 1 Apr 2026, excl. GST)
-// plus the data vendor's charges and GST.
+// Subscription plans. PRICES ARE PLACEHOLDERS: set them before launch. The site shows NSE end-of-day data only (no
+// live prices); the paid plan's id stays 'LIVE' in the database and billing code, displayed as "Pro".
 
 export type PlanId = 'FREE' | 'LIVE';
 export type BillingInterval = 'month' | 'year';
@@ -10,13 +9,13 @@ export const PLANS: Record<PlanId, { name: string; tagline: string; pricePaise: 
     name: 'Free',
     tagline: 'Learn, research and practise',
     pricePaise: { month: 0, year: 0 },
-    features: ['Charts with 15-minute delayed prices', 'All indicators and drawing tools', 'Stock & options backtesting on end-of-day data', 'Option chain (end of day)', 'Paper trading'],
+    features: ['Charts on NSE end-of-day data', 'All indicators and drawing tools', 'Stock & options backtesting', 'Option chain and strategy builder (end of day)', 'NIFTY research tables'],
   },
   LIVE: {
-    name: 'Live',
-    tagline: 'Real-time data for active traders',
+    name: 'Pro',
+    tagline: 'For deeper research',
     pricePaise: { month: 2999_00, year: 29990_00 }, // placeholder prices, GST inclusive
-    features: ['Everything in Free', 'Real-time NSE prices, tick by tick', 'Live option chain with OI and Greeks', 'Live paper-trading fills', 'Priority support'],
+    features: ['Everything in Free', 'Higher backtest and scanner limits (being finalised)', 'Practice mode (bar replay), when it launches', 'Priority support'],
   },
 };
 

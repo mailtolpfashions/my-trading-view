@@ -18,6 +18,8 @@ export type AlertLine = { price: number; label: string };
 export type Measure = { from: Point; to: Point; text: string };
 
 type LayerState = {
+  /** The theme's ink: drawings saved in the "ink" swatch (#121212) are painted in it, so they show on a dark chart. */
+  ink: string;
   drawings: Drawing[];
   preview: Drawing | null;
   measure: Measure | null;
@@ -80,7 +82,8 @@ class LayerRenderer implements IPrimitivePaneRenderer {
         ctx.setLineDash([]);
         label(ctx, al.label, W - 6, y, AMBER, '#3d2c00', 'right');
       }
-      const all = [...this.layer.state.drawings, ...(this.layer.state.preview ? [this.layer.state.preview] : [])];
+      const ink = this.layer.state.ink;
+      const all = [...this.layer.state.drawings, ...(this.layer.state.preview ? [this.layer.state.preview] : [])].map((d) => (d.color === '#121212' ? { ...d, color: ink } : d));
       for (const pl of this.layer.placeAll(all)) drawOne(ctx, pl, W, H, pl.d.id === this.layer.state.selected);
       const m = this.layer.state.measure;
       if (m) {
@@ -207,7 +210,7 @@ class AxisLabel implements ISeriesPrimitiveAxisView {
 
 /** One primitive for all drawings on the main series. Update its state with `set`; it redraws itself. */
 export class DrawingLayer extends PluginBase {
-  state: LayerState = { drawings: [], preview: null, measure: null, selected: null, alerts: [], times: [] };
+  state: LayerState = { ink: '#121212', drawings: [], preview: null, measure: null, selected: null, alerts: [], times: [] };
   private views = [new LayerPaneView(this)];
 
   set(patch: Partial<LayerState>) {

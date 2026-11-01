@@ -14,23 +14,12 @@ export type Chain = {
   rows: ChainRow[];
 };
 
-export async function fetchChain(underlying: string, expiry?: string): Promise<Chain> {
-  const res = await feedFetch(`${FEED_URL}/api/fno/chain?underlying=${underlying}${expiry ? `&expiry=${expiry}` : ''}`);
+/** The chain on `date` (the latest trading day on or before it; omitted = latest). */
+export async function fetchChain(underlying: string, expiry?: string, date?: string): Promise<Chain> {
+  const res = await feedFetch(`${FEED_URL}/api/fno/chain?underlying=${underlying}${expiry ? `&expiry=${expiry}` : ''}${date ? `&date=${date}` : ''}`);
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.message ?? 'Option chain unavailable');
   return body as Chain;
-}
-
-export class ChainAccessError extends Error {
-  constructor(message: string, public code: string) { super(message); }
-}
-
-/** Live chain (price = last traded, settlePaise = previous close). Throws ChainAccessError when the plan or source can't have it. */
-export async function fetchLiveChain(underlying: string, expiry?: string): Promise<Chain & { live: true; asOf: number }> {
-  const res = await feedFetch(`${FEED_URL}/api/option-chain?underlying=${underlying}${expiry ? `&expiry=${expiry}` : ''}`);
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ChainAccessError(body.message ?? 'Live option chain unavailable', body.error ?? 'failed');
-  return body;
 }
 
 /** Per-unit Greeks of a contract, from the chain it was added from (legs can come from different expiries). */
@@ -45,9 +34,11 @@ export type MarginResponse = {
   scanRiskPaise: number; spreadChargePaise: number; netOptionValuePaise: number; spanPaise: number; exposurePaise: number;
   premiumPaise: number; marginPaise: number; fundsPaise: number; withoutHedgePaise: number; hedgeBenefitPaise: number;
   missing: unknown[]; file: string; created: string; tradeDate: string;
+  /** A past day's file (simulator): exposure and expiry-day rules are today's, not verified for that date. */
+  historical?: boolean;
 };
-export async function fetchMargin(underlying: string, spotPaise: number, legs: { kind: 'CE' | 'PE'; expiry: string; strikePaise: number; qty: number; pricePaise: number }[], signal?: AbortSignal): Promise<MarginResponse> {
-  const res = await feedFetch(`${FEED_URL}/api/margin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ underlying, spotPaise, legs }), signal });
+export async function fetchMargin(underlying: string, spotPaise: number, legs: { kind: 'CE' | 'PE'; expiry: string; strikePaise: number; qty: number; pricePaise: number }[], signal?: AbortSignal, date?: string): Promise<MarginResponse> {
+  const res = await feedFetch(`${FEED_URL}/api/margin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ underlying, spotPaise, legs, date }), signal });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.message ?? 'Margin unavailable');
   return body as MarginResponse;
@@ -71,3 +62,37 @@ export const TEMPLATES: { id: string; name: string; legs: { kind: 'CE' | 'PE'; s
   { id: 'put-calendar', name: 'Put calendar (sell this expiry, buy next)', legs: [{ kind: 'PE', side: 'SELL', offset: 0 }, { kind: 'PE', side: 'BUY', offset: 0, expiryOffset: 1 }] },
   { id: 'call-diagonal', name: 'Call diagonal (sell OTM this expiry, buy ATM next)', legs: [{ kind: 'CE', side: 'SELL', offset: 4 }, { kind: 'CE', side: 'BUY', offset: 0, expiryOffset: 1 }] },
 ];
+
+/**
+ * IV smile of a chain: for each traded strike with volume, the IV of its out-of-the-money side (calls above the
+ * forward, puts below), as the what-if models expect.
+ */
+export function buildSmile(c: Chain, minVolume = 100): { k: number; iv: number }[] {
+  if (!c.forwardPaise) return [];
+  const out: { k: number; iv: number }[] = [];
+  for (const r of c.rows) {
+    const s = r.strikePaise >= c.forwardPaise ? r.CE : r.PE;
+    if (s?.traded && s.iv != null && s.volume >= minVolume) out.push({ k: r.strikePaise, iv: s.iv });
+  }
+  return out;
+}
+
+/** First and last day of NSE F&O data held. */
+export async function fetchFnoRange(): Promise<{ from: string | null; to: string | null }> {
+  const res = await feedFetch(`${FEED_URL}/api/fno/status`);
+  const body = await res.json().catch(() => ({}));
+  return { from: body.from ?? null, to: body.to ?? null };
+}
+
+// ---- options simulator (feed: /api/options-sim) ----
+export type SimLegDay = { pricePaise: number | null; source: 'close' | 'settle' | 'expired' | 'missing'; iv: number | null; delta: number | null; theta: number | null; vega: number | null; gamma: number | null };
+export type SimDay = { date: string; spotPaise: number | null; legs: SimLegDay[]; grossPaise: number; chargesIfExitPaise: number; netIfExitPaise: number; delta: number; theta: number; vega: number; gamma: number; greeksMissing: number; openLegs: number };
+export type SimLeg = { expiry: string; strikePaise: number; kind: 'CE' | 'PE'; side: 'BUY' | 'SELL'; lots: number; entryPaise: number; qty: number; enteredUntraded: boolean };
+export type SimResult = { underlying: string; entryDate: string; lotSize: number; legs: SimLeg[]; entryChargesPaise: number; days: SimDay[]; end: 'expired' | 'end-of-data'; notes: string[] };
+
+export async function runSimulation(body: { underlying: string; entryDate: string; broker: string; legs: Omit<SimLeg, 'qty' | 'enteredUntraded'>[] }): Promise<SimResult> {
+  const res = await feedFetch(`${FEED_URL}/api/options-sim`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.message ?? 'Simulation failed');
+  return out as SimResult;
+}

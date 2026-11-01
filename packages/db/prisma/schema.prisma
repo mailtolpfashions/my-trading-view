@@ -336,6 +336,80 @@ model FnoDayMeta {
 }
 
 /// One row per date attempted, so holidays and finished days are never downloaded twice.
+/// NSE participant-wise open interest ('oi') and trading volume ('vol') in equity derivatives, in contracts, as
+/// published daily (content/nsccl/fao_participant_*). participant: Client | DII | FII | Pro.
+model ParticipantOi {
+  date            String
+  kind            String
+  participant     String
+  futIdxLong      BigInt
+  futIdxShort     BigInt
+  futStkLong      BigInt
+  futStkShort     BigInt
+  optIdxCallLong  BigInt
+  optIdxPutLong   BigInt
+  optIdxCallShort BigInt
+  optIdxPutShort  BigInt
+  optStkCallLong  BigInt
+  optStkPutLong   BigInt
+  optStkCallShort BigInt
+  optStkPutShort  BigInt
+  totalLong       BigInt
+  totalShort      BigInt
+
+  @@id([date, kind, participant])
+}
+
+/// NSE daily FII derivatives statistics (content/fo/fii_stats_*.xls): buy, sell and end-of-day open interest, in
+/// contracts and ₹ crore, per segment as NSE names it (INDEX FUTURES, NIFTY OPTIONS, STOCK FUTURES, …).
+model FiiDerivStat {
+  date          String
+  segment       String
+  buyContracts  BigInt
+  buyCr         Decimal @db.Decimal(18, 4)
+  sellContracts BigInt
+  sellCr        Decimal @db.Decimal(18, 4)
+  oiContracts   BigInt
+  oiCr          Decimal @db.Decimal(18, 4)
+
+  @@id([date, segment])
+}
+
+/// NSDL "Daily Trends in FPI Investments": FPI gross purchases, sales and net investment (₹ crore, US$ mn) per
+/// asset class and route. reportDate is NSDL's reporting date (trades of the previous trading day(s)).
+model FpiFlow {
+  reportDate String
+  category   String
+  route      String
+  purchaseCr Decimal  @db.Decimal(18, 2)
+  salesCr    Decimal  @db.Decimal(18, 2)
+  netCr      Decimal  @db.Decimal(18, 2)
+  netUsdMn   Decimal  @db.Decimal(18, 2)
+  usdInr     Decimal? @db.Decimal(10, 4)
+
+  @@id([reportDate, category, route])
+}
+
+/// One row per date attempted for FII statistics files.
+model FiiStatFetch {
+  date      String   @id
+  /// saved | not-published | error
+  status    String
+  message   String?
+  attempts  Int      @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+/// One row per date attempted for participant files, so none is downloaded twice.
+model ParticipantFetch {
+  date      String   @id
+  /// saved | not-published | error
+  status    String
+  message   String?
+  attempts  Int      @default(1)
+  updatedAt DateTime @updatedAt
+}
+
 model FnoFetch {
   date      String   @id
   /// saved | not-published | error

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlignJustify, BellPlus, Equal, Minus, MousePointer2, MoveUpRight, Ruler, Slash, Square, SeparatorVertical, Trash2, Type } from 'lucide-react';
+import { AlignJustify, Equal, Minus, MousePointer2, MoveUpRight, Ruler, Slash, Square, SeparatorVertical, Trash2, Type } from 'lucide-react';
 import type { Tool } from '@/lib/chart/drawings/model';
 
 const TOOLS: { tool: Tool; label: string; key: string; Icon: typeof Slash }[] = [
@@ -15,7 +15,6 @@ const TOOLS: { tool: Tool; label: string; key: string; Icon: typeof Slash }[] = 
   { tool: 'channel', label: 'Parallel channel (3 clicks)', key: 'C', Icon: Equal },
   { tool: 'text', label: 'Text note', key: 'N', Icon: Type },
   { tool: 'measure', label: 'Measure (price, %, bars, time)', key: 'M', Icon: Ruler },
-  { tool: 'alert', label: 'Alert at a price: click the chart', key: 'A', Icon: BellPlus },
 ];
 
 /** Drawing tools down the left edge of the chart. Single-letter shortcuts, like TradingView's Alt shortcuts. */
@@ -41,7 +40,7 @@ export function DrawingRail({ tool, onTool, count, onClearAll }: { tool: Tool; o
     <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 border-r border-line py-1.5" role="toolbar" aria-label="Drawing tools" aria-orientation="vertical">
       {TOOLS.map(({ tool: t, label, key, Icon }) => (
         <button key={t} type="button" onClick={() => onTool(t)} aria-pressed={tool === t} title={`${label} (Alt+${key})`} aria-label={label}
-          className={`grid h-8 w-8 place-items-center rounded-[8px] ${tool === t ? 'bg-ink text-white' : 'text-ink-2 hover:bg-raised'}`}>
+          className={`grid h-8 w-8 place-items-center rounded-[8px] ${tool === t ? 'bg-inverse text-on-inverse' : 'text-ink-2 hover:bg-raised'}`}>
           <Icon size={16} />
         </button>
       ))}

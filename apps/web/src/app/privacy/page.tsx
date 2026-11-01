@@ -7,13 +7,12 @@ const CONTACT = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? 'support@mytradingview.
 
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy policy" updated="26 October 2026">
+    <LegalPage title="Privacy policy" updated="1 November 2026">
       <p>This policy explains what personal data My Trading View collects and how we use it, in line with India&rsquo;s Digital Personal Data Protection Act, 2023.</p>
       <h2>What we collect</h2>
       <ul>
         <li>Account details you give us: name, email address and mobile number.</li>
-        <li>Your settings and content: watchlists, chart layouts, alerts, strategies and paper trades.</li>
-        <li>Broker connection tokens, if you connect a broker. We never see or store your broker password.</li>
+        <li>Your settings and content: watchlists, chart layouts, strategies and backtests.</li>
         <li>Basic technical data such as device, browser and log information, used to run and secure the service.</li>
       </ul>
       <h2>How we use it</h2>

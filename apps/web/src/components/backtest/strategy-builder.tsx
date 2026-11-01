@@ -2,13 +2,13 @@
 
 import { Plus, Trash2 } from 'lucide-react';
 import { INDICATOR_DEFAULTS, type Comparator, type Condition, type IndicatorName, type Operand, type RuleSet, type Strategy } from '@mtv/backtest';
-import type { Timeframe } from '@mtv/shared';
+import { EOD_TIMEFRAMES, type Timeframe } from '@mtv/shared';
 import { INDICATOR_LABELS, PARAM_LABELS, PRESETS } from '@/lib/backtest';
 import { tfLabel } from '@/lib/format';
 
 const COMPARATORS: [Comparator, string][] = [['crossesAbove', 'crosses above'], ['crossesBelow', 'crosses below'], ['>', 'is above'], ['<', 'is below'], ['>=', 'is at or above'], ['<=', 'is at or below']];
 const PRICE_FIELDS = ['close', 'open', 'high', 'low', 'volume'] as const;
-const TFS: Timeframe[] = ['5', '15', '30', '60', 'D', 'W'];
+const TFS: Timeframe[] = EOD_TIMEFRAMES; // NSE end-of-day data only
 const input = 'num h-9 rounded-[10px] border border-line bg-panel px-2.5 text-[13px] outline-none focus:border-ink';
 const select = 'h-9 rounded-[10px] border border-line bg-panel px-2 text-[13px] outline-none focus:border-ink';
 
@@ -82,7 +82,7 @@ export function StrategyBuilder({ strategy, tf, symbol, busy, onChange, onTf, on
   onRun: () => void;
 }) {
   const s = strategy;
-  const intraday = tf !== 'D' && tf !== 'W';
+  const intraday = tf !== 'D' && tf !== 'W' && tf !== 'M';
   const pctField = (label: string, v: number | undefined, set: (v: number | undefined) => void) => (
     <label className="text-[12px] font-semibold text-ink-2">{label}
       <input className={`${input} mt-1 w-full`} type="number" step="any" min="0" placeholder="Off" value={v ?? ''} onChange={(e) => set(e.target.value === '' ? undefined : Number(e.target.value))} />
@@ -112,11 +112,11 @@ export function StrategyBuilder({ strategy, tf, symbol, busy, onChange, onTf, on
             <option value="LONG">Long (buy first)</option><option value="SHORT">Short (sell first)</option>
           </select>
           <select className={select} value={s.product} onChange={(e) => onChange({ ...s, product: e.target.value as Strategy['product'] })} aria-label="Product">
-            <option value="MIS">Intraday (MIS)</option><option value="CNC">Delivery (CNC)</option>
+            <option value="CNC">Delivery (CNC)</option><option value="MIS" disabled>Intraday (MIS): needs intraday data</option>
           </select>
         </div>
-        {s.product === 'MIS' && !intraday && <p className="text-[12px] font-semibold text-down">Intraday strategies need an intraday timeframe (5m–1h).</p>}
-        {s.product === 'CNC' && s.direction === 'SHORT' && <p className="text-[12px] font-semibold text-down">Delivery cannot short. Choose Long or Intraday.</p>}
+        {s.product === 'MIS' && !intraday && <p className="text-[12px] font-semibold text-down">Intraday (MIS) needs intraday data; this site has NSE end-of-day data only. Choose Delivery.</p>}
+        {s.product === 'CNC' && s.direction === 'SHORT' && <p className="text-[12px] font-semibold text-down">Delivery cannot short. Choose Long.</p>}
 
         <Rules title="Entry when" rules={s.entry} onChange={(entry) => onChange({ ...s, entry })} />
         <Rules title="Exit when" optional rules={s.exit ?? { match: 'any', conditions: [] }} onChange={(exit) => onChange({ ...s, exit })} />
@@ -145,7 +145,7 @@ export function StrategyBuilder({ strategy, tf, symbol, busy, onChange, onTf, on
         </p>
       </div>
       <div className="border-t border-line p-3">
-        <button type="submit" disabled={busy} className="h-11 w-full rounded-full bg-ink font-bold text-white disabled:opacity-50">{busy ? 'Running backtest…' : 'Run backtest'}</button>
+        <button type="submit" disabled={busy} className="h-11 w-full rounded-full bg-inverse font-bold text-on-inverse disabled:opacity-50">{busy ? 'Running backtest…' : 'Run backtest'}</button>
       </div>
     </form>
   );
