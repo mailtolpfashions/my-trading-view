@@ -1,6 +1,6 @@
 # Third-party notices
 
-My Trading View includes or adapts the following open-source software.
+Nandibull includes or adapts the following open-source software.
 
 ## TradingView Lightweight Charts™
 

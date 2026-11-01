@@ -153,8 +153,8 @@ export function ChartView(p: Props) {
     if (mainRef.current) chart.removeSeries(mainRef.current);
     const ohlc = { upColor: UP, downColor: DOWN, wickUpColor: UP, wickDownColor: DOWN, borderVisible: false };
     mainRef.current =
-      p.chartType === 'line' ? chart.addSeries(LineSeries, { color: '#2962ff', lineWidth: 2 })
-      : p.chartType === 'area' ? chart.addSeries(AreaSeries, { lineColor: '#2962ff', topColor: 'rgba(41,98,255,0.25)', bottomColor: 'rgba(41,98,255,0.02)', lineWidth: 2 })
+      p.chartType === 'line' ? chart.addSeries(LineSeries, { color: '#f59a0b', lineWidth: 2 })
+      : p.chartType === 'area' ? chart.addSeries(AreaSeries, { lineColor: '#f59a0b', topColor: 'rgba(245,154,11,0.24)', bottomColor: 'rgba(245,154,11,0.02)', lineWidth: 2 })
       : p.chartType === 'bars' ? chart.addSeries(BarSeries, { upColor: UP, downColor: DOWN })
       : chart.addSeries(CandlestickSeries, ohlc);
     mainRef.current.setData([]); // filled by the data effect below
@@ -298,7 +298,7 @@ export function ChartView(p: Props) {
     const lines = (p.positions ?? []).map((x) =>
       main.createPriceLine({
         price: Math.round(x.avgPricePaise) / 100,
-        color: x.qty > 0 ? '#2962ff' : DOWN,
+        color: x.qty > 0 ? '#2f5bff' : DOWN,
         lineWidth: 1,
         lineStyle: LineStyle.Solid,
         axisLabelVisible: true,

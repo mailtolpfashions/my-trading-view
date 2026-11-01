@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Logo } from '@/components/logo';
 
-const CONTACT = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? 'support@mytradingview.in';
+const CONTACT = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? 'support@nandibull.in';
 
 export function SiteFooter() {
   return (
@@ -10,7 +10,7 @@ export function SiteFooter() {
         <div className="max-w-[560px]">
           <Logo />
           <p className="mt-4 leading-relaxed text-muted">
-            My Trading View is a charting, research and paper-trading platform. It does not provide investment advice and is not registered with SEBI as an
+            Nandibull is a charting, research and paper-trading platform. It does not provide investment advice and is not registered with SEBI as an
             investment adviser or research analyst. Signals are generated from published rules for research and education. Past performance does not
             guarantee future results. Investments in securities are subject to market risks; read all related documents carefully before investing.
           </p>
@@ -22,7 +22,7 @@ export function SiteFooter() {
           <a href={`mailto:${CONTACT}`} className="hover:text-ink">{CONTACT}</a>
         </nav>
       </div>
-      <p className="mt-8 text-muted">© {new Date().getFullYear()} My Trading View · mytradingview.in</p>
+      <p className="mt-8 text-muted">© {new Date().getFullYear()} Nandibull · nandibull.in</p>
     </footer>
   );
 }

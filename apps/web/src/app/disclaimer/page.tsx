@@ -7,7 +7,7 @@ export default function Disclaimer() {
   return (
     <LegalPage title="Disclaimer" updated="1 November 2026">
       <p>
-        My Trading View (&ldquo;we&rdquo;, &ldquo;the platform&rdquo;) provides research tools, backtesting and option strategy building on historical
+        Nandibull (&ldquo;we&rdquo;, &ldquo;the platform&rdquo;) provides research tools, backtesting and option strategy building on historical
         end-of-day data for the Indian securities markets. It does not provide live prices or place orders.
       </p>
       <h2>Not investment advice</h2>

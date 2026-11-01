@@ -7,7 +7,7 @@ import { yahooTicker } from '../symbols';
 import { NotFoundError, type MarketDataProvider } from './types';
 
 const BASE = 'https://query1.finance.yahoo.com';
-const HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; MyTradingView/0.1; +https://mytradingview.in)' };
+const HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; Nandibull/0.1; +https://nandibull.in)' };
 
 /** Yahoo interval and how much history to request for each timeframe (Yahoo limits 1m history to ~7 days). */
 const INTERVALS: Record<Timeframe, [interval: string, range: string]> = {

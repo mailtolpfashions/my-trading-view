@@ -3,15 +3,15 @@ import { LegalPage } from '@/components/legal-page';
 
 export const metadata: Metadata = { title: 'Terms of use' };
 
-const CONTACT = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? 'support@mytradingview.in';
+const CONTACT = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? 'support@nandibull.in';
 
 export default function Terms() {
   return (
     <LegalPage title="Terms of use" updated="1 November 2026">
-      <p>By using mytradingview.in you agree to these terms. If you do not agree, please do not use the platform.</p>
+      <p>By using nandibull.in you agree to these terms. If you do not agree, please do not use the platform.</p>
       <h2>The service</h2>
       <p>
-        My Trading View is a software tool for research, backtesting and option strategy building on NSE end-of-day data. It
+        Nandibull is a software tool for research, backtesting and option strategy building on NSE end-of-day data. It
         shows no live prices and does not place orders. It is in beta: features may change, and the service
         may be interrupted or unavailable at times.
       </p>

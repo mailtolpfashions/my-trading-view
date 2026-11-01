@@ -71,7 +71,7 @@ export default async function Pricing({ searchParams }: { searchParams: Promise<
 
       <p className="mx-auto mt-6 max-w-[640px] text-center text-[12.5px] text-muted">
         Payments by UPI Autopay, cards or net banking, renewing automatically until you cancel. All prices shown are NSE&rsquo;s official
-        end-of-day data; the site has no live prices. My Trading View is not investment advice; see the <Link href="/disclaimer" className="underline">disclaimer</Link>.
+        end-of-day data; the site has no live prices. Nandibull is not investment advice; see the <Link href="/disclaimer" className="underline">disclaimer</Link>.
       </p>
     </SiteShell>
   );

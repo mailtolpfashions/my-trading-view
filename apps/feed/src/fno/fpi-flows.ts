@@ -54,7 +54,7 @@ export function parseNsdlDailyTrends(html: string): FpiDay {
 
 /** Reads today's page and stores it, unless that reporting date is already stored. Returns the reporting date. */
 export async function fetchNsdlDaily(): Promise<string> {
-  const res = await fetch(NSDL_LATEST_URL, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MyTradingView research; +https://mytradingview.in)' }, signal: AbortSignal.timeout(60_000) });
+  const res = await fetch(NSDL_LATEST_URL, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Nandibull research; +https://nandibull.in)' }, signal: AbortSignal.timeout(60_000) });
   if (!res.ok) throw new Error(`NSDL FPI: HTTP ${res.status}`);
   const day = parseNsdlDailyTrends(await res.text());
   if (await prisma.fpiFlow.count({ where: { reportDate: day.reportDate } })) return day.reportDate;

@@ -11,7 +11,7 @@ export async function SiteShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="mx-auto max-w-[1240px] px-4 sm:px-6">
       <header className="flex h-[72px] items-center gap-3">
-        <Link href="/" aria-label="My Trading View home" className="mr-auto">
+        <Link href="/" aria-label="Nandibull home" className="mr-auto">
           <Logo />
         </Link>
         <ThemeToggle />

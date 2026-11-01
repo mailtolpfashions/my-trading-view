@@ -8,8 +8,8 @@ import { prisma } from '@mtv/db';
 
 const WEB = process.env.BETTER_AUTH_URL ?? 'http://localhost:3000';
 const ACCOUNTS = [
-  { email: 'demo-free@mytradingview.in', name: 'Demo Free', plan: 'FREE' as const },
-  { email: 'demo-live@mytradingview.in', name: 'Demo Live', plan: 'LIVE' as const },
+  { email: 'demo-free@nandibull.in', name: 'Demo Free', plan: 'FREE' as const },
+  { email: 'demo-live@nandibull.in', name: 'Demo Live', plan: 'LIVE' as const },
 ];
 const recreate = process.argv.includes('--recreate');
 // Readable password: no 0/O/1/l/I.

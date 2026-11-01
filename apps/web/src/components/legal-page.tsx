@@ -6,7 +6,7 @@ export function LegalPage({ title, updated, children }: { title: string; updated
   return (
     <div className="mx-auto max-w-[1240px] px-4 sm:px-6">
       <header className="flex h-[72px] items-center">
-        <Link href="/" aria-label="My Trading View home">
+        <Link href="/" aria-label="Nandibull home">
           <Logo />
         </Link>
       </header>

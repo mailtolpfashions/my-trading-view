@@ -30,8 +30,8 @@ export const useTheme = (): Theme => useSyncExternalStore(subscribe, read, () =>
  * comma rgba()). Values mirror the tokens in globals.css.
  */
 export const CHART_COLORS = {
-  light: { bg: '#ffffff', text: '#131722', grid: '#f3f2ee', line: '#ecebe6', cross: '#9598a1', crossLabel: '#121212', hover: 'rgba(18,18,18,0.08)', watermark: 'rgba(18,18,18,0.06)', zero: '#8b8a83', ink: '#121212', ink2: '#45453f', level: '#b2b5be' },
-  dark: { bg: '#1a1a17', text: '#c3c2b9', grid: '#23231f', line: '#2c2c27', cross: '#6f7280', crossLabel: '#2e2d28', hover: 'rgba(241,240,234,0.08)', watermark: 'rgba(241,240,234,0.05)', zero: '#8f8e85', ink: '#f1f0ea', ink2: '#c3c2b9', level: '#55574f' },
+  light: { bg: '#ffffff', text: '#514a40', grid: '#f4efe6', line: '#efe9df', cross: '#9a917f', crossLabel: '#1f1a14', hover: 'rgba(31,26,20,0.08)', watermark: 'rgba(31,26,20,0.06)', zero: '#8f877b', ink: '#1f1a14', ink2: '#514a40', level: '#c9bfae' },
+  dark: { bg: '#1c1914', text: '#cfc6b6', grid: '#26221b', line: '#2e2921', cross: '#7d7465', crossLabel: '#3d362b', hover: 'rgba(246,240,230,0.08)', watermark: 'rgba(246,240,230,0.05)', zero: '#958c7d', ink: '#f6f0e6', ink2: '#cfc6b6', level: '#574f42' },
 } as const;
 export type ChartColors = (typeof CHART_COLORS)[Theme];
 

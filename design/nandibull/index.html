@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en" data-dir="a" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nandibull · Design directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ---------- Tokens per direction and theme. Components below use roles only. ---------- */
+:root {
+  --font: 'Inter', system-ui, sans-serif;
+  --radius: 16px; --radius-sm: 10px;
+  --divider: 1px dashed var(--line-strong);
+}
+/* A · Violet: airy lavender canvas, white cards, filled violet active state, dashed dividers. */
+[data-dir='a'][data-theme='light'] {
+  --canvas: #f6f4ff; --panel: #ffffff; --raised: #f8f7fc; --ink: #1b1d2a; --ink-2: #4a4f63; --muted: #8a8ea0;
+  --line: #ecebf3; --line-strong: #dcd8ee;
+  --accent: #7346ff; --accent-hover: #5f30f0; --on-accent: #ffffff; --accent-soft: #efe9ff; --accent-text: #5b2fe6;
+  --side: #ffffff; --side-ink: #4a4f63; --side-muted: #8a8ea0; --side-line: #dcd8ee;
+  --up: #0a9b76; --up-soft: #e3f6f0; --down: #e5484d; --down-soft: #fdeaea; --warn: #c27a00; --warn-soft: #fff3dc;
+  --shadow: 0 6px 30px rgb(40 20 120 / 0.05); --grid: #f0eef8;
+}
+[data-dir='a'][data-theme='dark'] {
+  --canvas: #0f0d1a; --panel: #18162a; --raised: #211e36; --ink: #f1effa; --ink-2: #c4c0da; --muted: #8b87a3;
+  --line: #29253f; --line-strong: #3a3556;
+  --accent: #8f6bff; --accent-hover: #a387ff; --on-accent: #ffffff; --accent-soft: #2a2350; --accent-text: #b39dff;
+  --side: #141225; --side-ink: #c4c0da; --side-muted: #7f7b98; --side-line: #2e2a47;
+  --up: #2bc49a; --up-soft: #12302a; --down: #ff6b70; --down-soft: #3a1a20; --warn: #f2b543; --warn-soft: #3a2c10;
+  --shadow: 0 6px 30px rgb(0 0 0 / 0.35); --grid: #221f37;
+}
+/* B · Cobalt: cool porcelain, deep navy sidebar in both themes, cobalt accent, solid hairlines, tighter radius. */
+[data-dir='b'] { --font: 'Plus Jakarta Sans', system-ui, sans-serif; --radius: 12px; --radius-sm: 8px; --divider: 1px solid var(--line); }
+[data-dir='b'][data-theme='light'] {
+  --canvas: #f2f4f8; --panel: #ffffff; --raised: #f6f8fb; --ink: #0f1626; --ink-2: #3d4659; --muted: #7d8699;
+  --line: #e6e9f0; --line-strong: #d5dae5;
+  --accent: #2f5bff; --accent-hover: #1f47e6; --on-accent: #ffffff; --accent-soft: #e8eeff; --accent-text: #2449d8;
+  --side: #0d1630; --side-ink: #c9d2ea; --side-muted: #7686ad; --side-line: #1f2b4d;
+  --up: #0a9b76; --up-soft: #e3f6f0; --down: #e5484d; --down-soft: #fdeaea; --warn: #c27a00; --warn-soft: #fff3dc;
+  --shadow: 0 1px 2px rgb(15 22 38 / 0.04), 0 8px 24px -14px rgb(15 22 38 / 0.18); --grid: #eef1f6;
+}
+[data-dir='b'][data-theme='dark'] {
+  --canvas: #080d1c; --panel: #111a31; --raised: #18233f; --ink: #edf1fb; --ink-2: #b7c1da; --muted: #7d89a8;
+  --line: #1f2a47; --line-strong: #2b3860;
+  --accent: #5b7fff; --accent-hover: #7792ff; --on-accent: #ffffff; --accent-soft: #1b2a5c; --accent-text: #93a9ff;
+  --side: #060a17; --side-ink: #b7c1da; --side-muted: #5d6b8f; --side-line: #18213b;
+  --up: #2bc49a; --up-soft: #0f2d2a; --down: #ff6b70; --down-soft: #351a22; --warn: #f2b543; --warn-soft: #33290f;
+  --shadow: 0 8px 24px -12px rgb(0 0 0 / 0.6); --grid: #19233d;
+}
+/* C · Saffron: warm ivory, saffron accent with dark ink on it, soft-tint active state, big rounded cards. */
+[data-dir='c'] { --font: 'Outfit', system-ui, sans-serif; --radius: 22px; --radius-sm: 12px; --divider: 1px dashed var(--line-strong); }
+[data-dir='c'][data-theme='light'] {
+  --canvas: #faf6ef; --panel: #ffffff; --raised: #fbf8f3; --ink: #1f1a14; --ink-2: #514a40; --muted: #8f877b;
+  --line: #efe9df; --line-strong: #e3d9c8;
+  --accent: #f59a0b; --accent-hover: #e08900; --on-accent: #2b1a00; --accent-soft: #fff1d6; --accent-text: #a45f00;
+  --side: #ffffff; --side-ink: #514a40; --side-muted: #8f877b; --side-line: #efe9df;
+  --up: #0a9b76; --up-soft: #e3f6f0; --down: #e5484d; --down-soft: #fdeaea; --warn: #7346ff; --warn-soft: #efe9ff;
+  --shadow: 0 10px 34px -14px rgb(80 50 10 / 0.18); --grid: #f4efe6;
+}
+[data-dir='c'][data-theme='dark'] {
+  --canvas: #12100c; --panel: #1c1914; --raised: #26221b; --ink: #f6f0e6; --ink-2: #cfc6b6; --muted: #958c7d;
+  --line: #2e2921; --line-strong: #3d362b;
+  --accent: #ffad2e; --accent-hover: #ffbe57; --on-accent: #2b1a00; --accent-soft: #3a2a10; --accent-text: #ffc266;
+  --side: #17140f; --side-ink: #cfc6b6; --side-muted: #857d6f; --side-line: #2e2921;
+  --up: #2bc49a; --up-soft: #12302a; --down: #ff6b70; --down-soft: #3a1a20; --warn: #a98bff; --warn-soft: #2a2350;
+  --shadow: 0 10px 34px -14px rgb(0 0 0 / 0.6); --grid: #26221b;
+}
+
+/* ---------- Base ---------- */
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { font-family: var(--font); background: var(--canvas); color: var(--ink); font-size: 14px; line-height: 1.45; transition: background .25s, color .25s; }
+.num { font-variant-numeric: tabular-nums; }
+svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+button { font: inherit; color: inherit; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+
+.app { display: grid; grid-template-columns: 272px 1fr; min-height: 100vh; background: linear-gradient(to right, var(--side) 272px, transparent 272px); }
+
+/* ---------- Sidebar ---------- */
+.side { background: var(--side); color: var(--side-ink); padding: 26px 22px; display: flex; flex-direction: column; gap: 6px; border-right: 1px solid var(--side-line); position: sticky; top: 0; height: 100vh; }
+.brand { display: flex; align-items: center; gap: 11px; padding: 0 6px 22px; border-bottom: var(--divider); border-color: var(--side-line); margin-bottom: 14px; }
+.brand b { font-size: 22px; font-weight: 800; letter-spacing: -0.03em; color: var(--ink); }
+[data-dir='b'] .brand b { color: #ffffff; }
+[data-dir='b'][data-theme='dark'] .brand b { color: var(--ink); }
+.sec { font-size: 11.5px; font-weight: 700; letter-spacing: .02em; color: var(--side-muted); padding: 10px 8px 6px; }
+.nav { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: var(--radius-sm); font-weight: 500; font-size: 14.5px; position: relative; }
+.nav:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.nav .tag { margin-left: auto; font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 99px; background: var(--warn-soft); color: var(--warn); }
+.nav .plus { margin-left: auto; opacity: .7; }
+/* Active state differs per direction. */
+[data-dir='a'] .nav.on, [data-dir='b'] .nav.on { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+[data-dir='c'] .nav.on { background: var(--accent-soft); color: var(--accent-text); font-weight: 700; }
+[data-dir='c'] .nav.on::before { content: ''; position: absolute; left: -22px; top: 8px; bottom: 8px; width: 4px; border-radius: 0 4px 4px 0; background: var(--accent); }
+.sub { margin: 4px 0 6px 31px; border-left: 1px solid var(--side-line); display: flex; flex-direction: column; }
+.sub a { padding: 8px 14px; font-size: 13.5px; color: var(--side-ink); opacity: .85; }
+.sub a.on { color: var(--accent-text); opacity: 1; font-weight: 600; }
+[data-dir='b'] .sub a.on { color: #ffffff; }
+[data-dir='b'][data-theme='dark'] .sub a.on { color: var(--accent-text); }
+.datacard { margin-top: auto; border-radius: var(--radius); padding: 16px; background: var(--accent-soft); color: var(--ink); }
+[data-dir='b'] .datacard { background: #17224a; color: #e3e9fb; }
+[data-dir='b'][data-theme='dark'] .datacard { background: #111a33; }
+.datacard small { display: block; font-size: 11.5px; color: var(--muted); font-weight: 600; }
+[data-dir='b'] .datacard small { color: #8796c0; }
+.datacard b { display: block; font-size: 17px; margin: 2px 0 8px; }
+.datacard .bar { height: 6px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 22%, transparent); overflow: hidden; }
+.datacard .bar i { display: block; height: 100%; width: 100%; background: var(--accent); }
+.datacard p { margin: 8px 0 0; font-size: 12px; color: var(--ink-2); }
+[data-dir='b'] .datacard p { color: #a9b5d6; }
+
+/* ---------- Top bar ---------- */
+.main { min-width: 0; }
+.top { height: 84px; display: flex; align-items: center; gap: 14px; padding: 0 32px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+[data-dir='c'] .top { background: transparent; border: 0; }
+.iconbtn { width: 46px; height: 46px; display: grid; place-items: center; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--panel); position: relative; }
+.iconbtn:hover { border-color: var(--line-strong); }
+.iconbtn .dot { position: absolute; top: 10px; right: 12px; width: 7px; height: 7px; border-radius: 9px; background: var(--accent); }
+.ghost { border: 0; background: none; width: 40px; height: 40px; display: grid; place-items: center; }
+.search { flex: 0 1 420px; display: flex; align-items: center; height: 48px; border-radius: var(--radius-sm); background: var(--raised); border: 1px solid var(--line); padding: 4px 4px 4px 16px; gap: 10px; color: var(--muted); }
+.search span { flex: 1; }
+.search kbd { font: 600 11px var(--font); border: 1px solid var(--line-strong); border-radius: 6px; padding: 2px 6px; color: var(--muted); }
+.search .go { width: 40px; height: 40px; border-radius: 8px; border: 0; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; }
+.spacer { flex: 1; }
+.chip { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; border-radius: 99px; background: var(--up-soft); color: var(--up); font-weight: 600; font-size: 12.5px; }
+.chip i { width: 7px; height: 7px; border-radius: 9px; background: currentColor; }
+.btn { height: 46px; padding: 0 22px; border-radius: var(--radius-sm); border: 1px solid transparent; font-weight: 600; display: inline-flex; align-items: center; gap: 9px; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.outline { background: transparent; border-color: var(--accent); color: var(--accent-text); }
+.avatar { width: 46px; height: 46px; border-radius: var(--radius-sm); display: grid; place-items: center; font-weight: 700; background: var(--ink); color: var(--panel); }
+
+/* ---------- Page ---------- */
+.page { padding: 34px 32px 48px; }
+.head { display: flex; align-items: flex-end; gap: 14px; margin-bottom: 26px; }
+.head h1 { font-size: 34px; letter-spacing: -0.03em; margin: 0; font-weight: 700; }
+.head p { margin: 4px 0 0; color: var(--muted); }
+.head .spacer { flex: 1; }
+
+.grid { display: grid; gap: 22px; }
+.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.g-chart { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.g3 { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px 24px; min-width: 0; }
+[data-dir='c'] .card { border-color: transparent; }
+.card h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.card .hd { display: flex; align-items: center; gap: 10px; padding-bottom: 16px; margin-bottom: 18px; border-bottom: var(--divider); }
+.card .hd .spacer { flex: 1; }
+.muted { color: var(--muted); }
+.select { height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 500; }
+.seg { display: inline-flex; padding: 3px; border-radius: 9px; background: var(--raised); border: 1px solid var(--line); }
+.seg button { border: 0; background: none; padding: 6px 12px; border-radius: 7px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.seg button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px rgb(0 0 0 / .08); }
+[data-theme='dark'] .seg button.on { background: var(--accent-soft); color: var(--accent-text); }
+
+/* Stat card */
+.stat { position: relative; overflow: hidden; }
+.stat .v { font-size: 25px; font-weight: 700; letter-spacing: -0.02em; }
+.stat .d { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-weight: 600; font-size: 13.5px; }
+.stat .d small { color: var(--muted); font-weight: 500; }
+.stat svg.spark { position: absolute; right: 22px; bottom: 50px; width: 84px; height: 36px; }
+.up { color: var(--up); } .down { color: var(--down); }
+.pill { white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 99px; font-size: 12px; font-weight: 600; }
+.pill.up { background: var(--up-soft); } .pill.down { background: var(--down-soft); } .pill.warn { background: var(--warn-soft); color: var(--warn); }
+
+/* Chart */
+.chart-meta { display: flex; gap: 22px; align-items: baseline; margin-bottom: 8px; flex-wrap: wrap; }
+.chart-meta b { font-size: 24px; letter-spacing: -0.02em; }
+.chart-meta span { font-size: 12.5px; color: var(--muted); }
+.chart-meta span em { font-style: normal; color: var(--ink-2); font-weight: 600; }
+#chart { width: 100%; height: 300px; display: block; }
+
+/* Watchlist */
+.wl { display: flex; flex-direction: column; }
+.wl a { display: grid; grid-template-columns: 38px 1fr auto; gap: 12px; align-items: center; padding: 11px 6px; border-radius: 10px; }
+.wl a:hover { background: var(--raised); }
+.wl a + a { border-top: 1px solid var(--line); }
+.tick { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; font-size: 11px; font-weight: 800; background: var(--accent-soft); color: var(--accent-text); }
+.wl .n b { display: block; font-weight: 600; } .wl .n small { color: var(--muted); font-size: 12px; }
+.wl .p { text-align: right; } .wl .p b { display: block; font-weight: 600; } .wl .p small { font-size: 12px; font-weight: 600; }
+.seeall { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; color: var(--accent-text); font-weight: 600; font-size: 13.5px; }
+
+/* Table */
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 0 8px 12px; }
+td { padding: 13px 8px; border-top: 1px solid var(--line); }
+td:first-child, th:first-child { padding-left: 0; } td:last-child, th:last-child { padding-right: 0; text-align: right; }
+td .sym { display: flex; align-items: center; gap: 10px; } td .sym b { font-weight: 600; display: block; } td .sym small { white-space: nowrap; } td { white-space: nowrap; } td .sym small { color: var(--muted); font-size: 12px; }
+.r { text-align: right; } th.r { text-align: right; }
+.foot { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; color: var(--muted); font-size: 12.5px; }
+.pager { display: flex; gap: 6px; } .pager button { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); font-size: 12.5px; font-weight: 600; }
+.pager button.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+
+/* Breadth */
+.breadth .big { display: flex; align-items: baseline; gap: 10px; } .breadth .big b { font-size: 30px; letter-spacing: -0.02em; }
+.split { display: flex; height: 12px; border-radius: 99px; overflow: hidden; gap: 3px; margin: 16px 0 12px; }
+.split i { display: block; border-radius: 99px; }
+.legend { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); }
+.legend b { color: var(--ink); }
+.rows { margin-top: 18px; display: flex; flex-direction: column; gap: 12px; }
+.rows div { display: flex; justify-content: space-between; font-size: 13.5px; } .rows span { color: var(--muted); }
+
+/* FII bars */
+#fii { width: 100%; height: 170px; display: block; }
+
+/* Quick start */
+.qs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px; }
+.q { display: flex; gap: 14px; align-items: flex-start; }
+.q .ic { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-text); flex: none; }
+.q b { display: block; font-size: 15px; font-weight: 600; margin-bottom: 2px; } .q p { margin: 0; color: var(--muted); font-size: 13px; }
+
+/* ---------- Mockup switcher (not part of the design) ---------- */
+.switcher { position: fixed; right: 20px; bottom: 20px; z-index: 50; background: #111; color: #fff; border-radius: 14px; padding: 12px; width: 300px; font: 13px/1.4 system-ui, sans-serif; box-shadow: 0 20px 50px rgb(0 0 0 / .35); }
+.switcher .row { display: flex; gap: 6px; margin-top: 8px; }
+.switcher button { flex: 1; border: 1px solid #333; background: #1d1d1d; color: #ddd; border-radius: 9px; padding: 7px 4px; font: 600 12px system-ui; }
+.switcher button.on { background: #fff; color: #111; }
+.switcher p { margin: 8px 0 0; color: #aaa; font-size: 12px; }
+.switcher .t { font-weight: 700; }
+
+@media (max-width: 1280px) { .g4 { grid-template-columns: repeat(2, 1fr); } .g3 { grid-template-columns: 1fr 1fr; } .qs { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+        <rect width="40" height="40" rx="12" fill="var(--accent)"/>
+        <!-- Nandibull mark: a bull's head; the right horn rises higher, like a price line. -->
+        <path d="M13.5 15.5C9 15.5 6.5 13 6.8 9.5M26.5 15.5C31.5 15 34 11.5 33.2 6.5" fill="none" stroke="var(--on-accent)" stroke-width="2.6" stroke-linecap="round"/>
+        <path d="M12.5 14.5h15l-2.2 12.2a3.5 3.5 0 0 1-3.4 2.8h-3.8a3.5 3.5 0 0 1-3.4-2.8z" fill="var(--on-accent)"/>
+        <circle cx="16.8" cy="20" r="1.3" fill="var(--accent)"/><circle cx="23.2" cy="20" r="1.3" fill="var(--accent)"/>
+      </svg>
+      <b>Nandibull</b>
+    </div>
+    <div class="sec">Workspace</div>
+    <a class="nav on" href="#"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</a>
+    <a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M9 5v4M9 15v4M15 3v4M15 13v6"/><rect x="7" y="9" width="4" height="6" rx="1"/><rect x="13" y="7" width="4" height="6" rx="1"/></svg>Chart</a>
+    <a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M12 3 2 8l10 5 10-5-10-5z"/><path d="m2 13 10 5 10-5"/></svg>Options &amp; simulator</a>
+    <a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/></svg>Futures</a>
+    <a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M10 2v7.31L4.5 19A2 2 0 0 0 6.2 22h11.6a2 2 0 0 0 1.7-3L14 9.31V2"/><path d="M8.5 2h7M7 16h10"/></svg>Backtest</a>
+    <a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3M11 8v6M8 11h6"/></svg>Research<svg class="i plus" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></a>
+    <div class="sub">
+      <a href="#">Condition study</a>
+      <a href="#">NIFTY day by day</a>
+      <a href="#">FII footprints</a>
+      <a href="#">Scanner</a>
+    </div>
+    <a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l4 2"/></svg>Practice<span class="tag">Soon</span></a>
+
+    <div class="datacard">
+      <small>NSE end-of-day data</small>
+      <b class="num">Fri, 31 Oct 2026</b>
+      <div class="bar"><i></i></div>
+      <p>Bhavcopy, F&amp;O, participant OI and FPI flows loaded. No live prices.</p>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="top">
+      <button class="ghost" aria-label="Menu"><svg class="i" viewBox="0 0 24 24" style="width:24px;height:24px"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <div class="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><span>Search a symbol, e.g. RELIANCE</span><kbd>/</kbd></div>
+      <div class="spacer"></div>
+      <span class="chip num"><i></i>EOD · 31 Oct</span>
+      <button class="btn primary"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>New strategy</button>
+      <button class="iconbtn" id="themeBtn" aria-label="Theme"><svg class="i" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+      <button class="iconbtn" aria-label="Alerts"><svg class="i" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="dot"></span></button>
+      <div class="avatar">MP</div>
+    </header>
+
+    <div class="page">
+      <div class="head">
+        <div><h1>Market overview</h1><p class="num">NSE end-of-day · Friday, 31 October 2026</p></div>
+        <div class="spacer"></div>
+        <button class="btn primary"><svg class="i" viewBox="0 0 24 24"><path d="M9 5v4M9 15v4M15 3v4M15 13v6"/><rect x="7" y="9" width="4" height="6" rx="1"/><rect x="13" y="7" width="4" height="6" rx="1"/></svg>Open chart</button>
+        <button class="btn outline">Run backtest</button>
+      </div>
+
+      <div class="grid g4" id="stats"></div>
+
+      <div class="grid g-chart" style="margin-top:22px">
+        <section class="card">
+          <div class="hd"><h3>NIFTY 50</h3><span class="pill up num">▲ 0.84%</span><div class="spacer"></div>
+            <div class="seg"><button class="on">D</button><button>W</button><button>M</button></div>
+            <span class="select">Last 6 months <svg class="i" viewBox="0 0 24 24" style="width:14px;height:14px"><path d="m6 9 6 6 6-6"/></svg></span>
+          </div>
+          <div class="chart-meta num"><b>25,722.10</b><span>O <em>25,540.35</em></span><span>H <em>25,768.90</em></span><span>L <em>25,512.60</em></span><span>Vol <em>31.4 cr</em></span></div>
+          <svg id="chart" preserveAspectRatio="none"></svg>
+        </section>
+        <section class="card">
+          <div class="hd"><h3>My watchlist</h3><div class="spacer"></div><button class="ghost" aria-label="More"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button></div>
+          <div class="wl" id="wl"></div>
+          <a class="seeall" href="#">See all <svg class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        </section>
+      </div>
+
+      <div class="grid g3" style="margin-top:22px">
+        <section class="card">
+          <div class="hd"><h3>NIFTY 50 movers</h3><div class="spacer"></div><div class="seg"><button class="on">Gainers</button><button>Losers</button></div></div>
+          <table class="num"><thead><tr><th>Symbol</th><th class="r">Close</th><th class="r">Change</th><th class="r">Volume</th><th>Signal</th></tr></thead><tbody id="movers"></tbody></table>
+          <div class="foot"><span>Showing 5 of 50</span><div class="pager"><button class="on">1</button><button>2</button><button>…</button><button>10</button></div></div>
+        </section>
+        <section class="card breadth">
+          <div class="hd"><h3>NIFTY 500 breadth</h3></div>
+          <div class="big num"><b>318</b><span class="muted">advances of 500</span></div>
+          <div class="split"><i style="flex:318;background:var(--up)"></i><i style="flex:12;background:var(--muted)"></i><i style="flex:170;background:var(--down)"></i></div>
+          <div class="legend num"><span><b>318</b> up</span><span><b>12</b> unchanged</span><span><b>170</b> down</span></div>
+          <div class="rows num">
+            <div><span>Above 50-day average</span><b>61.2%</b></div>
+            <div><span>Above 200-day average</span><b>54.8%</b></div>
+            <div><span>New 52-week highs</span><b class="up">27</b></div>
+            <div><span>New 52-week lows</span><b class="down">6</b></div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="hd"><h3>FII footprint</h3><div class="spacer"></div><span class="select">Index futures <svg class="i" viewBox="0 0 24 24" style="width:14px;height:14px"><path d="m6 9 6 6 6-6"/></svg></span></div>
+          <div class="num" style="display:flex;justify-content:space-between;align-items:baseline"><span class="muted">Net long, last 10 sessions</span><b class="down">−₹2,140 cr</b></div>
+          <svg id="fii" preserveAspectRatio="none"></svg>
+          <div class="legend"><span>17 Oct</span><span>31 Oct</span></div>
+        </section>
+      </div>
+
+      <section class="card" style="margin-top:22px">
+        <div class="hd"><h3>Quick start</h3></div>
+        <div class="qs">
+          <a class="q" href="#"><span class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M12 3 2 8l10 5 10-5-10-5z"/><path d="m2 13 10 5 10-5"/></svg></span><span><b>Build an option strategy</b><p>Margin, hedge benefit and charges per broker.</p></span></a>
+          <a class="q" href="#"><span class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></span><span><b>Simulate a past trade</b><p>Pick an as-of date and run it day by day.</p></span></a>
+          <a class="q" href="#"><span class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M10 2v7.31L4.5 19A2 2 0 0 0 6.2 22h11.6a2 2 0 0 0 1.7-3L14 9.31V2"/></svg></span><span><b>Backtest an idea</b><p>Stocks and indices since 2011, adjusted.</p></span></a>
+          <a class="q" href="#"><span class="ic"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span><span><b>Study a condition</b><p>Day, month and year tables. Gaps skipped.</p></span></a>
+        </div>
+      </section>
+      <p class="muted" style="margin-top:22px;font-size:12px">Mockup only. Numbers are illustrative, not NSE data.</p>
+    </div>
+  </main>
+</div>
+
+<div class="switcher">
+  <div class="t">Nandibull · pick a direction</div>
+  <div class="row" id="dirs"><button data-d="a">A · Violet</button><button data-d="b">B · Cobalt</button><button data-d="c">C · Saffron</button></div>
+  <div class="row" id="themes"><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
+  <p id="desc"></p>
+</div>
+
+<script>
+const root = document.documentElement;
+const css = (v) => getComputedStyle(root).getPropertyValue(v).trim();
+const DESC = {
+  a: 'Closest to your reference: lavender-tinted canvas, white cards, filled violet active nav, dashed dividers, Inter.',
+  b: 'Cooler and more "pro": navy sidebar in both themes, cobalt accent, solid hairlines, tighter corners, Plus Jakarta Sans.',
+  c: 'Warm and Indian: ivory canvas, saffron accent with dark ink, soft active nav with a side bar, rounder cards, Outfit.',
+};
+
+// Deterministic random walk so every reload draws the same illustrative chart.
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const candles = []; let c = 24300;
+for (let i = 0; i < 110; i++) {
+  const o = c, drift = Math.sin(i / 14) * 18 + 6;
+  c = o + drift + (rnd() - 0.5) * 210;
+  const h = Math.max(o, c) + rnd() * 90, l = Math.min(o, c) - rnd() * 90;
+  candles.push({ o, c, h, l, v: 0.4 + rnd() });
+}
+
+{ const shift = 25722.10 - candles[candles.length - 1].c; candles.forEach(k => { k.o += shift; k.c += shift; k.h += shift; k.l += shift; }); }
+function drawChart() {
+  const svg = document.getElementById('chart'); const W = svg.clientWidth, H = 300, vh = 46;
+  const lo = Math.min(...candles.map(k => k.l)), hi = Math.max(...candles.map(k => k.h));
+  const y = (p) => 8 + (hi - p) / (hi - lo) * (H - vh - 24);
+  const step = (W - 56) / candles.length, bw = Math.max(2, step * 0.62);
+  let s = '';
+  for (let g = 0; g <= 4; g++) {
+    const p = lo + (hi - lo) * g / 4, yy = y(p);
+    s += `<line x1="0" x2="${W - 56}" y1="${yy}" y2="${yy}" stroke="${css('--grid')}" />`;
+    s += `<text x="${W - 50}" y="${yy + 4}" font-size="11" fill="${css('--muted')}" font-family="${css('--font')}">${Math.round(p).toLocaleString('en-IN')}</text>`;
+  }
+  // Soft accent area under the closes, then candles and volume.
+  let area = `M0 ${y(candles[0].c)}`;
+  candles.forEach((k, i) => area += ` L${i * step + step / 2} ${y(k.c)}`);
+  s += `<defs><linearGradient id="ga" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${css('--accent')}" stop-opacity=".18"/><stop offset="1" stop-color="${css('--accent')}" stop-opacity="0"/></linearGradient></defs>`;
+  s += `<path d="${area} L${W - 56} ${H - vh} L0 ${H - vh} Z" fill="url(#ga)"/>`;
+  candles.forEach((k, i) => {
+    const x = i * step + step / 2, col = k.c >= k.o ? css('--up') : css('--down');
+    s += `<line x1="${x}" x2="${x}" y1="${y(k.h)}" y2="${y(k.l)}" stroke="${col}"/>`;
+    s += `<rect x="${x - bw / 2}" y="${y(Math.max(k.o, k.c))}" width="${bw}" height="${Math.max(1, Math.abs(y(k.o) - y(k.c)))}" fill="${col}" rx="1"/>`;
+    const vhh = k.v * (vh - 8);
+    s += `<rect x="${x - bw / 2}" y="${H - vhh}" width="${bw}" height="${vhh}" fill="${col}" opacity=".25" rx="1"/>`;
+  });
+  const last = candles[candles.length - 1];
+  s += `<line x1="0" x2="${W - 56}" y1="${y(last.c)}" y2="${y(last.c)}" stroke="${css('--accent')}" stroke-dasharray="4 4"/>`;
+  s += `<rect x="${W - 60}" y="${y(last.c) - 10}" width="60" height="20" rx="5" fill="${css('--accent')}"/><text x="${W - 56}" y="${y(last.c) + 4}" font-size="10.5" font-weight="700" fill="${css('--on-accent')}" font-family="${css('--font')}">${last.c.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</text>`;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.innerHTML = s;
+}
+
+function spark(up) {
+  let p = '', v = 20; const pts = [];
+  for (let i = 0; i < 16; i++) { v += (rnd() - (up ? 0.38 : 0.62)) * 8; pts.push(Math.max(3, Math.min(37, v))); }
+  pts.forEach((yy, i) => p += `${i ? 'L' : 'M'}${i * 6} ${yy}`);
+  return `<svg class="spark" viewBox="0 0 92 40"><path d="${p}" fill="none" stroke="var(--${up ? 'up' : 'down'})" stroke-width="2" stroke-linecap="round" opacity=".55"/></svg>`;
+}
+
+const STATS = [
+  ['NIFTY 50', '25,722.10', '+214.30', '0.84%', true],
+  ['NIFTY BANK', '57,776.35', '+402.85', '0.70%', true],
+  ['INDIA VIX', '12.14', '−0.38', '3.03%', false],
+  ['NIFTY MIDCAP 100', '59,830.45', '−96.20', '0.16%', false],
+];
+const ARROW = (up) => `<svg class="i" viewBox="0 0 24 24" style="width:16px;height:16px">${up ? '<path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/>' : '<path d="m22 17-8.5-8.5-5 5L2 7"/><path d="M16 17h6v-6"/>'}</svg>`;
+document.getElementById('stats').innerHTML = STATS.map(([n, v, ch, pc, up]) => `
+  <section class="card stat"><div class="hd"><h3>${n}</h3></div>
+    <div class="v num">${v}</div>
+    <div class="d num ${up ? 'up' : 'down'}">${ARROW(up)}${ch} (${pc})<small>vs 30 Oct</small></div>${spark(up)}</section>`).join('');
+
+const WL = [['RELIANCE', 'Reliance Industries', '1,486.70', '+1.12%', true], ['HDFCBANK', 'HDFC Bank', '1,002.45', '+0.48%', true], ['INFY', 'Infosys', '1,512.30', '−0.86%', false], ['TCS', 'Tata Consultancy', '3,071.95', '−0.31%', false], ['ICICIBANK', 'ICICI Bank', '1,364.20', '+0.92%', true]];
+document.getElementById('wl').innerHTML = WL.map(([s, n, p, c, up]) => `
+  <a href="#"><span class="tick">${s.slice(0, 2)}</span><span class="n"><b>${s}</b><small>${n}</small></span><span class="p num"><b>${p}</b><small class="${up ? 'up' : 'down'}">${c}</small></span></a>`).join('');
+
+const MV = [['BEL', 'Bharat Electronics', '418.65', '+4.21%', '2.1 cr', 'Above 200 DMA', 'up'], ['TATAMOTORS', 'Tata Motors', '702.10', '+3.64%', '1.8 cr', '52-wk high', 'up'], ['ADANIPORTS', 'Adani Ports', '1,448.00', '+2.97%', '74 L', 'Volume 2×', 'warn'], ['SBIN', 'State Bank of India', '918.40', '+2.12%', '1.2 cr', 'Above 200 DMA', 'up'], ['LT', 'Larsen &amp; Toubro', '3,902.55', '+1.88%', '31 L', 'Breakout', 'warn']];
+document.getElementById('movers').innerHTML = MV.map(([s, n, cl, ch, vol, sig, k]) => `
+  <tr><td><span class="sym"><span class="tick">${s.slice(0, 2)}</span><span><b>${s}</b><small>${n}</small></span></span></td>
+  <td class="r">${cl}</td><td class="r up">${ch}</td><td class="r">${vol}</td><td><span class="pill ${k}">${sig}</span></td></tr>`).join('');
+
+function drawFii() {
+  const svg = document.getElementById('fii'); const W = svg.clientWidth, H = 170, mid = H / 2;
+  const vals = [420, -310, -860, 150, -540, -220, 610, -720, -390, -280];
+  const bw = W / vals.length * 0.56, max = 900;
+  let s = `<line x1="0" x2="${W}" y1="${mid}" y2="${mid}" stroke="${css('--line-strong')}"/>`;
+  vals.forEach((v, i) => {
+    const x = (i + 0.5) * W / vals.length - bw / 2, h = Math.abs(v) / max * (mid - 10);
+    s += `<rect x="${x}" y="${v > 0 ? mid - h : mid}" width="${bw}" height="${h}" rx="4" fill="${v > 0 ? css('--up') : css('--down')}" opacity="${i === vals.length - 1 ? 1 : .75}"/>`;
+  });
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.innerHTML = s;
+}
+
+function apply(d, t) {
+  if (d) root.dataset.dir = d; if (t) root.dataset.theme = t;
+  document.querySelectorAll('#dirs button').forEach(b => b.classList.toggle('on', b.dataset.d === root.dataset.dir));
+  document.querySelectorAll('#themes button').forEach(b => b.classList.toggle('on', b.dataset.t === root.dataset.theme));
+  document.getElementById('desc').textContent = DESC[root.dataset.dir];
+  history.replaceState(null, '', `#${root.dataset.dir}-${root.dataset.theme}`);
+  requestAnimationFrame(() => { drawChart(); drawFii(); });
+}
+document.getElementById('dirs').onclick = (e) => e.target.dataset.d && apply(e.target.dataset.d);
+document.getElementById('themes').onclick = (e) => e.target.dataset.t && apply(null, e.target.dataset.t);
+document.getElementById('themeBtn').onclick = () => apply(null, root.dataset.theme === 'dark' ? 'light' : 'dark');
+window.onresize = () => { drawChart(); drawFii(); };
+const [hd, ht] = location.hash.slice(1).split('-');
+apply(DESC[hd] ? hd : 'a', ht === 'dark' ? 'dark' : 'light');
+</script>
+</body>
+</html>

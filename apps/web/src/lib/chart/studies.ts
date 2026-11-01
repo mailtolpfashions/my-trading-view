@@ -1,8 +1,8 @@
 import { atr, bollinger, ema, macd, rsi, sma, smaOfSeries, supertrend, vwap, type Series } from '@mtv/indicators';
 import type { Candle } from '@mtv/shared';
 
-export const UP = '#089981';
-export const DOWN = '#f23645';
+export const UP = '#0a9b76';
+export const DOWN = '#e5484d';
 
 export type StudyLine = { key: string; title: string; color: string; kind?: 'line' | 'histogram'; width?: 1 | 2 };
 /** Per-point colours (Supertrend direction, MACD histogram sign). */

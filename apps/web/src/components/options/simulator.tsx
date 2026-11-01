@@ -199,8 +199,8 @@ function SimChart({ r, dayIdx, onPick }: { r: SimResult; dayIdx: number; onPick:
         ))}
         <line x1={PAD.l} x2={W - PAD.r} y1={y(0)} y2={y(0)} className="stroke-zero" />
         <path d={path} fill="none" className="stroke-ink" strokeWidth={2} strokeLinejoin="round" />
-        <line x1={x(dayIdx)} x2={x(dayIdx)} y1={PAD.t} y2={H - PAD.b} stroke="#ffc21a" strokeWidth={1.5} />
-        <circle cx={x(dayIdx)} cy={y(vals[dayIdx])} r={5} fill="#ffc21a" stroke="#3d2c00" strokeWidth={1.5} />
+        <line x1={x(dayIdx)} x2={x(dayIdx)} y1={PAD.t} y2={H - PAD.b} stroke="#f59a0b" strokeWidth={1.5} />
+        <circle cx={x(dayIdx)} cy={y(vals[dayIdx])} r={5} fill="#f59a0b" stroke="#2b1a00" strokeWidth={1.5} />
         {hover != null && hover !== dayIdx && (
           <>
             <line x1={x(hover)} x2={x(hover)} y1={PAD.t} y2={H - PAD.b} className="stroke-cross" strokeDasharray="2 3" />

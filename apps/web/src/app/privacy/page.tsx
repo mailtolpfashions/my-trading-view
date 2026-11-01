@@ -3,12 +3,12 @@ import { LegalPage } from '@/components/legal-page';
 
 export const metadata: Metadata = { title: 'Privacy policy' };
 
-const CONTACT = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? 'support@mytradingview.in';
+const CONTACT = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? 'support@nandibull.in';
 
 export default function Privacy() {
   return (
     <LegalPage title="Privacy policy" updated="1 November 2026">
-      <p>This policy explains what personal data My Trading View collects and how we use it, in line with India&rsquo;s Digital Personal Data Protection Act, 2023.</p>
+      <p>This policy explains what personal data Nandibull collects and how we use it, in line with India&rsquo;s Digital Personal Data Protection Act, 2023.</p>
       <h2>What we collect</h2>
       <ul>
         <li>Account details you give us: name, email address and mobile number.</li>

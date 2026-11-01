@@ -18,8 +18,8 @@ import { SiteFooter } from '@/components/site-footer';
 import { LANDING, PAID_PLANS } from '@/lib/site-mode';
 import { ThemeToggle } from '@/components/theme-toggle';
 
-const CONTACT = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? 'support@mytradingview.in';
-const BETA_MAIL = `mailto:${CONTACT}?subject=${encodeURIComponent('My Trading View beta access')}`;
+const CONTACT = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? 'support@nandibull.in';
+const BETA_MAIL = `mailto:${CONTACT}?subject=${encodeURIComponent('Nandibull beta access')}`;
 /** Landing mode collects beta requests; otherwise the terminal is open to everyone. */
 const CTA = LANDING ? BETA_MAIL : '/dashboard';
 
@@ -28,7 +28,7 @@ const MODULES = [
   { icon: Calculator, name: 'Option strategy builder', text: 'Payoff at expiry and before it, Greeks, breakevens after charges, margin computed from NSE Clearing’s SPAN file with hedge benefit, and what-if: move NIFTY, the date or IV and see every premium.' },
   { icon: Table2, name: 'Option chain', text: 'NSE’s end-of-day strike ladder with OI, IV and Greeks for NIFTY and BANKNIFTY: the starting point for building strategies.' },
   { icon: LineChart, name: 'Futures', text: 'Basis and premium to spot, open interest, rollover and build-up classification from NSE’s end-of-day F&O files.' },
-  { icon: CandlestickChart, name: 'Charts', text: 'A TradingView-style chart on daily, weekly and monthly NSE data: indicators, drawing tools, Fibonacci and channels.' },
+  { icon: CandlestickChart, name: 'Charts', text: 'A full charting workspace on daily, weekly and monthly NSE data: indicators, drawing tools, Fibonacci and channels.' },
   { icon: BarChart3, name: 'Research', text: 'NIFTY day by day, month by month and year by year from NSE’s own files, with crisis periods you can isolate, plus a scanner for your own conditions.' },
   { icon: History, name: 'Practice mode', text: 'Coming next: replay history bar by bar from a date at least 30 days back and practise entries and exits with real charges.' },
 ];
@@ -40,8 +40,8 @@ const PRINCIPLES = [
 ];
 
 const FAQ = [
-  { q: 'Is My Trading View investment advice?', a: 'No. It is a research, backtesting and strategy-building tool. We do not give buy or sell calls. We are not a SEBI-registered investment adviser or research analyst. Trading in securities is subject to market risk.' },
-  { q: 'Is the market data live?', a: 'No. My Trading View is for analysis and research: every price is from NSE’s official end-of-day files and is shown with its date. Use your broker for live prices and orders.' },
+  { q: 'Is Nandibull investment advice?', a: 'No. It is a research, backtesting and strategy-building tool. We do not give buy or sell calls. We are not a SEBI-registered investment adviser or research analyst. Trading in securities is subject to market risk.' },
+  { q: 'Is the market data live?', a: 'No. Nandibull is for analysis and research: every price is from NSE’s official end-of-day files and is shown with its date. Use your broker for live prices and orders.' },
   { q: 'How far back does the data go?', a: 'Stocks and indices from mid-2011, NIFTY and BANKNIFTY options and futures from 2011, all from NSE’s archive.' },
   LANDING
     ? { q: 'What does it cost?', a: 'There will be a Free plan and a paid plan. Prices will be announced at launch.' }
@@ -54,7 +54,7 @@ export default function Home() {
   return (
     <div className="mx-auto max-w-[1240px] px-4 sm:px-6">
       <header className="flex h-[72px] items-center gap-6">
-        <Link href="/" aria-label="My Trading View home">
+        <Link href="/" aria-label="Nandibull home">
           <Logo />
         </Link>
         <nav className="ml-auto hidden items-center gap-1 rounded-full bg-panel p-1 shadow-[var(--shadow-panel)] md:flex" aria-label="Sections">
@@ -99,7 +99,7 @@ export default function Home() {
       <figure className="panel overflow-hidden p-2 shadow-[var(--shadow-pop)]">
         <Image
           src="/terminal.png"
-          alt="My Trading View: a NIFTY daily chart on NSE end-of-day data with indicators and a watchlist"
+          alt="Nandibull: a NIFTY daily chart on NSE end-of-day data with indicators and a watchlist"
           width={2400}
           height={1350}
           priority

@@ -111,15 +111,15 @@ export function PayoffChart({ legs, spotPaise, rate, carry, atYears, exact, atLa
         <line x1={PAD.l} x2={W - PAD.r} y1={y(0)} y2={y(0)} className="stroke-zero" />
         {today && <path d={line(today)} fill="none" className="stroke-blue" strokeWidth={1.5} strokeDasharray="5 4" />}
         <path d={line(expiry)} fill="none" className="stroke-ink" strokeWidth={2} />
-        {what && <path d={line(what)} fill="none" stroke="#b07d00" strokeWidth={2} />}
+        {what && <path d={line(what)} fill="none" stroke="#a45f00" strokeWidth={2} />}
         {scenario && scenario.spotPaise > lo && scenario.spotPaise < hi && (
           <g>
-            <line x1={x(scenario.spotPaise)} x2={x(scenario.spotPaise)} y1={PAD.t} y2={H - PAD.b} stroke="#b07d00" strokeDasharray="4 3" />
-            {whatAt != null && <circle cx={x(scenario.spotPaise)} cy={y(whatAt / 100)} r={5} fill="#ffc21a" stroke="#3d2c00" strokeWidth={1.5} />}
+            <line x1={x(scenario.spotPaise)} x2={x(scenario.spotPaise)} y1={PAD.t} y2={H - PAD.b} stroke="#a45f00" strokeDasharray="4 3" />
+            {whatAt != null && <circle cx={x(scenario.spotPaise)} cy={y(whatAt / 100)} r={5} fill="#f59a0b" stroke="#2b1a00" strokeWidth={1.5} />}
             <text x={x(scenario.spotPaise) + 6} y={H - PAD.b - 6} className="num fill-accent-label text-[10px] font-semibold">What if {fmt(scenario.spotPaise / 100)}{whatAt != null ? ` · ${formatRupees(Math.round(whatAt))}` : ''}</text>
           </g>
         )}
-        <line x1={x(spotPaise)} x2={x(spotPaise)} y1={PAD.t} y2={H - PAD.b} stroke="#ffc21a" strokeWidth={1.5} />
+        <line x1={x(spotPaise)} x2={x(spotPaise)} y1={PAD.t} y2={H - PAD.b} stroke="#f59a0b" strokeWidth={1.5} />
         <text x={x(spotPaise) + 4} y={PAD.t + 10} className="num fill-accent-label text-[10px] font-semibold">Spot {fmt(spotPaise / 100)}</text>
         {breakevens.filter((b) => b > lo && b < hi).map((b) => (
           <g key={b}>

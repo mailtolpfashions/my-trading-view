@@ -4,7 +4,7 @@
 // NOTICE: adapted from TradingView Lightweight Charts™ plugin examples (trend-line, rectangle-drawing-tool,
 // user-price-lines, vertical-line) and @tradingview/lwc-toolkit (PluginBase), Copyright (c) 2025 TradingView, Inc.,
 // https://www.tradingview.com/, licensed under the Apache License 2.0
-// (https://www.apache.org/licenses/LICENSE-2.0). Changed by My Trading View: merged into one layer for all drawing
+// (https://www.apache.org/licenses/LICENSE-2.0). Changed by Nandibull: merged into one layer for all drawing
 // kinds, timeframe-independent point mapping, selection handles, measure tool, alert lines and our styling.
 
 import type { CanvasRenderingTarget2D } from 'fancy-canvas';
@@ -29,7 +29,7 @@ type LayerState = {
   times: number[];
 };
 
-const AMBER = '#ff9800';
+const AMBER = '#f59a0b';
 const FONT = '600 11.5px "Plus Jakarta Sans", system-ui, sans-serif';
 const fmtPrice = (p: number) => p.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const IST = 5.5 * 3600;
@@ -80,7 +80,7 @@ class LayerRenderer implements IPrimitivePaneRenderer {
         ctx.setLineDash([6, 4]);
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
         ctx.setLineDash([]);
-        label(ctx, al.label, W - 6, y, AMBER, '#3d2c00', 'right');
+        label(ctx, al.label, W - 6, y, AMBER, '#2b1a00', 'right');
       }
       const ink = this.layer.state.ink;
       const all = [...this.layer.state.drawings, ...(this.layer.state.preview ? [this.layer.state.preview] : [])].map((d) => (d.color === '#121212' ? { ...d, color: ink } : d));
@@ -227,7 +227,7 @@ export class DrawingLayer extends PluginBase {
       if (d.kind !== 'hline' && !(d.id === this.state.selected && (d.kind === 'trend' || d.kind === 'ray' || d.kind === 'rect' || d.kind === 'fib' || d.kind === 'channel'))) continue;
       for (const p of [d.p1, d.p2]) if (p) { const y = this.priceY(p.price); if (y != null) out.push(new AxisLabel(y as Coordinate, fmtPrice(p.price), d.color)); }
     }
-    for (const al of this.state.alerts) { const y = this.priceY(al.price); if (y != null) out.push(new AxisLabel(y as Coordinate, fmtPrice(al.price), AMBER, '#3d2c00')); }
+    for (const al of this.state.alerts) { const y = this.priceY(al.price); if (y != null) out.push(new AxisLabel(y as Coordinate, fmtPrice(al.price), AMBER, '#2b1a00')); }
     return out;
   }
 

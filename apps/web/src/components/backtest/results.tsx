@@ -47,7 +47,7 @@ export function BacktestResults({ data }: { data: BacktestResponse }) {
     const long = result.trades[0]?.side !== 'SHORT';
     // Compact B/S markers like TradingView's strategy tester; the exit is green for a winning trade, red for a loser.
     const markers: SeriesMarker<Time>[] = result.trades.flatMap((t) => [
-      { time: toChart(t.entryTime), position: long ? 'belowBar' : 'aboveBar', color: '#2962ff', shape: long ? 'arrowUp' : 'arrowDown', text: long ? 'B' : 'S' },
+      { time: toChart(t.entryTime), position: long ? 'belowBar' : 'aboveBar', color: '#2f5bff', shape: long ? 'arrowUp' : 'arrowDown', text: long ? 'B' : 'S' },
       { time: toChart(t.exitTime), position: long ? 'aboveBar' : 'belowBar', color: t.netPaise > 0 ? UP : DOWN, shape: long ? 'arrowDown' : 'arrowUp', text: long ? 'S' : 'B' },
     ] as SeriesMarker<Time>[]).sort((a, b) => (a.time as number) - (b.time as number));
     createSeriesMarkers(s, markers);

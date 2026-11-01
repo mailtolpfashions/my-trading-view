@@ -1,4 +1,4 @@
-// My Trading View data service: NSE end-of-day data for research, backtesting and strategy building. The product
+// Nandibull data service: NSE end-of-day data for research, backtesting and strategy building. The product
 // publishes no live or delayed prices: charts, quotes and backtests read only NSE's official daily files, stored as
 // published (apps/feed/src/eod). Zerodha Kite is the owner's personal connection for internal research scripts only.
 

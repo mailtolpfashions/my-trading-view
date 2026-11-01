@@ -24,13 +24,13 @@ export function UserMenu({ user }: { user: TerminalUser }) {
         aria-haspopup="menu"
         aria-label={`Account: ${user.name}, ${PLANS[user.plan].name} plan`}
         title={user.name}
-        className="flex h-8 items-center gap-1.5 rounded-full bg-panel pr-1 pl-2.5 text-[12px] font-semibold whitespace-nowrap shadow-[var(--shadow-panel)]"
+        className="flex h-11 items-center gap-2 rounded-[12px] bg-deep pr-1.5 pl-3 text-[12.5px] font-semibold whitespace-nowrap text-white"
       >
         <UserRound size={15} aria-hidden="true" />
         <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${user.plan === 'LIVE' ? 'bg-up-soft text-up' : 'bg-raised text-ink-2'}`}>{PLANS[user.plan].name}</span>
       </button>
       {open && (
-        <div role="menu" className="absolute top-10 right-0 z-50 w-64 rounded-2xl bg-panel p-2 shadow-[var(--shadow-pop)]">
+        <div role="menu" className="absolute top-13 right-0 z-50 w-64 rounded-2xl bg-panel p-2 shadow-[var(--shadow-pop)]">
           <div className="px-3 py-2">
             <div className="truncate text-[13px] font-bold">{user.name}</div>
             <div className="truncate text-[12px] text-muted">{user.email}</div>

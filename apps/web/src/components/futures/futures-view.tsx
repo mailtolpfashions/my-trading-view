@@ -17,7 +17,7 @@ const tone = (n: number | null | undefined) => (n == null || n === 0 ? '' : n > 
 const carry = (c: number | null, dte: number) => (dte < 3 ? '—' : pct(c, 1));
 
 const TONE_CLASS: Record<string, string> = { up: 'bg-up text-white', 'up-soft': 'bg-up-soft text-up', down: 'bg-down text-white', 'down-soft': 'bg-down-soft text-down', neutral: 'bg-raised text-ink-2' };
-const OI_COLOR: Record<BuildUp, string> = { 'long-buildup': '#089981', 'short-covering': 'rgba(8,153,129,0.45)', 'short-buildup': '#f23645', 'long-unwinding': 'rgba(242,54,69,0.45)', neutral: '#b8b7b0' };
+const OI_COLOR: Record<BuildUp, string> = { 'long-buildup': '#0a9b76', 'short-covering': 'rgba(10,155,118,0.45)', 'short-buildup': '#e5484d', 'long-unwinding': 'rgba(229,72,77,0.45)', neutral: '#c9bfae' };
 
 function BuildUpPill({ b }: { b: BuildUp }) {
   return <span title={BUILD_UP[b].hint} className={`rounded-full px-2 py-0.5 text-[11px] font-bold whitespace-nowrap ${TONE_CLASS[BUILD_UP[b].tone]}`}>{BUILD_UP[b].label}</span>;
@@ -113,7 +113,7 @@ function FuturesChart({ days }: { days: FuturesDay[] }) {
     });
     chartRef.current = chart;
     const withNear = days.filter((d) => d.near);
-    chart.addSeries(LineSeries, { color: '#2962ff', lineWidth: 2, title: 'Future' })
+    chart.addSeries(LineSeries, { color: '#2f5bff', lineWidth: 2, title: 'Future' })
       .setData(withNear.map((d) => ({ time: d.date, value: d.near!.closePaise / 100 })));
     chart.addSeries(LineSeries, { color: C.ink2, lineWidth: 1, lineStyle: LineStyle.Dashed, title: 'Spot', lastValueVisible: false, priceLineVisible: false })
       .setData(days.filter((d) => d.spotPaise != null).map((d) => ({ time: d.date, value: d.spotPaise! / 100 })));
