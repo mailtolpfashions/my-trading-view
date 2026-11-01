@@ -113,4 +113,13 @@ describe('symbols', () => {
     ];
     expect(searchInstruments('tata', 10, list).map((i) => i.symbol)).toEqual(['TATA', 'TATAMOTORS', 'TCS']);
   });
+  it('puts popular symbols first within a rank, and matches names typed without spaces', () => {
+    const list: Instrument[] = [
+      { symbol: 'RELIABLE', name: 'Reliable Data Services Limited', exchange: 'NSE', kind: 'EQUITY' },
+      { symbol: 'RELIANCE', name: 'Reliance Industries Limited', exchange: 'NSE', kind: 'EQUITY' },
+      { symbol: 'TMPV', name: 'Tata Motors Passenger Vehicles Limited', exchange: 'NSE', kind: 'EQUITY' },
+    ];
+    expect(searchInstruments('reli', 10, list, new Set(['RELIANCE'])).map((i) => i.symbol)).toEqual(['RELIANCE', 'RELIABLE']);
+    expect(searchInstruments('tatamo', 10, list).map((i) => i.symbol)).toEqual(['TMPV']);
+  });
 });

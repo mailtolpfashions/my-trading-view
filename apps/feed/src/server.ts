@@ -97,7 +97,15 @@ app.addHook('onSend', async (req, reply, payload) => {
 });
 
 app.get('/health', async () => ({ ok: true, status: status() }));
-app.get<{ Querystring: { q?: string } }>('/api/search', async (req) => searchInstruments(req.query.q ?? ''));
+// Search ranks NIFTY 500 members first within a match rank; the list is refreshed at most daily by indexMembers.
+let popular: { set: Set<string>; at: number } = { set: new Set(), at: 0 };
+app.get<{ Querystring: { q?: string } }>('/api/search', async (req) => {
+  if (Date.now() - popular.at > 6 * 3600_000) {
+    popular.at = Date.now();
+    await indexMembers('NIFTY 500').then((m) => { popular = { set: new Set(m.symbols), at: Date.now() }; }, () => {});
+  }
+  return searchInstruments(req.query.q ?? '', 20, undefined, popular.set);
+});
 
 const isEodTf = (tf: string): tf is EodTimeframe => (EOD_TIMEFRAMES as string[]).includes(tf);
 

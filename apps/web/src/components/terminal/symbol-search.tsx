@@ -8,24 +8,33 @@ import { searchSymbols } from '@/lib/feed';
 /** TradingView-style symbol search dialog. Arrow keys move, Enter picks, Escape closes. */
 export function SymbolSearch({ open, onClose, onPick, title = 'Symbol search' }: { open: boolean; onClose: () => void; onPick: (i: Instrument) => void; title?: string }) {
   const [q, setQ] = useState('');
-  const [results, setResults] = useState<Instrument[]>([]);
+  // Results remember the query they answer, so Enter never picks from an older search.
+  const [found, setFound] = useState<{ q: string; results: Instrument[] }>({ q: '', results: [] });
+  const results = found.results;
   const [active, setActive] = useState(0);
+  const [enterPending, setEnterPending] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     const d = dialog.current!;
-    if (open && !d.open) { d.showModal(); setQ(''); }
+    if (open && !d.open) { d.showModal(); setQ(''); setEnterPending(false); }
     if (!open && d.open) d.close();
   }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const ctrl = new AbortController();
-    const t = setTimeout(() => searchSymbols(q, ctrl.signal).then((r) => { setResults(r); setActive(0); }).catch(() => {}), 120);
+    const t = setTimeout(() => searchSymbols(q, ctrl.signal).then((r) => { setFound({ q, results: r }); setActive(0); }).catch(() => {}), 120);
     return () => { clearTimeout(t); ctrl.abort(); };
   }, [q, open]);
 
   const pick = (i?: Instrument) => { if (i) { onPick(i); onClose(); } };
+  const current = found.q === q;
+
+  // Enter pressed before this query's results arrived: pick the first result once they do.
+  useEffect(() => {
+    if (enterPending && current) { setEnterPending(false); pick(results[0]); }
+  }, [enterPending, current]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <dialog
@@ -48,7 +57,7 @@ export function SymbolSearch({ open, onClose, onPick, title = 'Symbol search' }:
           onKeyDown={(e) => {
             if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, results.length - 1)); }
             if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
-            if (e.key === 'Enter') pick(results[active]);
+            if (e.key === 'Enter') { if (current) pick(results[active]); else setEnterPending(true); }
           }}
           placeholder="Search NSE stocks and indices: RELIANCE, NIFTY, Tata…"
           className="w-full bg-transparent text-[14.5px] outline-none placeholder:text-muted"
@@ -70,7 +79,7 @@ export function SymbolSearch({ open, onClose, onPick, title = 'Symbol search' }:
             </button>
           </li>
         ))}
-        {!results.length && <li className="px-5 py-6 text-center text-muted">No matches</li>}
+        {!results.length && current && <li className="px-5 py-6 text-center text-muted">No matches</li>}
       </ul>
     </dialog>
   );

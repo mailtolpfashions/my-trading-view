@@ -26,6 +26,8 @@ export function OptionsView() {
   const [chain, setChain] = useState<Chain | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [legs, setLegs] = useState<BuilderLeg[]>([]);
+  // The template that produced the current legs; shown as selected until the legs change.
+  const [template, setTemplate] = useState<{ id: string; legs: BuilderLeg[] } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const chainCache = useRef(new Map<string, Chain>());
   const [brokerId, setBrokerId] = useState('zerodha');
@@ -107,6 +109,7 @@ export function OptionsView() {
       out.push({ id: `l${++seq}`, kind: l.kind, side: l.side, strikePaise: strike, expiry: c.expiry, lots: 1, pricePaise: q.closePaise, iv: q.iv, greeks: legGreeks(q) });
     }
     setLegs(out);
+    setTemplate({ id, legs: out });
   }
 
   const engineLegs: Leg[] = useMemo(() => (lot ? legs.map((l) => ({ kind: l.kind, side: l.side, strikePaise: l.strikePaise, pricePaise: l.pricePaise, qty: l.lots * lot })) : []), [legs, lot]);
@@ -234,7 +237,7 @@ export function OptionsView() {
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
           <div className="flex rounded-full bg-raised p-[3px]">
             {(['NIFTY', 'BANKNIFTY'] as const).map((u) => (
-              <button key={u} type="button" onClick={() => { if (u !== underlying) { setUnderlying(u); setExpiry(undefined); setLegs([]); } }}
+              <button key={u} type="button" onClick={() => { if (u !== underlying) { setUnderlying(u); setExpiry(undefined); if (legs.length) setNotice(`Legs cleared: switched to ${u}.`); setLegs([]); } }}
                 className={`rounded-full px-3 py-1 text-[12.5px] font-bold ${u === underlying ? 'bg-inverse text-on-inverse' : 'text-ink-2'}`}>{u}</button>
             ))}
           </div>
@@ -296,7 +299,7 @@ export function OptionsView() {
             </tbody>
           </table>
         </div>
-        <p className="border-t border-line px-3 py-1.5 text-[10.5px] text-muted">Hover a price and press B / S to add a leg. * = no trades that day. IV and Greeks are Black-76 estimates from traded premiums.</p>
+        <p className="border-t border-line px-3 py-1.5 text-[10.5px] text-muted">Hover over a price and click B to buy or S to sell. * = no trades that day. IV and Greeks are Black-76 estimates from traded premiums.</p>
       </section>
 
       {/* builder */}
@@ -306,15 +309,15 @@ export function OptionsView() {
           <select className="ml-auto h-8 rounded-full bg-raised px-3 text-[12.5px] font-semibold" value={broker.id} onChange={(e) => pickBroker(e.target.value)} aria-label="Broker for charges" title="Brokerage schedule used for charges">
             {BROKERS.map((b) => <option key={b.id} value={b.id}>{b.name} charges</option>)}
           </select>
-          <select className="h-8 w-44 rounded-full bg-raised px-3 text-[12.5px] font-semibold" value="" onChange={(e) => void applyTemplate(e.target.value)} aria-label="Strategy template">
-            <option value="">Add a template…</option>
+          <select className="h-8 w-44 rounded-full bg-raised px-3 text-[12.5px] font-semibold" value={template && template.legs === legs ? template.id : ''} onChange={(e) => void applyTemplate(e.target.value)} aria-label="Strategy template">
+            <option value="">Choose a template…</option>
             {TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           {legs.length > 0 && <button type="button" onClick={() => setLegs([])} className="rounded-full px-3 py-1 text-[12px] font-semibold text-muted hover:bg-down-soft hover:text-down">Clear</button>}
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
-          {!legs.length && <p className="py-10 text-center text-[13px] text-muted">Add legs from the option chain, or pick a template.</p>}
+          {!legs.length && <p className="py-10 text-center text-[13px] text-muted">Add legs from the option chain, or choose a template.</p>}
           {legs.length > 0 && (
             <table className="num w-full text-[12.5px]">
               <thead className="text-[10.5px] font-bold tracking-[0.05em] text-muted"><tr><th className="py-1 text-left">SIDE</th><th className="text-left">CONTRACT</th><th className="text-right">LOTS</th><th className="text-right">PRICE</th><th className="text-right">QTY</th><th /></tr></thead>

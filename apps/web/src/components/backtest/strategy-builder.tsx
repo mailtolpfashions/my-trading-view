@@ -82,6 +82,8 @@ export function StrategyBuilder({ strategy, tf, symbol, busy, onChange, onTf, on
   onRun: () => void;
 }) {
   const s = strategy;
+  // The preset these settings came from, while they are unchanged; any edit shows the placeholder again.
+  const presetId = PRESETS.find((p) => p.tf === tf && JSON.stringify(p.strategy) === JSON.stringify(s))?.id ?? '';
   const intraday = tf !== 'D' && tf !== 'W' && tf !== 'M';
   const pctField = (label: string, v: number | undefined, set: (v: number | undefined) => void) => (
     <label className="text-[12px] font-semibold text-ink-2">{label}
@@ -93,7 +95,7 @@ export function StrategyBuilder({ strategy, tf, symbol, busy, onChange, onTf, on
     <form className="flex min-h-0 flex-col" onSubmit={(e) => { e.preventDefault(); onRun(); }}>
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
         <div className="flex items-center gap-2">
-          <select className={`${select} flex-1`} value="" aria-label="Load a preset" onChange={(e) => {
+          <select className={`${select} flex-1`} value={presetId} aria-label="Load a preset" onChange={(e) => {
             const p = PRESETS.find((x) => x.id === e.target.value);
             if (p) { onChange(structuredClone(p.strategy)); onTf(p.tf); }
           }}>

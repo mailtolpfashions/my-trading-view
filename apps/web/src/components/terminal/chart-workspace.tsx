@@ -43,28 +43,29 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
   useEffect(() => { if (picker || editLib) fetchCatalog().then(setLibCatalog, () => {}); }, [picker, editLib]);
   const [data, setData] = useState<{ candles: Candle[]; key: string; quality: DataQuality | null; name: string; exchange: string }>({ candles: [], key: '', quality: null, name: PULSE_NAMES[symbol] ?? symbol, exchange: 'NSE' });
   const [visibleSeconds, setVisibleSeconds] = useState<number | undefined>();
+  const [range, setRange] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [menu, setMenu] = useState<null | 'type'>(null);
   const [side, setSide] = useState<'watch' | 'scanner'>('watch');
   const shownSymbol = useRef(symbol);
 
-  useEffect(() => { rememberChart(symbol); }, [symbol]);
   useEffect(() => {
     const ctrl = new AbortController();
     setLoading(true);
     setError(null);
-    if (shownSymbol.current !== symbol) { shownSymbol.current = symbol; setVisibleSeconds(undefined); }
+    if (shownSymbol.current !== symbol) { shownSymbol.current = symbol; setVisibleSeconds(undefined); setRange(null); }
     fetchCandles(symbol, tf, ctrl.signal)
-      .then((r) => setData({ candles: r.candles, key: `${symbol}:${tf}:${Date.now()}`, quality: r.quality, name: r.instrument?.name ?? symbol, exchange: r.instrument?.exchange ?? 'NSE' }))
+      .then((r) => { setData({ candles: r.candles, key: `${symbol}:${tf}:${Date.now()}`, quality: r.quality, name: r.instrument?.name ?? symbol, exchange: r.instrument?.exchange ?? 'NSE' }); if (r.candles.length) rememberChart(symbol); })
       .catch((e: Error) => { if (e.name !== 'AbortError') setError(e.message); })
       .finally(() => !ctrl.signal.aborted && setLoading(false));
     return () => ctrl.abort();
   }, [symbol, tf]);
   useEffect(() => { const close = (e: KeyboardEvent) => e.key === 'Escape' && setMenu(null); window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close); }, []);
 
-  const changeTf = (t: Timeframe) => { setVisibleSeconds(undefined); setTf(t); };
-  const applyRange = (rtf: Timeframe, secs: number) => {
+  const changeTf = (t: Timeframe) => { setVisibleSeconds(undefined); setRange(null); setTf(t); };
+  const applyRange = (label: string, rtf: Timeframe, secs: number) => {
+    setRange(label);
     setVisibleSeconds(secs);
     if (rtf === tf) setData((d) => ({ ...d, key: d.key + 'r' }));
     else setTf(rtf);
@@ -140,7 +141,8 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
         {/* range bar */}
         <div className="flex items-center gap-0.5 border-t border-line px-2 text-[12.5px]">
           {RANGES.map(([label, rtf, secs]) => (
-            <button key={label} type="button" onClick={() => applyRange(rtf, typeof secs === 'function' ? secs() : secs)} className="rounded-full px-2 py-1 font-medium hover:bg-raised">
+            <button key={label} type="button" aria-pressed={range === label} onClick={() => applyRange(label, rtf, typeof secs === 'function' ? secs() : secs)}
+              className={`rounded-full px-2.5 py-1 font-medium ${range === label ? 'bg-inverse text-on-inverse' : 'hover:bg-raised'}`}>
               {label}
             </button>
           ))}

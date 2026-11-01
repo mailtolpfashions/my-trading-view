@@ -2,6 +2,8 @@ import type { NextConfig } from 'next';
 
 // Env comes from the repo-root .env via dotenv-cli in package.json scripts.
 const nextConfig: NextConfig = {
+  // A separate build folder (e.g. NEXT_DIST_DIR=.next-qa) lets a test build run beside a running server without replacing its files.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   transpilePackages: ['@mtv/shared', '@mtv/indicators', '@mtv/paper', '@mtv/backtest', '@mtv/options'],
   async headers() {
     return [

@@ -87,7 +87,7 @@ export function StudyView() {
             {EOD_TIMEFRAMES.map((t) => <button key={t} type="button" onClick={() => setTf(t)} className={`num rounded-full px-2.5 py-0.5 text-[12px] font-bold ${t === tf ? 'bg-inverse text-on-inverse' : ''}`}>{tfLabel(t)}</button>)}
           </div>
         </div>
-        <select aria-label="Example condition" className="h-9 rounded-[10px] border border-line bg-panel px-2 text-[13px]" value="" onChange={(e) => { const p = STUDY_PRESETS.find((x) => x.id === e.target.value); if (p) setRules(structuredClone(p.rules)); }}>
+        <select aria-label="Example condition" className="h-9 rounded-[10px] border border-line bg-panel px-2 text-[13px]" value={STUDY_PRESETS.find((p) => JSON.stringify(p.rules) === JSON.stringify(rules))?.id ?? ''} onChange={(e) => { const p = STUDY_PRESETS.find((x) => x.id === e.target.value); if (p) setRules(structuredClone(p.rules)); }}>
           <option value="">Load an example…</option>
           {STUDY_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>

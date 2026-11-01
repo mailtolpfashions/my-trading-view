@@ -82,21 +82,30 @@ export function yahooTicker(symbol: string): string {
   return idx ? idx.yahoo : `${symbol}.NS`;
 }
 
-/** Symbol search: exact symbol, then symbol prefix, then name matches. */
-export function searchInstruments(query: string, limit = 20, list: Instrument[] = [...INDICES, ...equities]): Instrument[] {
+/** Letters and digits only, so "Tata Motors" matches a typed "TATAMO". */
+const squash = (s: string) => s.toUpperCase().replace(/[^A-Z0-9&]/g, '');
+
+/**
+ * Symbol search: exact symbol, then symbol prefix, then name matches. Within a rank, indices come first, then
+ * `popular` symbols (NIFTY 500 members), so "reli" lists RELIANCE before RELIABLE.
+ */
+export function searchInstruments(query: string, limit = 20, list: Instrument[] = [...INDICES, ...equities], popular: ReadonlySet<string> = new Set()): Instrument[] {
   const q = query.trim().toUpperCase();
-  if (!q) return list.slice(0, limit);
+  if (!q) return list.slice(0, limit).map(({ symbol, name, exchange, kind }) => ({ symbol, name, exchange, kind }));
+  const qs = squash(q);
   const rank = (i: Instrument) => {
+    const name = i.name.toUpperCase();
     if (i.symbol === q) return 0;
     if (i.symbol.startsWith(q)) return 1;
-    if (i.name.toUpperCase().startsWith(q)) return 2;
-    if (i.symbol.includes(q) || i.name.toUpperCase().includes(q)) return 3;
+    if (name.startsWith(q) || (qs && squash(name).startsWith(qs))) return 2;
+    if (i.symbol.includes(q) || name.includes(q) || (qs && squash(name).includes(qs))) return 3;
     return -1;
   };
+  const tier = (i: Instrument) => (i.kind === 'INDEX' ? 0 : popular.has(i.symbol) ? 1 : 2);
   return list
     .map((i) => ({ i, r: rank(i) }))
     .filter((x) => x.r >= 0)
-    .sort((a, b) => a.r - b.r || (a.i.kind === 'INDEX' ? -1 : 0) - (b.i.kind === 'INDEX' ? -1 : 0) || a.i.symbol.length - b.i.symbol.length)
+    .sort((a, b) => a.r - b.r || tier(a.i) - tier(b.i) || a.i.symbol.length - b.i.symbol.length || a.i.symbol.localeCompare(b.i.symbol))
     .slice(0, limit)
     .map((x) => ({ symbol: x.i.symbol, name: x.i.name, exchange: x.i.exchange, kind: x.i.kind }));
 }

@@ -97,7 +97,7 @@ export function ScannerView({ compact, onOpenChart }: { compact?: boolean; onOpe
                 <tr className="text-left text-[11.5px] text-muted">
                   <th className="px-4 py-2 font-semibold">Stock</th><th className="text-right font-semibold">Close</th><th className="text-right font-semibold">Change</th>
                   <th className="text-right font-semibold">Volume</th><th className="text-right font-semibold">Traded value (₹ cr)</th>
-                  {valueKeys.map((k) => <th key={k} className="max-w-[160px] px-2 text-right font-semibold">{valueLabel(k)}</th>)}
+                  {valueKeys.map((k) => <th key={k} className="max-w-[160px] px-2 text-right font-semibold first-letter:uppercase">{valueLabel(k)}</th>)}
                 </tr>
               </thead>
               <tbody>
@@ -108,7 +108,7 @@ export function ScannerView({ compact, onOpenChart }: { compact?: boolean; onOpe
                     <td className={`text-right ${r.changePct != null && r.changePct >= 0 ? 'text-up' : 'text-down'}`}>{pctCell(r.changePct)}</td>
                     <td className="text-right">{r.volume.toLocaleString('en-IN')}</td>
                     <td className="text-right">{cr(r.valueCr)}</td>
-                    {valueKeys.map((k) => <td key={k} className="px-2 text-right">{r.values[k] == null ? '—' : fmt(r.values[k]!)}</td>)}
+                    {valueKeys.map((k) => <td key={k} className="px-2 text-right">{r.values[k] == null ? '—' : k.startsWith('VOL_SMA') ? Math.round(r.values[k]!).toLocaleString('en-IN') : fmt(r.values[k]!)}</td>)}
                   </tr>
                 ))}
               </tbody>

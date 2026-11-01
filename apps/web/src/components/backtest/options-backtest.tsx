@@ -78,8 +78,8 @@ export function OptionsBacktest() {
       <section className="panel flex min-h-0 flex-col overflow-hidden">
         <form className="flex min-h-0 flex-1 flex-col" onSubmit={(ev) => { ev.preventDefault(); void run(); }}>
           <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
-            <select className={`${select} w-full`} value="" aria-label="Load a preset" onChange={(ev) => { const p = OPTION_PRESETS[Number(ev.target.value)]; if (p) setS(structuredClone(p)); }}>
-              <option value="">Load a preset…</option>
+            <select className={`${select} w-full`} value={OPTION_PRESETS.findIndex((p) => JSON.stringify(p) === JSON.stringify(s))} aria-label="Load a preset" onChange={(ev) => { const p = OPTION_PRESETS[Number(ev.target.value)]; if (p) setS(structuredClone(p)); }}>
+              <option value={-1}>Load a preset…</option>
               {OPTION_PRESETS.map((p, i) => <option key={p.name} value={i}>{p.name} · {p.underlying}</option>)}
             </select>
             <input className={`${input} w-full font-sans font-bold`} value={s.name} onChange={(ev) => setS({ ...s, name: ev.target.value })} aria-label="Strategy name" />
