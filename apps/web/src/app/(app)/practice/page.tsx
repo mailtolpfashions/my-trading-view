@@ -9,9 +9,9 @@ export default function PracticePage() {
     <section className="panel grid place-items-center">
       <div className="m-auto max-w-[320px] px-4 text-center">
         <span className="mx-auto grid h-11 w-11 place-items-center rounded-[12px] bg-deep text-accent"><History size={20} aria-hidden="true" /></span>
-        <h1 className="mt-3 text-[15px] font-extrabold tracking-[-0.02em]">Practice mode is coming</h1>
+        <h1 className="mt-3 text-[15px] font-extrabold tracking-[-0.02em]">Practice mode: coming soon</h1>
         <p className="mt-1.5 text-[13px] leading-relaxed text-ink-2">
-          Replay any stock or index bar by bar from a date at least 30 days back, and practise entries and exits with real charges. No live prices, no prizes.
+          Replay a stock or index bar by bar from any date at least 30 days back, and practise entries and exits with real charges.
         </p>
       </div>
     </section>

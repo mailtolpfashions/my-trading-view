@@ -107,7 +107,7 @@ export function FiiFootprints() {
           <>
             <p className="py-2 text-[12px] text-ink-2">
               On days FIIs <b>raised</b> their index-futures net position, how often NIFTY rose or fell the <b>next</b> trading day, and the same for days
-              they <b>cut</b> it. Counted per year, so you can see whether it held and whether it changed. Plain counts, not a forecast.
+              they <b>cut</b> it. Counted per year.
             </p>
             <table className="num w-full text-[12px]">
               <thead className="text-[10.5px] font-bold tracking-[0.04em] text-muted">

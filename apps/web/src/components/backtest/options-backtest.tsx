@@ -144,7 +144,7 @@ export function OptionsBacktest() {
         {error && <p role="alert" className="m-3 rounded-[10px] bg-down-soft px-3 py-2 text-[13px] font-semibold text-down">{error}</p>}
         {data ? <OptionsResults data={data} /> : !error && (
           <p className="m-auto max-w-[380px] px-4 text-center text-[13px] leading-relaxed text-ink-2">
-            Build legs like StockMock, choose when to enter (time-based or an indicator signal), and test on NSE&rsquo;s official end-of-day option prices.
+            Add legs, choose when to enter (by day or on an indicator signal) and test on NSE&rsquo;s end-of-day option prices.
           </p>
         )}
       </section>

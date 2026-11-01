@@ -61,8 +61,8 @@ export function BacktestView() {
         {data ? <BacktestResults data={data} /> : !error && (
           <div className="m-auto max-w-[360px] px-4 text-center">
             <span className="mx-auto grid h-11 w-11 place-items-center rounded-[12px] bg-deep text-accent"><FlaskConical size={20} aria-hidden="true" /></span>
-            <h3 className="mt-3 text-[15px] font-extrabold tracking-[-0.02em]">Test a strategy on real history</h3>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-ink-2">Pick a preset or build your own rules, then run. Backtests use NSE&rsquo;s official end-of-day data (daily, weekly or monthly bars), back to 2011 as the history download completes.</p>
+            <h3 className="mt-3 text-[15px] font-extrabold tracking-[-0.02em]">No backtest yet</h3>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-ink-2">Choose a preset or set your own rules, then click Run backtest. Uses NSE end-of-day data from 2011 on daily, weekly or monthly bars.</p>
           </div>
         )}
       </section>

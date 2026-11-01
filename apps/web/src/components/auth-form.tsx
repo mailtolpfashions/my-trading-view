@@ -45,8 +45,8 @@ export function AuthForm({ mode, google }: { mode: 'login' | 'signup'; google: b
   return (
     <form onSubmit={submit} className="panel w-full max-w-[400px] space-y-4 p-7">
       <div>
-        <h1 className="text-[24px] font-extrabold tracking-[-0.03em]">{mode === 'signup' ? 'Create your free account' : 'Sign in'}</h1>
-        <p className="mt-1 text-[13.5px] text-ink-2">Everything is free. Signing in removes the daily limit on backtests, studies and scans.</p>
+        <h1 className="text-[24px] font-extrabold tracking-[-0.03em]">{mode === 'signup' ? 'Create an account' : 'Sign in'}</h1>
+        <p className="mt-1 text-[13.5px] text-ink-2">Sign in to remove the daily limit on backtests, studies and scans.</p>
       </div>
       {google && (
         <button type="button" onClick={() => void withGoogle()} disabled={busy}

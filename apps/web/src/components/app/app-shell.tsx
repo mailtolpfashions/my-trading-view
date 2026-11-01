@@ -111,10 +111,10 @@ export function AppShell({ user, children }: { user: TerminalUser | null; childr
             </ul>
             {!collapsed && (
               <div className="mt-auto mb-3 hidden rounded-[18px] bg-accent-soft p-4 lg:block" title="All prices are NSE's official end-of-day data">
-                <p className="text-[11.5px] font-semibold text-muted">NSE end-of-day data</p>
+                <p className="text-[11.5px] font-semibold text-muted">Data as of</p>
                 <p className="num mt-0.5 text-[16px] font-bold">{asOf ? fmtTradingDay(asOf) : 'Loading…'}</p>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-accent/25"><div className={`h-full bg-accent ${asOf ? 'w-full' : 'w-1/3 animate-pulse'}`} /></div>
-                <p className="mt-2 text-[12px] leading-snug text-ink-2">Official closing prices, F&amp;O and FPI flows. No live prices.</p>
+                <p className="mt-2 text-[12px] leading-snug text-ink-2">NSE closing prices. Not live.</p>
               </div>
             )}
           </div>
@@ -137,12 +137,12 @@ export function AppShell({ user, children }: { user: TerminalUser | null; childr
             {!user && (
               <span className="hidden h-9 items-center rounded-full bg-panel px-3.5 text-[12.5px] font-semibold whitespace-nowrap text-ink-2 shadow-[var(--shadow-panel)] lg:flex"
                 title="Backtests, studies, scans and simulations count as runs. Charts, option chains and the strategy builder are unlimited.">
-                {runs ? `${runs.remaining} free run${runs.remaining === 1 ? '' : 's'} left today` : 'Free · a few runs a day'}
+                {runs ? `${runs.remaining} free run${runs.remaining === 1 ? '' : 's'} left today` : 'Free daily runs'}
               </span>
             )}
             <ThemeToggle />
             {user ? <UserMenu user={user} /> : (
-              <Link href={signInHref} className="flex h-11 items-center rounded-[12px] bg-inverse px-5 text-[13.5px] font-semibold whitespace-nowrap text-on-inverse hover:bg-inverse-hover">Sign in · unlimited</Link>
+              <Link href={signInHref} className="flex h-11 items-center rounded-[12px] bg-inverse px-5 text-[13.5px] font-semibold whitespace-nowrap text-on-inverse hover:bg-inverse-hover">Sign in</Link>
             )}
           </header>
 
@@ -182,12 +182,12 @@ function LimitPrompt({ signInHref, onClose }: { signInHref: string; onClose: () 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-scrim" onClick={onClose} role="dialog" aria-modal="true" aria-label="Free runs used">
       <div className="panel max-w-[360px] px-6 py-6 text-center" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-[15px] font-extrabold tracking-[-0.02em]">You&rsquo;ve used today&rsquo;s free runs</h3>
+        <h3 className="text-[15px] font-extrabold tracking-[-0.02em]">Daily limit reached</h3>
         <p className="mt-1.5 text-[13px] leading-relaxed text-ink-2">
-          Sign in with Google for unlimited backtests, studies, scans and simulations. It&rsquo;s free. Charts, option chains and the strategy builder stay open either way.
+          You have used today&rsquo;s free runs. Sign in to keep running backtests, studies, scans and simulations. Charts and the option chain don&rsquo;t need an account.
         </p>
         <div className="mt-4 flex justify-center gap-2">
-          <Link href={signInHref} className="rounded-[12px] bg-inverse px-4 py-2.5 text-[13px] font-semibold text-on-inverse hover:bg-inverse-hover">Sign in, free</Link>
+          <Link href={signInHref} className="rounded-[12px] bg-inverse px-4 py-2.5 text-[13px] font-semibold text-on-inverse hover:bg-inverse-hover">Sign in</Link>
           <button type="button" onClick={onClose} className="rounded-[12px] border border-accent px-4 py-2.5 text-[13px] font-semibold text-accent-deep hover:bg-accent-soft">Not now</button>
         </div>
       </div>

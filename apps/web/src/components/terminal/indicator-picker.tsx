@@ -38,13 +38,13 @@ export function IndicatorPicker({ quick, onToggleQuick, onAdd, onClose }: { quic
         </div>
         <div className="grid min-h-0 flex-1 grid-cols-[180px_1fr]">
           <nav className="overflow-y-auto border-r border-line p-2" aria-label="Categories">
-            <p className="eyebrow px-2 pt-1 pb-1.5">Quick (verified)</p>
+            <p className="eyebrow px-2 pt-1 pb-1.5">Popular</p>
             {STUDIES.map((s) => (
               <button key={s.id} type="button" onClick={() => onToggleQuick(s.id)} className="flex w-full items-center gap-1.5 rounded-[8px] px-2 py-1.5 text-left text-[12.5px] hover:bg-raised">
                 {s.name}{quick.includes(s.id) && <Check size={13} className="ml-auto text-up" />}
               </button>
             ))}
-            <p className="eyebrow px-2 pt-3 pb-1.5">TradingView library</p>
+            <p className="eyebrow px-2 pt-3 pb-1.5">All indicators</p>
             {cats.map((c) => (
               <button key={c} type="button" onClick={() => setCat(c)} aria-pressed={cat === c}
                 className={`w-full rounded-[8px] px-2 py-1.5 text-left text-[12.5px] ${cat === c ? 'bg-inverse font-semibold text-on-inverse' : 'hover:bg-raised'}`}>{c}</button>
@@ -61,13 +61,13 @@ export function IndicatorPicker({ quick, onToggleQuick, onAdd, onClose }: { quic
                   <span className="block truncate text-[11.5px] text-muted">{i.category}{i.overlay ? ' · on the price chart' : ' · own pane'}</span>
                 </span>
                 {i.verified
-                  ? <span className="flex items-center gap-1 rounded-full bg-up-soft px-2 py-0.5 text-[10.5px] font-bold text-up" title="Values measured equal to TradingView's"><BadgeCheck size={12} />Verified</span>
-                  : <span className="rounded-full bg-raised px-2 py-0.5 text-[10.5px] font-semibold text-ink-2" title="Pine Script formula; not yet measured against TradingView">Pine formula</span>}
+                  ? <span className="flex items-center gap-1 rounded-full bg-up-soft px-2 py-0.5 text-[10.5px] font-bold text-up" title="Values checked against reference charts"><BadgeCheck size={12} />Verified</span>
+                  : <span className="rounded-full bg-raised px-2 py-0.5 text-[10.5px] font-semibold text-ink-2" title="Values not yet checked against reference charts">Unchecked</span>}
               </button>
             ))}
           </div>
         </div>
-        <p className="border-t border-line px-5 py-2 text-[11px] text-muted">Indicator library: lightweight-charts-indicators (MIT), Pine Script v6 formulas. Values are calculated on the same data your chart shows.</p>
+        <p className="border-t border-line px-5 py-2 text-[11px] text-muted">Indicator formulas: lightweight-charts-indicators (MIT licence). Values use the same data as your chart.</p>
       </div>
     </div>
   );

@@ -39,7 +39,7 @@ export function Dashboard() {
         <div className="flex flex-wrap items-end gap-3 pt-3">
           <div>
             <h1 className="text-[30px] leading-tight font-bold tracking-[-0.03em] sm:text-[34px]">Market overview</h1>
-            <p className="mt-1 text-[14px] text-muted">{data ? `NSE session of ${fmtDate(data.asOf)} · official end-of-day data` : error ? '' : 'Loading the last NSE session…'}</p>
+            <p className="mt-1 text-[14px] text-muted">{data ? `NSE closing data for ${fmtDate(data.asOf)}` : error ? '' : 'Loading…'}</p>
           </div>
           <div className="ml-auto flex gap-2.5">
             <Link href={chartHref('NIFTY')} className="flex h-11 items-center gap-2 rounded-[12px] bg-inverse px-5 text-[14px] font-semibold text-on-inverse hover:bg-inverse-hover">
@@ -219,16 +219,16 @@ function FiiCard({ loading, fii, fpi }: { loading: boolean; fii: { latest: FiiPo
           FPI equity, net: <b className={`num ${tone(fpi.netCr)}`}>{signed(fpi.netCr)} Cr</b> <span className="text-muted">(NSDL, reported {fmtDate(fpi.reportDate)})</span>
         </p>
       )}
-      <p className="mt-1.5 text-[11.5px] text-muted">Contracts, from NSE&rsquo;s participant-wise open interest. Long minus short; not a forecast.</p>
+      <p className="mt-1.5 text-[11.5px] text-muted">In contracts. Source: NSE participant-wise open interest.</p>
     </section>
   );
 }
 
 function QuickStart() {
   const items = [
-    { href: '/options', icon: Layers, title: 'Simulate an option strategy', text: 'Build on a past day, follow it to expiry' },
-    { href: '/research/study', icon: Microscope, title: 'Run a condition study', text: 'What followed, year by year' },
-    { href: '/backtest', icon: FlaskConical, title: 'Backtest a strategy', text: 'Indicator rules with real charges' },
+    { href: '/options', icon: Layers, title: 'Option simulator', text: 'Replay an option trade from a past date' },
+    { href: '/research/study', icon: Microscope, title: 'Condition study', text: 'What happened after a signal, by year' },
+    { href: '/backtest', icon: FlaskConical, title: 'Backtest', text: 'Test indicator rules with real charges' },
   ];
   return (
     <section className="panel p-6">

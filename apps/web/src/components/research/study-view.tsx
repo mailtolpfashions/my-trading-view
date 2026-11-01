@@ -79,7 +79,7 @@ export function StudyView() {
     <div className="grid min-h-0 grid-cols-[400px_1fr] gap-2">
       <section className="panel flex min-h-0 flex-col gap-3 overflow-auto p-3">
         <h2 className="text-[14px] font-extrabold tracking-[-0.02em]">Condition study</h2>
-        <p className="text-[12px] leading-snug text-ink-2">Every time the condition held, what happened next, counted year by year against all days. Plain counts on NSE end-of-day data, not a forecast.</p>
+        <p className="text-[12px] leading-snug text-ink-2">Finds every day the condition was true and shows what happened next, year by year, compared with all days.</p>
         <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
           <input aria-label="Symbol" disabled={allStocks} value={symbol} onChange={(e) => setSymbol(e.target.value)} className="num h-9 w-32 rounded-[10px] border border-line px-2.5 font-semibold uppercase disabled:opacity-40" />
           <label className="flex items-center gap-1.5 font-semibold"><input type="checkbox" checked={allStocks} onChange={(e) => setAllStocks(e.target.checked)} /> All NSE stocks</label>
@@ -106,7 +106,7 @@ export function StudyView() {
       </section>
 
       <section className="panel flex min-h-0 flex-col overflow-hidden">
-        {!result ? <p className="m-auto max-w-sm text-center text-[13px] text-muted">Pick a condition and run the study. Results show every year separately, so a pattern that changed over time is visible.</p> : (
+        {!result ? <p className="m-auto max-w-sm text-center text-[13px] text-muted">Choose a condition and click Run study.</p> : (
           <>
             <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5 text-[12px]">
               <div className="flex rounded-full bg-raised p-[3px]">

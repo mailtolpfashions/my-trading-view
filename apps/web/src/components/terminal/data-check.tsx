@@ -30,7 +30,7 @@ export function DataCheck({ quality, delayed }: { quality: DataQuality | null; d
       {off.verified
         ? <>Checked against <b className="font-bold text-ink">NSE&rsquo;s official end-of-day files</b> for {off.verified} day{off.verified > 1 ? 's' : ''} (latest {day(off.latest!)}).
             {off.corrected.length ? ` ${off.corrected.length} bar${off.corrected.length > 1 ? 's were' : ' was'} corrected or added from NSE's official record:${off.corrected.slice(0, 8).map((c) => `${ist(c.time).slice(0, 5)} (${c.fields.join(', ')})`).join('; ')}.` : off.adjusted?.length ? '' : ' All matched exactly.'}
-            {off.adjusted?.length ? ` ${off.adjusted.length} bar${off.adjusted.length > 1 ? 's differ' : ' differs'} from NSE's record by a split/bonus ratio and ${off.adjusted.length > 1 ? 'were' : 'was'} kept adjusted, as TradingView shows them.` : ''}</>
+            {off.adjusted?.length ? ` ${off.adjusted.length} bar${off.adjusted.length > 1 ? 's differ' : ' differs'} from NSE's record by a split/bonus ratio and ${off.adjusted.length > 1 ? 'were' : 'was'} kept adjusted for the split or bonus.` : ''}</>
         : <>Not yet checked against NSE&rsquo;s official end-of-day files; they download automatically each evening.</>}
     </p>
   );
@@ -80,8 +80,8 @@ export function DataCheck({ quality, delayed }: { quality: DataQuality | null; d
         <div className="absolute top-8 right-0 z-30 w-[380px] rounded-[14px] whitespace-normal bg-panel p-4 text-[12.5px] leading-relaxed text-ink-2 shadow-[var(--shadow-pop)]">
           <p className="font-bold text-ink">This chart&rsquo;s data is not complete</p>
           <p className="mt-1">
-            Indicator values near these bars can differ from TradingView and the exchange. We never fill gaps with made-up prices.
-            {delayed && ' The free data source has these defects; a licensed broker feed (Kite) provides exact NSE data.'}
+            Indicator values near these bars may be off. We never fill gaps with made-up prices.
+            
           </p>
           {list('Missing', quality.missing)}
           {list('Frozen (price did not move)', quality.suspect)}

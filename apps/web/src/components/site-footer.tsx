@@ -10,9 +10,9 @@ export function SiteFooter() {
         <div className="max-w-[560px]">
           <Logo />
           <p className="mt-4 leading-relaxed text-muted">
-            Nandibull is a charting, research and paper-trading platform. It does not provide investment advice and is not registered with SEBI as an
-            investment adviser or research analyst. Signals are generated from published rules for research and education. Past performance does not
-            guarantee future results. Investments in securities are subject to market risks; read all related documents carefully before investing.
+            Nandibull is a research and backtesting tool for NSE data. It does not give investment advice and is not registered with SEBI as an
+            investment adviser or research analyst. Past performance does not guarantee future results. Investments in securities are subject to
+            market risks. Read all related documents carefully before investing.
           </p>
         </div>
         <nav className="flex flex-col gap-2 sm:ml-auto" aria-label="Legal">
@@ -22,7 +22,7 @@ export function SiteFooter() {
           <a href={`mailto:${CONTACT}`} className="hover:text-ink">{CONTACT}</a>
         </nav>
       </div>
-      <p className="mt-8 text-muted">© {new Date().getFullYear()} Nandibull · nandibull.in</p>
+      <p className="mt-8 text-muted">© {new Date().getFullYear()} Nandibull</p>
     </footer>
   );
 }

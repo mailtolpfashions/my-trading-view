@@ -145,7 +145,7 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
             </button>
           ))}
           <span className="flex-1" />
-          <span className="hidden truncate px-3 text-[10.5px] text-muted xl:inline">NSE end-of-day data · research tool, not investment advice</span>
+          <span className="hidden truncate px-3 text-[10.5px] text-muted xl:inline">NSE end-of-day data. Not investment advice.</span>
         </div>
       </section>
 

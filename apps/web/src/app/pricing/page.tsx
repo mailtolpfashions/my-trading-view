@@ -24,8 +24,8 @@ export default async function Pricing({ searchParams }: { searchParams: Promise<
   return (
     <SiteShell>
       <section className="pt-8 pb-6 text-center">
-        <h1 className="text-[clamp(32px,5vw,52px)] leading-[1.05] font-extrabold tracking-[-0.04em]">Simple pricing</h1>
-        <p className="mx-auto mt-3 max-w-[560px] text-[16px] text-ink-2">Research, backtesting and strategy building on NSE end-of-day data. Start free; cancel any time.</p>
+        <h1 className="text-[clamp(32px,5vw,52px)] leading-[1.05] font-extrabold tracking-[-0.04em]">Pricing</h1>
+        <p className="mx-auto mt-3 max-w-[560px] text-[16px] text-ink-2">Charts, backtests and option tools on NSE end-of-day data. Cancel any time.</p>
         <div className="mt-6 inline-flex rounded-full bg-panel p-1 shadow-[var(--shadow-panel)]" role="group" aria-label="Billing period">
           {(['month', 'year'] as const).map((i) => (
             <Link key={i} href={`/pricing?interval=${i}`} aria-current={i === interval ? 'true' : undefined} className={`rounded-full px-4 py-1.5 text-[13px] font-semibold ${i === interval ? 'bg-inverse text-on-inverse' : 'text-ink-2 hover:bg-raised'}`}>

@@ -7,15 +7,15 @@ export type BillingInterval = 'month' | 'year';
 export const PLANS: Record<PlanId, { name: string; tagline: string; pricePaise: Record<BillingInterval, number>; features: string[] }> = {
   FREE: {
     name: 'Free',
-    tagline: 'Learn, research and practise',
+    tagline: 'Everything you need to start',
     pricePaise: { month: 0, year: 0 },
     features: ['Charts on NSE end-of-day data', 'All indicators and drawing tools', 'Stock & options backtesting', 'Option chain and strategy builder (end of day)', 'NIFTY research tables'],
   },
   LIVE: {
     name: 'Pro',
-    tagline: 'For deeper research',
+    tagline: 'Higher limits',
     pricePaise: { month: 2999_00, year: 29990_00 }, // placeholder prices, GST inclusive
-    features: ['Everything in Free', 'Higher backtest and scanner limits (being finalised)', 'Practice mode (bar replay), when it launches', 'Priority support'],
+    features: ['Everything in Free', 'Higher backtest and scanner limits', 'Practice mode (bar replay), when it launches', 'Email support'],
   },
 };
 

@@ -60,7 +60,7 @@ export function ScannerView({ compact, onOpenChart }: { compact?: boolean; onOpe
         </div>
         <div className="mt-1.5 px-1">{error ? <p className="text-[12px] font-semibold text-down">{error}</p> : summary}</div>
         <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
-          {!result && !busy && <p className="px-2 py-4 text-center text-[12.5px] text-muted">Pick a scan to run it on NSE&rsquo;s latest official close.</p>}
+          {!result && !busy && <p className="px-2 py-4 text-center text-[12.5px] text-muted">Choose a scan to run it on the latest NSE close.</p>}
           {result?.rows.map((r) => (
             <button key={r.symbol} type="button" onClick={() => onOpenChart(r.symbol)} className="num flex w-full items-center gap-2 rounded-[10px] px-2 py-1.5 text-left text-[12.5px] hover:bg-raised">
               <span className="font-sans font-bold">{r.symbol}</span>
@@ -86,7 +86,7 @@ export function ScannerView({ compact, onOpenChart }: { compact?: boolean; onOpe
           <Play size={15} /> {busy ? 'Scanning…' : 'Run scan'}
         </button>
         {error && <p role="alert" className="rounded-[10px] bg-down-soft px-3 py-2 text-[12.5px] font-semibold text-down">{error}</p>}
-        <p className="text-[11.5px] text-muted">Results are research starting points, not recommendations. Not SEBI-registered advice.</p>
+        <p className="text-[11.5px] text-muted">Scan results are not a recommendation to buy or sell.</p>
       </section>
       <section className="panel flex min-h-0 flex-col overflow-hidden">
         <div className="border-b border-line px-4 py-3">{summary ?? <p className="text-[13px] text-muted">Run a scan to see matching stocks.</p>}</div>

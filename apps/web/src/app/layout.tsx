@@ -8,7 +8,7 @@ const outfit = Outfit({ subsets: ['latin'], weight: ['400', '500', '600', '700',
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
-  title: { default: 'Nandibull · Trading workspace for the Indian market', template: '%s · Nandibull' },
+  title: { default: 'Nandibull: NSE charts, backtests and option tools', template: '%s | Nandibull' },
   description:
     'Research, backtesting and option strategy building on NSE end-of-day data: charts, option chain, futures, SPAN margin and NIFTY research.',
   openGraph: { type: 'website', siteName: 'Nandibull', locale: 'en_IN' },
