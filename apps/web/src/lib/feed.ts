@@ -3,7 +3,15 @@
 import { useEffect, useState } from 'react';
 import type { Candle, DataQuality, DataStatus, Instrument, Quote, Timeframe } from '@mtv/shared';
 
-export const FEED_URL = process.env.NEXT_PUBLIC_FEED_URL ?? 'http://localhost:4001';
+const CONFIGURED_FEED = process.env.NEXT_PUBLIC_FEED_URL ?? 'http://localhost:4001';
+const LOCAL = /^(https?:\/\/)(localhost|127\.0\.0\.1)(?=[:/]|$)/;
+/**
+ * The data service. When it is configured as localhost but this page was opened from another device on the same
+ * network (e.g. a phone at http://192.168.x.x:3000), localhost would mean the phone, so use the page's own host.
+ */
+export const FEED_URL = typeof window !== 'undefined' && LOCAL.test(CONFIGURED_FEED) && !['localhost', '127.0.0.1'].includes(window.location.hostname)
+  ? CONFIGURED_FEED.replace(LOCAL, `$1${window.location.hostname}`)
+  : CONFIGURED_FEED;
 
 // ---- feed access token (issued by our server for the signed-in user; refreshed before it expires) ----
 let cached: { token: string; exp: number } | null = null;

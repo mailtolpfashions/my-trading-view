@@ -6,6 +6,7 @@ import { formatRupees } from '@mtv/paper';
 import { fmt } from '@/lib/format';
 import { fmtDate, fmtStrike, runSimulation, type BuilderLeg, type SimResult } from '@/lib/options';
 import { niceTicks } from './payoff-chart';
+import { InfoTip } from '@/components/info-tip';
 
 const W = 760, H = 220, PAD = { l: 64, r: 16, t: 12, b: 26 };
 const SOURCE: Record<string, string> = { close: '', settle: '*', expired: ' (settled)', missing: ' (no data)' };
@@ -39,10 +40,14 @@ export function Simulator({ underlying, entryDate, legs, brokerId, brokerName }:
   return (
     <section className="rounded-[12px] border border-line p-2.5">
       <div className="flex items-center gap-2">
-        <div>
-          <h3 className="text-[13.5px] font-extrabold tracking-[-0.02em]">Simulate to expiry</h3>
-          <p className="text-[11.5px] text-muted">Follow this position from {fmtDate(entryDate)} on NSE&rsquo;s official closes, day by day.</p>
-        </div>
+        <h3 className="flex items-center gap-1.5 text-[13.5px] font-extrabold tracking-[-0.02em]">Simulate to expiry
+          <InfoTip label="About the simulation">
+            <p>Follows this position from {fmtDate(entryDate)} on NSE&rsquo;s official closes, day by day, to expiry.</p>
+            <p>Prices are NSE&rsquo;s official daily close; * = the contract did not trade that day, so NSE&rsquo;s settlement price is used. On its expiry day a leg settles at intrinsic value against the index&rsquo;s official close, NSE&rsquo;s final settlement rule.</p>
+            <p>&ldquo;If squared off&rdquo; pays entry charges plus {brokerName} brokerage and statutory charges at the rates in force on each date; held to expiry, long in-the-money legs pay exercise STT instead.</p>
+            <p>Daily closes only: what happened during the day is not known. IV and Greeks are Black-76 estimates. A record of the past, not a forecast or advice.</p>
+          </InfoTip>
+        </h3>
         <button type="button" onClick={() => void start()} disabled={busy || !legs.length}
           className="ml-auto flex h-8 items-center gap-1.5 rounded-full bg-inverse px-3.5 text-[12.5px] font-bold text-on-inverse hover:bg-inverse-hover disabled:opacity-50">
           <Play size={13} aria-hidden="true" /> {busy ? 'Running…' : result ? 'Run again' : 'Run day by day'}
@@ -152,13 +157,8 @@ function SimView({ r, dayIdx, setDayIdx, underlying, brokerName }: { r: SimResul
 
       {r.notes.length > 0 && <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-down">{r.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
       <p className="text-[11px] leading-snug text-muted">
-        Prices are NSE&rsquo;s official daily close; * = the contract did not trade that day, so NSE&rsquo;s settlement price is used.
-        On its expiry day a leg settles at intrinsic value against the index&rsquo;s official close, NSE&rsquo;s final settlement rule.
-        &ldquo;If squared off&rdquo; pays entry charges plus {brokerName} brokerage and statutory charges at the rates in force on each date; held to expiry,
-        long in-the-money legs pay exercise STT instead. Lot size is NSE&rsquo;s on {fmtDate(r.entryDate)} ({r.lotSize}).
-        Daily closes only: what happened during the day is not known. IV and Greeks are Black-76 estimates.
+        Lot size {r.lotSize} (NSE, {fmtDate(r.entryDate)}).
         {r.end === 'end-of-data' && <> NSE data ends before the last expiry, so the run stops at {fmtDate(last.date)}.</>}
-        {' '}A record of the past, not a forecast or advice.
       </p>
     </div>
   );
@@ -215,7 +215,6 @@ function SimChart({ r, dayIdx, onPick }: { r: SimResult; dayIdx: number; onPick:
           <p className="num">If squared off: <b className={h.netIfExitPaise >= 0 ? 'text-[#4ade80]' : 'text-[#ff8a8a]'}>{formatRupees(h.netIfExitPaise)}</b></p>
         </div>
       )}
-      <p className="mt-0.5 text-[11px] text-muted">P&amp;L if squared off at each day&rsquo;s close, after all charges. Click a day to inspect it.</p>
     </div>
   );
 }

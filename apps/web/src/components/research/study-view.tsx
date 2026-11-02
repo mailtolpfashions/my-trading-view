@@ -7,6 +7,7 @@ import { EOD_TIMEFRAMES, type EodTimeframe } from '@mtv/shared';
 import { Rules } from '@/components/backtest/strategy-builder';
 import { fmt, tfLabel } from '@/lib/format';
 import { STUDY_PRESETS, runStudy, type PeriodStats, type StudyResult } from '@/lib/study';
+import { InfoTip } from '@/components/info-tip';
 
 const GROUPS = [{ id: 'covid', label: 'COVID 2020' }, { id: 'election', label: 'Election results' }, { id: 'budget', label: 'Budget days' }];
 const pct = (n: number, d = 2) => `${n >= 0 ? '+' : '−'}${Math.abs(n).toFixed(d)}%`;
@@ -116,7 +117,12 @@ export function StudyView() {
               <div className="flex rounded-full bg-raised p-[3px]">
                 {result.horizons.map((x, k) => <button key={x} type="button" onClick={() => setH(k)} className={`num rounded-full px-2.5 py-0.5 font-bold ${k === h ? 'bg-inverse text-on-inverse' : ''}`}>{x} bar{x > 1 ? 's' : ''}</button>)}
               </div>
-              <span className="ml-auto text-muted">
+              <InfoTip label="How to read the study" className="ml-auto">
+                <p>Up share = events whose close {result.horizons[h]} bar(s) later was higher ÷ events with that many bars after them. Events close together have overlapping windows and are all counted.</p>
+                {result.totalEvents > result.events.length && <p>The event list shows the latest {result.events.length.toLocaleString('en-IN')}.</p>}
+                <p>Research data, not investment advice.</p>
+              </InfoTip>
+              <span className="text-muted">
                 {result.totalEvents.toLocaleString('en-IN')} events in {result.symbols.toLocaleString('en-IN')} symbol{result.symbols > 1 ? 's' : ''} · {tfLabel(result.tf)}
                 {result.excluded.length ? ` · ${result.excluded.length} event periods left out` : ''}
                 {totals && ` · overall up after ${result.horizons[h]}: ${share(totals[h].up, totals[h].n)} (any day ${share(totals[h].bUp, totals[h].bN)})`}
@@ -158,10 +164,6 @@ export function StudyView() {
                   </tbody>
                 </table>
               )}
-              <p className="pt-2 text-[11px] text-muted">
-                Up share = events whose close {result.horizons[h]} bar(s) later was higher ÷ events with that many bars after them. Events close together have overlapping windows and are all counted.
-                {result.totalEvents > result.events.length ? ` Event list shows the latest ${result.events.length.toLocaleString('en-IN')}.` : ''} Research data, not investment advice.
-              </p>
             </div>
           </>
         )}

@@ -10,6 +10,7 @@ import { CHART_COLORS, useTheme } from '@/lib/theme';
 import { fmtDate, fmtStrike } from '@/lib/options';
 import { EXPIRY_LABEL, OPTION_PRESETS, fetchFnoCoverage, runOptionsBacktestApi, type FnoCoverage, type OptionsBacktestResponse } from '@/lib/options-backtest';
 import { Rules } from './strategy-builder';
+import { InfoTip } from '@/components/info-tip';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS: [number, string][] = [[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri']];
@@ -94,12 +95,12 @@ export function OptionsBacktest() {
             {s.underlying === 'BANKNIFTY' && s.legs.some((l) => l.expiry.startsWith('week')) && <p className="text-[11px] font-semibold text-down">BANKNIFTY has had only monthly expiries since Nov 2024; &ldquo;week&rdquo; picks the nearest listed expiry.</p>}
 
             <div className="space-y-1.5 rounded-[12px] bg-raised p-2.5">
-              <div className="flex items-center justify-between"><p className="text-[13px] font-extrabold">Legs</p>
+              <div className="flex items-center justify-between"><p className="flex items-center gap-1.5 text-[13px] font-extrabold">Legs
+                <InfoTip label="How strikes are picked">OTM n = n strikes away from ATM (NIFTY 50 points, BANKNIFTY 100). &ldquo;Premium ≈&rdquo; picks the traded strike whose premium is closest to that price.</InfoTip></p>
                 <button type="button" onClick={() => setS({ ...s, legs: [...s.legs, { kind: 'CE', side: 'SELL', lots: 1, strike: { by: 'moneyness', moneyness: 'ATM', steps: 0 }, expiry: 'week0' }] })}
                   className="flex items-center gap-1 rounded-full px-2 py-1 text-[12px] font-semibold text-ink-2 hover:bg-panel"><Plus size={14} /> Add leg</button>
               </div>
               {s.legs.map((l, i) => <LegRow key={i} leg={l} onChange={(leg) => setS({ ...s, legs: s.legs.map((x, j) => (j === i ? leg : x)) })} onRemove={() => setS({ ...s, legs: s.legs.filter((_, j) => j !== i) })} />)}
-              <p className="text-[11px] text-muted">OTM n = n strikes away from ATM (NIFTY 50 pts, BANKNIFTY 100 pts). Premium ≈ picks the traded strike closest to that price.</p>
             </div>
 
             <div className="space-y-2 rounded-[12px] bg-raised p-2.5">
@@ -124,7 +125,8 @@ export function OptionsBacktest() {
             </div>
 
             <div className="space-y-2 rounded-[12px] bg-raised p-2.5">
-              <p className="text-[13px] font-extrabold">Exit (always by expiry)</p>
+              <p className="flex items-center gap-1.5 text-[13px] font-extrabold">Exit (always by expiry)
+                <InfoTip label="How exits are checked">Stops and targets are checked at each day&rsquo;s close, not during the day, so a trade can lose more than the stop (for example on a big move on expiry day). Intraday stops need minute data.</InfoTip></p>
               <div className="grid grid-cols-2 gap-2 text-[12px] font-semibold text-ink-2">
                 <label>Stop loss ₹<input className={`${input} mt-1 w-full`} type="number" min="0" placeholder="Off" value={s.exit.stopLossRupees ?? ''} onChange={(ev) => setS({ ...s, exit: { ...s.exit, stopLossRupees: num(ev.target.value) } })} /></label>
                 <label>Target ₹<input className={`${input} mt-1 w-full`} type="number" min="0" placeholder="Off" value={s.exit.targetRupees ?? ''} onChange={(ev) => setS({ ...s, exit: { ...s.exit, targetRupees: num(ev.target.value) } })} /></label>
@@ -133,7 +135,6 @@ export function OptionsBacktest() {
                 <label>Max trading days held<input className={`${input} mt-1 w-full`} type="number" min="1" placeholder="Off" value={s.exit.holdDays ?? ''} onChange={(ev) => setS({ ...s, exit: { ...s.exit, holdDays: num(ev.target.value) } })} /></label>
               </div>
               <Rules title="Exit signal" optional rules={s.exit.signal ?? { match: 'any', conditions: [] }} onChange={(signal) => setS({ ...s, exit: { ...s.exit, signal: signal.conditions.length ? signal : undefined } })} />
-              <p className="text-[11px] leading-snug text-muted">Stops and targets are checked at each day’s close, not during the day, so a trade can lose more than the stop (for example on a big move on expiry day). Intraday stops need minute data.</p>
             </div>
           </div>
           <div className="border-t border-line p-3">
@@ -196,7 +197,11 @@ function OptionsResults({ data, exit }: { data: OptionsBacktestResponse; exit: O
   return (
     <div className="flex min-h-0 flex-col gap-2 overflow-auto p-3">
       <div className="flex flex-wrap items-baseline gap-2">
-        <p className="text-[15px] font-extrabold tracking-[-0.02em]">Options backtest</p>
+        <p className="flex items-center gap-1.5 text-[15px] font-extrabold tracking-[-0.02em]">Options backtest
+          <InfoTip label="About this backtest">
+            <p>Simulated on NSE&rsquo;s official daily closing prices: real fills differ (spreads, slippage, intraday moves). Stops are checked at the daily close. Expiry settles at intrinsic value against the index&rsquo;s official close.</p>
+            <p>Past performance does not guarantee future results. Not investment advice.</p>
+          </InfoTip></p>
         <p className="num text-[12px] text-muted">{m.from ? fmtDate(m.from) : ''} → {m.to ? fmtDate(m.to) : ''} · {m.days} trading days · NSE official end-of-day data</p>
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -330,10 +335,6 @@ function OptionsResults({ data, exit }: { data: OptionsBacktestResponse; exit: O
         </table></div>
         {!result.trades.length && <p className="px-3 pb-4 text-[13px] text-muted">No trades: the entry rules never fired, or every entry was skipped (see notes).</p>}
       </div>
-      <p className="text-[11px] leading-snug text-muted">
-        Simulated on NSE&rsquo;s official daily closing prices: real fills differ (spreads, slippage, intraday moves). Stops are checked at the daily close. Expiry settles at intrinsic value against the
-        index&rsquo;s official close. Past performance does not guarantee future results. Not investment advice.
-      </p>
     </div>
   );
 }

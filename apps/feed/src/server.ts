@@ -3,14 +3,14 @@
 // published (apps/feed/src/eod). Zerodha Kite is the owner's personal connection for internal research scripts only.
 
 import cors from '@fastify/cors';
-import Fastify, { type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { BacktestError, OptionsBacktestError, STUDY_HORIZONS, SimError, StudyTally, breakIndices, findEvents, runBacktest, runOptionsBacktest, simulatePosition, type OptionsStrategy, type SimInput, type RuleSet, type Strategy, type StudyEvent } from '@mtv/backtest';
 import { prisma } from '@mtv/db';
 import { positionMargin } from '@mtv/options';
 import { EOD_TIMEFRAMES, type DataStatus, type EodTimeframe, type Quote } from '@mtv/shared';
 import { verifyFeedToken, type FeedClaims } from '@mtv/shared/feed-token';
 import { activeSession, clearSession, createSession, kiteConfigured, loginUrl } from './providers/kite/session';
-import { FNO_UNDERLYINGS, type FnoUnderlying } from './fno/bhavcopy';
+import { buildUpCycle, fnoCalendar, gexOn, maxPainHistory, derivedOn, derivedSeries, expiriesBetween, fnoUnderlyings, futuresMovers, isFnoUnderlying, ivGrid, latestFnoDay, lotSizes, strikeHistory } from './fno/analytics';
 import { getChain, latestFnoDate } from './fno/chain';
 import { prismaOptionsData } from './fno/data';
 import { futuresHistory } from './fno/futures';
@@ -20,11 +20,12 @@ import { startNsdlDaily } from './fno/fpi-flows';
 import { SPAN_UNDERLYINGS, spanOn, spanToday } from './fno/span';
 import { brokerById } from '@mtv/paper';
 import { fnoStatus, startFnoSync } from './fno/store';
-import { allEquityShareSymbols, dailyHistory, eodLoaded, eodStatus, startEodSync } from './eod/store';
+import { allEquityShareSymbols, dailyHistory, eodLoaded, eodStatus, loadEod, startEodSync } from './eod/store';
 import { eodCandles, eodSeries, lastCloseQuote } from './eod/timeframes';
 import { auditCandles } from './quality';
 import { MARKET_EVENTS, niftyDays } from './research/nifty-days';
-import { OVERVIEW_INDICES, breadth, indexCard, indexMembers, moveOn, movers, type StockMove } from './research/overview';
+import { OVERVIEW_INDICES, breadth, indexCard, indexMembers, moveOn, movers, type IndexList, type StockMove } from './research/overview';
+import { BREADTH_INDICES, RRG_BENCHMARKS, RRG_SECTORS, allBreadth, indexBreadth, rotation, warmMarketViews } from './market/service';
 import { ScanError, runScan } from './signals/scanner';
 import { StudyError, catalog as studyCatalog, computeStudy, encodeNonFinite } from './studies/library';
 import { findInstrument, loadEquities, searchInstruments } from './symbols';
@@ -32,8 +33,13 @@ import { COUNTED_ROUTES, VisitorQuota } from './visitor-quota';
 
 const PORT = Number(process.env.FEED_PORT ?? 4001);
 const WEB_ORIGIN = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+// Testing from another device on the same network: FEED_HOST=0.0.0.0 and EXTRA_WEB_ORIGINS=http://<PC address>:3000.
+const HOST = process.env.FEED_HOST ?? '127.0.0.1';
+const EXTRA_ORIGINS = (process.env.EXTRA_WEB_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean);
 const TOKEN_SECRET = process.env.FEED_TOKEN_SECRET ?? '';
 const MAX_SYMBOLS = 100;
+/** The options backtester and simulator cover these underlyings (their presets use these strike steps). */
+const BACKTEST_UNDERLYINGS = ['NIFTY', 'BANKNIFTY'] as const;
 /** Free runs a day for a visitor who hasn't signed in (per visitor id), and from one IP address. */
 const VISITOR_DAILY_RUNS = Number(process.env.VISITOR_DAILY_RUNS ?? 5);
 const VISITOR_DAILY_RUNS_PER_IP = Number(process.env.VISITOR_DAILY_RUNS_PER_IP ?? VISITOR_DAILY_RUNS * 4);
@@ -48,7 +54,7 @@ declare module 'fastify' {
 
 // A failed background job (database restarting, NSE unreachable) must never take the service down: log it loudly.
 process.on('unhandledRejection', (e) => app.log.error({ err: e }, 'Unhandled background error'));
-await app.register(cors, { origin: [WEB_ORIGIN], methods: ['GET', 'HEAD', 'POST'], exposedHeaders: ['X-Visitor-Remaining'] });
+await app.register(cors, { origin: [WEB_ORIGIN, ...EXTRA_ORIGINS], methods: ['GET', 'HEAD', 'POST'], exposedHeaders: ['X-Visitor-Remaining'] });
 // An empty body sent as JSON means "no body", not an error.
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
   const text = String(body ?? '');
@@ -72,7 +78,7 @@ const tokenFrom = (req: FastifyRequest) => {
 // needs a valid feed token.
 const PUBLIC = new Set(['/api/kite/login', '/api/kite/callback']);
 /** Routes that read the in-memory NSE history. */
-const NEEDS_HISTORY = new Set(['/api/dashboard', '/api/research/study', '/api/research/fii', '/api/candles', '/api/quotes', '/api/backtest', '/api/options-backtest', '/api/studies/compute', '/api/research/nifty-days', '/api/eod/history', '/api/scan']);
+const NEEDS_HISTORY = new Set(['/api/market/rrg', '/api/market/breadth', '/api/market/breadth-all', '/api/dashboard', '/api/research/study', '/api/research/fii', '/api/candles', '/api/quotes', '/api/backtest', '/api/options-backtest', '/api/studies/compute', '/api/research/nifty-days', '/api/eod/history', '/api/scan']);
 // Visitors without an account may use everything (owner routes check `admin` themselves), with a daily allowance
 // of runs (COUNTED_ROUTES). A run is counted only when it succeeds, so a rejected rule doesn't use one up.
 const quota = new VisitorQuota(VISITOR_DAILY_RUNS, VISITOR_DAILY_RUNS_PER_IP);
@@ -156,7 +162,7 @@ app.post<{ Body: { symbol?: string; tf?: string; strategy?: Strategy } }>('/api/
 
 app.post<{ Body: { strategy?: OptionsStrategy } }>('/api/options-backtest', async (req, reply) => {
   const s = req.body?.strategy;
-  if (!s || !(FNO_UNDERLYINGS as readonly string[]).includes(s.underlying)) return reply.code(400).send({ error: 'bad_strategy', message: 'Options backtests cover NIFTY and BANKNIFTY' });
+  if (!s || !(BACKTEST_UNDERLYINGS as readonly string[]).includes(s.underlying)) return reply.code(400).send({ error: 'bad_strategy', message: 'Options backtests cover NIFTY and BANKNIFTY' });
   try {
     const usesSignals = s.entry.when === 'signal' || !!s.exit.signal;
     const daily = usesSignals ? (history(s.underlying, 'D')?.candles ?? []) : [];
@@ -177,7 +183,7 @@ type MarginBody = { underlying?: string; spotPaise?: number; date?: string; legs
 app.post<{ Body: MarginBody }>('/api/margin', async (req, reply) => {
   const { underlying, legs, spotPaise, date } = req.body ?? {};
   if (date != null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.code(400).send({ error: 'bad_date', message: 'Date must be YYYY-MM-DD' });
-  if (!underlying || !(SPAN_UNDERLYINGS as readonly string[]).includes(underlying)) return reply.code(400).send({ error: 'bad_underlying', message: `Margin covers ${SPAN_UNDERLYINGS.join(', ')}` });
+  if (!underlying || !(SPAN_UNDERLYINGS as readonly string[]).includes(underlying)) return reply.code(400).send({ error: 'bad_underlying', message: `not calculated for ${underlying} yet. NSE SPAN margin is worked out for ${SPAN_UNDERLYINGS.join(', ')} so far` });
   const valid = Array.isArray(legs) && legs.length > 0 && legs.length <= 20 && legs.every((l) =>
     ['FUT', 'CE', 'PE'].includes(l.kind) && /^\d{4}-\d{2}-\d{2}$/.test(l.expiry) && Number.isSafeInteger(l.qty) && l.qty !== 0 && Number.isSafeInteger(l.strikePaise) && (l.pricePaise == null || Number.isSafeInteger(l.pricePaise)));
   if (!valid) return reply.code(400).send({ error: 'bad_legs', message: 'Send 1–20 legs with kind, expiry, strike, signed quantity' });
@@ -200,7 +206,7 @@ app.post<{ Body: MarginBody }>('/api/margin', async (req, reply) => {
 type SimBody = Omit<SimInput, 'broker'> & { broker?: string };
 app.post<{ Body: SimBody }>('/api/options-sim', async (req, reply) => {
   const b = req.body;
-  if (!b || !(FNO_UNDERLYINGS as readonly string[]).includes(b.underlying)) return reply.code(400).send({ error: 'bad_position', message: 'The simulator covers NIFTY and BANKNIFTY' });
+  if (!b || !(BACKTEST_UNDERLYINGS as readonly string[]).includes(b.underlying)) return reply.code(400).send({ error: 'bad_position', message: 'The simulator covers NIFTY and BANKNIFTY' });
   try {
     const started = performance.now();
     const result = await simulatePosition({ underlying: b.underlying, entryDate: b.entryDate, legs: b.legs, broker: brokerById(b.broker) }, prismaOptionsData);
@@ -249,20 +255,114 @@ app.get('/api/dashboard', async (req, reply) => {
 
 // ---- F&O end-of-day data ----
 app.get('/api/fno/status', async () => fnoStatus());
+const isDate = (d: unknown): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d);
+/** The underlying from the query, upper-cased, if we hold F&O data for it; otherwise sends 400 and returns null. */
+async function fnoUnderlying(raw: unknown, reply: FastifyReply): Promise<string | null> {
+  const u = String(raw ?? 'NIFTY').toUpperCase();
+  if (/^[A-Z0-9&-]{1,20}$/.test(u) && (await isFnoUnderlying(u))) return u;
+  reply.code(400).send({ error: 'bad_underlying', message: `No NSE F&O data for ${u}` });
+  return null;
+}
 app.get<{ Querystring: { underlying?: string; date?: string; expiry?: string } }>('/api/fno/chain', async (req, reply) => {
-  const u = String(req.query.underlying ?? 'NIFTY').toUpperCase();
-  if (!(FNO_UNDERLYINGS as readonly string[]).includes(u)) return reply.code(400).send({ error: 'bad_underlying', message: 'Options data covers NIFTY and BANKNIFTY' });
-  const date = await latestFnoDate(u as FnoUnderlying, req.query.date);
-  if (!date) return reply.code(404).send({ error: 'no_data', message: 'No F&O data downloaded yet' });
-  const chain = await getChain(u as FnoUnderlying, date, req.query.expiry);
+  const u = await fnoUnderlying(req.query.underlying, reply);
+  if (!u) return reply;
+  const date = await latestFnoDate(u, req.query.date);
+  if (!date) return reply.code(404).send({ error: 'no_data', message: `No F&O data for ${u} on or before that date` });
+  const chain = await getChain(u, date, req.query.expiry);
   return chain ?? reply.code(404).send({ error: 'no_data', message: `No options for ${u} on ${date}` });
 });
 app.get<{ Querystring: { underlying?: string; days?: string } }>('/api/futures/history', async (req, reply) => {
-  const u = String(req.query.underlying ?? 'NIFTY').toUpperCase();
-  if (!(FNO_UNDERLYINGS as readonly string[]).includes(u)) return reply.code(400).send({ error: 'bad_underlying', message: 'Futures cover NIFTY and BANKNIFTY' });
+  const u = await fnoUnderlying(req.query.underlying, reply);
+  if (!u) return reply;
   const days = Math.min(750, Math.max(5, Number(req.query.days) || 250));
-  return { underlying: u, days: await futuresHistory(u as FnoUnderlying, days) };
+  return { underlying: u, days: await futuresHistory(u, days) };
 });
+app.get('/api/fno/underlyings', async () => fnoUnderlyings());
+/** Trading days held for an underlying and its expiry dates (for date pickers: holidays off, expiries marked). */
+app.get<{ Querystring: { underlying?: string } }>('/api/fno/dates', async (req, reply) => {
+  const u = await fnoUnderlying(req.query.underlying, reply);
+  if (!u) return reply;
+  const { dates, expiries } = await fnoCalendar(u);
+  return { underlying: u, dates, expiries };
+});
+app.get('/api/fno/lot-sizes', async () => lotSizes());
+/** Daily chain statistics (PCR, max pain, straddle, IV, HV, gamma exposure). Default: the last year, current expiry. */
+app.get<{ Querystring: { underlying?: string; from?: string; to?: string; expiry?: string } }>('/api/fno/derived', async (req, reply) => {
+  const u = await fnoUnderlying(req.query.underlying, reply);
+  if (!u) return reply;
+  const to = isDate(req.query.to) ? req.query.to : (await latestFnoDate(u)) ?? '';
+  const from = isDate(req.query.from) ? req.query.from : new Date(Date.parse(`${to}T00:00:00Z`) - 365 * 86400_000).toISOString().slice(0, 10);
+  if (!to || from > to) return reply.code(400).send({ error: 'bad_range', message: 'Pick a start date before the end date' });
+  if (Date.parse(to) - Date.parse(from) > 6 * 366 * 86400_000) return reply.code(400).send({ error: 'bad_range', message: 'Pick at most 6 years' });
+  const expiry = isDate(req.query.expiry) ? req.query.expiry : undefined;
+  const [points, expiries] = await Promise.all([derivedSeries(u, from, to, expiry), expiriesBetween(u, from, to)]);
+  return { underlying: u, from, to, expiry: expiry ?? null, expiries, points };
+});
+/** Every expiry's statistics on one day (term structure and max pain by expiry). */
+app.get<{ Querystring: { underlying?: string; date?: string } }>('/api/fno/expiries', async (req, reply) => {
+  const u = await fnoUnderlying(req.query.underlying, reply);
+  if (!u) return reply;
+  const date = await latestFnoDate(u, isDate(req.query.date) ? req.query.date : undefined);
+  if (!date) return reply.code(404).send({ error: 'no_data', message: `No F&O data for ${u}` });
+  return { underlying: u, date, expiries: await derivedOn(u, date) };
+});
+/** Daily quotes of chosen strikes (comma-separated rupees; empty = all) of one expiry, with spot and near future. */
+app.get<{ Querystring: { underlying?: string; expiry?: string; strikes?: string; kind?: string; from?: string; to?: string } }>('/api/fno/strike-history', async (req, reply) => {
+  const u = await fnoUnderlying(req.query.underlying, reply);
+  if (!u) return reply;
+  if (!isDate(req.query.expiry)) return reply.code(400).send({ error: 'bad_expiry', message: 'Pick an expiry' });
+  const strikes = (req.query.strikes ?? '').split(',').map((x) => x.trim()).filter(Boolean).map(Number);
+  if (strikes.length > 60 || strikes.some((k) => !Number.isFinite(k) || k <= 0)) return reply.code(400).send({ error: 'bad_strikes', message: 'Pick up to 60 strikes' });
+  const kind = req.query.kind === 'CE' || req.query.kind === 'PE' ? req.query.kind : undefined;
+  const r = await strikeHistory(u, req.query.expiry, strikes.map((k) => Math.round(k * 100)), kind, isDate(req.query.from) ? req.query.from : undefined, isDate(req.query.to) ? req.query.to : undefined);
+  return { underlying: u, expiry: req.query.expiry, ...r };
+});
+/** Near-month futures of every underlying on a day: price and OI change, build-up, PCR. */
+app.get<{ Querystring: { date?: string } }>('/api/fno/movers', async (req, reply) => {
+  const latest = await latestFnoDay();
+  if (!latest) return reply.code(404).send({ error: 'no_data', message: 'No F&O data downloaded yet' });
+  const date = (await latestFnoDate('NIFTY', isDate(req.query.date) ? req.query.date : latest)) ?? latest;
+  return futuresMovers(date);
+});
+/** Gamma exposure by strike for one day and expiry (latest day if none). */
+app.get<{ Querystring: { underlying?: string; date?: string; expiry?: string } }>('/api/fno/gex', async (req, reply) => {
+  const u = await fnoUnderlying(req.query.underlying, reply);
+  if (!u) return reply;
+  const date = await latestFnoDate(u, isDate(req.query.date) ? req.query.date : undefined);
+  if (!date) return reply.code(404).send({ error: 'no_data', message: `No F&O data for ${u}` });
+  const r = await gexOn(u, date, isDate(req.query.expiry) ? req.query.expiry : undefined);
+  return r ?? reply.code(404).send({ error: 'no_data', message: `No options for ${u} on ${date}` });
+});
+/** Max pain some sessions before each expiry against the close on expiry day. */
+app.get<{ Querystring: { underlying?: string; from?: string; before?: string } }>('/api/fno/max-pain-history', async (req, reply) => {
+  const u = await fnoUnderlying(req.query.underlying, reply);
+  if (!u) return reply;
+  const from = isDate(req.query.from) ? req.query.from : new Date(Date.now() - 2 * 365 * 86400_000).toISOString().slice(0, 10);
+  const before = Math.min(10, Math.max(1, Number(req.query.before) || 1));
+  return { underlying: u, from, before, expiries: await maxPainHistory(u, from, before) };
+});
+app.get<{ Querystring: { sessions?: string } }>('/api/fno/buildup-cycle', async (req) => buildUpCycle(Math.min(120, Math.max(5, Number(req.query.sessions) || 50))));
+app.get<{ Querystring: { date?: string } }>('/api/fno/iv-grid', async (req, reply) => {
+  const latest = await latestFnoDay();
+  if (!latest) return reply.code(404).send({ error: 'no_data', message: 'No F&O data downloaded yet' });
+  const date = (await latestFnoDate('NIFTY', isDate(req.query.date) ? req.query.date : latest)) ?? latest;
+  return { date, rows: await ivGrid(date) };
+});
+
+// ---- market: sector rotation and breadth (market/service.ts) ----
+app.get<{ Querystring: { tf?: string; bench?: string } }>('/api/market/rrg', async (req) => {
+  const tf = req.query.tf === 'W' ? 'W' : 'D';
+  const bench = (RRG_BENCHMARKS as readonly string[]).includes(req.query.bench ?? '') ? req.query.bench! : 'NIFTY 50';
+  return rotation(tf, bench);
+});
+app.get('/api/market/indices', async () => ({ breadth: BREADTH_INDICES, rrg: { sectors: RRG_SECTORS, benchmarks: RRG_BENCHMARKS } }));
+app.get<{ Querystring: { index?: string; days?: string } }>('/api/market/breadth', async (req, reply) => {
+  const index = (req.query.index ?? 'NIFTY 50').toUpperCase();
+  if (!(BREADTH_INDICES as string[]).includes(index)) return reply.code(400).send({ error: 'bad_index', message: `No constituent list for ${index}` });
+  const days = Math.min(750, Math.max(20, Number(req.query.days) || 250));
+  try { return await indexBreadth(index as IndexList, days); } catch { return reply.code(503).send({ error: 'list_unavailable', message: `NSE's constituent list for ${index} could not be read right now` }); }
+});
+app.get('/api/market/breadth-all', async () => allBreadth());
 
 // ---- research: NIFTY day by day (rows only; tables are built from them in the browser) ----
 let expiryCache: { at: number; expiries: Set<string>; fnoDates: Set<string> } | null = null;
@@ -425,12 +525,17 @@ app.post('/api/kite/logout', async (req, reply) => {
 
 await loadEquities((m) => app.log.info(m));
 // NSE end-of-day history (stocks, indices, corporate actions), F&O, and participant positions, downloaded politely.
-startEodSync(process.env.EOD_BACKFILL_FROM ?? '2022-01-03', (m) => app.log.info(m));
-startFnoSync(process.env.FNO_BACKFILL_FROM ?? '2023-11-01', (m) => app.log.info(m));
-// FII / DII / Pro / Client positions in F&O: NSE's archive starts in January 2012.
-startParticipantSync(process.env.PARTICIPANT_BACKFILL_FROM ?? '2012-01-02', (m) => app.log.info(m));
-// FII buy / sell / open interest in derivatives: NSE's archive starts around December 2014.
-startFiiStatsSync(process.env.FII_STATS_BACKFILL_FROM ?? '2014-10-01', (m) => app.log.info(m));
-// FPI cash-market flows: NSDL's Daily Trends page, read once a day (it shows only the latest day).
-startNsdlDaily((m) => app.log.info(m));
-await app.listen({ port: PORT, host: '127.0.0.1' });
+// FEED_NO_SYNC=1 (a second instance for testing beside the main one): load the stored history, download nothing.
+if (process.env.FEED_NO_SYNC === '1') void loadEod((m) => app.log.info(m));
+else {
+  startEodSync(process.env.EOD_BACKFILL_FROM ?? '2022-01-03', (m) => app.log.info(m));
+  startFnoSync(process.env.FNO_BACKFILL_FROM ?? '2023-11-01', (m) => app.log.info(m));
+  // FII / DII / Pro / Client positions in F&O: NSE's archive starts in January 2012.
+  startParticipantSync(process.env.PARTICIPANT_BACKFILL_FROM ?? '2012-01-02', (m) => app.log.info(m));
+  // FII buy / sell / open interest in derivatives: NSE's archive starts around December 2014.
+  startFiiStatsSync(process.env.FII_STATS_BACKFILL_FROM ?? '2014-10-01', (m) => app.log.info(m));
+  // FPI cash-market flows: NSDL's Daily Trends page, read once a day (it shows only the latest day).
+  startNsdlDaily((m) => app.log.info(m));
+}
+warmMarketViews((m) => app.log.info(m));
+await app.listen({ port: PORT, host: HOST });

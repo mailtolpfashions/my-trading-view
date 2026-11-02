@@ -1,16 +1,22 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlignJustify, Equal, Minus, MousePointer2, MoveUpRight, Ruler, Slash, Square, SeparatorVertical, Trash2, Type } from 'lucide-react';
+import { AlignJustify, ArrowDownFromLine, ArrowRightToLine, ArrowUpFromLine, ArrowUpRight, Equal, Minus, MousePointer2, MoveHorizontal, MoveUpRight, MoveVertical, Ruler, Slash, Square, SeparatorVertical, Trash2, Type } from 'lucide-react';
 import type { Tool } from '@/lib/chart/drawings/model';
 
 const TOOLS: { tool: Tool; label: string; key: string; Icon: typeof Slash }[] = [
   { tool: 'cursor', label: 'Select and move', key: 'V', Icon: MousePointer2 },
   { tool: 'trend', label: 'Trend line', key: 'T', Icon: Slash },
   { tool: 'ray', label: 'Ray', key: 'R', Icon: MoveUpRight },
+  { tool: 'arrow', label: 'Arrow', key: 'A', Icon: ArrowUpRight },
   { tool: 'hline', label: 'Horizontal line', key: 'H', Icon: Minus },
+  { tool: 'hray', label: 'Horizontal ray', key: 'J', Icon: ArrowRightToLine },
   { tool: 'vline', label: 'Vertical line', key: 'L', Icon: SeparatorVertical },
   { tool: 'rect', label: 'Rectangle (zone)', key: 'B', Icon: Square },
+  { tool: 'prange', label: 'Price range', key: 'P', Icon: MoveVertical },
+  { tool: 'drange', label: 'Date range', key: 'E', Icon: MoveHorizontal },
+  { tool: 'long', label: 'Long position', key: 'Q', Icon: ArrowUpFromLine },
+  { tool: 'short', label: 'Short position', key: 'W', Icon: ArrowDownFromLine },
   { tool: 'fib', label: 'Fibonacci retracement', key: 'F', Icon: AlignJustify },
   { tool: 'channel', label: 'Parallel channel (3 clicks)', key: 'C', Icon: Equal },
   { tool: 'text', label: 'Text note', key: 'N', Icon: Type },
@@ -37,7 +43,7 @@ export function DrawingRail({ tool, onTool, count, onClearAll }: { tool: Tool; o
   }, [onTool]);
 
   return (
-    <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 border-r border-line py-1.5" role="toolbar" aria-label="Drawing tools" aria-orientation="vertical">
+    <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-r border-line py-1.5 [scrollbar-width:none]" role="toolbar" aria-label="Drawing tools" aria-orientation="vertical">
       {TOOLS.map(({ tool: t, label, key, Icon }) => (
         <button key={t} type="button" onClick={() => onTool(t)} aria-pressed={tool === t} title={`${label} (Alt+${key})`} aria-label={label}
           className={`grid h-8 w-8 place-items-center rounded-[8px] ${tool === t ? 'bg-inverse text-on-inverse' : 'text-ink-2 hover:bg-raised'}`}>

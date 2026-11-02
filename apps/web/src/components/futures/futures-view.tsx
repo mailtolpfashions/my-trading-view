@@ -6,6 +6,10 @@ import { fmt } from '@/lib/format';
 import { CHART_COLORS, useTheme } from '@/lib/theme';
 import { BUILD_UP, fetchFuturesHistory, type BuildUp, type FuturesDay } from '@/lib/futures';
 import { fmtDate } from '@/lib/options';
+import Link from 'next/link';
+import { UnderlyingPicker, useToolParams } from '@/components/tools/controls';
+import { FUTURES_TOOLS } from '@/lib/tools';
+import { InfoTip } from '@/components/info-tip';
 
 const rupees = (p: number | null | undefined) => (p == null ? '—' : fmt(p / 100));
 const signedRupees = (p: number | null | undefined) => (p == null ? '—' : `${p >= 0 ? '+' : '−'}${fmt(Math.abs(p) / 100)}`);
@@ -23,9 +27,10 @@ function BuildUpPill({ b }: { b: BuildUp }) {
   return <span title={BUILD_UP[b].hint} className={`rounded-full px-2 py-0.5 text-[11px] font-bold whitespace-nowrap ${TONE_CLASS[BUILD_UP[b].tone]}`}>{BUILD_UP[b].label}</span>;
 }
 
-/** Futures module: NIFTY / BANKNIFTY futures vs spot, open interest and build-up, from NSE's end-of-day F&O files. */
+/** Futures module: any F&O underlying's futures vs spot, open interest and build-up, from NSE's end-of-day F&O files. */
 export function FuturesView() {
-  const [u, setU] = useState<'NIFTY' | 'BANKNIFTY'>('NIFTY');
+  const params = useToolParams();
+  const u = params.u;
   const [range, setRange] = useState(250);
   const [days, setDays] = useState<FuturesDay[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,16 +45,16 @@ export function FuturesView() {
   return (
     <div className="grid min-h-0 grid-rows-[auto_1fr] gap-2 lg:overflow-hidden">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex rounded-full bg-panel p-1 shadow-[var(--shadow-panel)]" role="tablist" aria-label="Index">
-          {(['NIFTY', 'BANKNIFTY'] as const).map((x) => (
-            <button key={x} type="button" role="tab" aria-selected={x === u} onClick={() => setU(x)}
-              className={`rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold ${x === u ? 'bg-inverse text-on-inverse' : 'text-ink-2 hover:bg-raised'}`}>{x} futures</button>
-          ))}
-        </div>
+        <UnderlyingPicker value={u} onChange={(x) => params.set({ u: x })} />
         <select className="h-9 rounded-full bg-panel px-3 text-[12.5px] font-semibold shadow-[var(--shadow-panel)]" value={range} onChange={(e) => setRange(Number(e.target.value))} aria-label="History">
           {[60, 120, 250, 500].map((n) => <option key={n} value={n}>Last {n} sessions</option>)}
         </select>
         <span className="text-[12px] text-muted">History from NSE&rsquo;s official F&amp;O files{latest ? ` · latest ${fmtDate(latest.date)}` : ''}</span>
+        <nav aria-label="Futures tools" className="flex gap-1.5 sm:ml-auto">
+          {FUTURES_TOOLS.map((t) => (
+            <Link key={t.slug} href={`/futures/${t.slug}`} className="rounded-full bg-panel px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap text-ink-2 shadow-[var(--shadow-panel)] hover:text-ink">{t.label}</Link>
+          ))}
+        </nav>
       </div>
 
       <div className="grid grid-cols-1 content-start gap-2 lg:min-h-0 lg:auto-rows-max lg:overflow-y-auto xl:auto-rows-auto xl:content-stretch xl:overflow-visible xl:grid-cols-[1fr_580px]">
@@ -57,7 +62,7 @@ export function FuturesView() {
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-4 py-2.5 text-[12px] text-ink-2">
             <span className="w-full font-bold text-ink sm:w-auto">Near-month future vs spot</span>
             <span className="flex items-center gap-1.5"><i className="inline-block h-0.5 w-4 bg-blue" />Future</span>
-            <span className="flex items-center gap-1.5"><i className="inline-block h-0 w-4 border-t-2 border-dashed border-ink-2" />Spot (index close)</span>
+            <span className="flex items-center gap-1.5"><i className="inline-block h-0 w-4 border-t-2 border-dashed border-ink-2" />Spot (official close)</span>
             <span className="flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-up" />OI coloured by build-up</span>
           </div>
           {error ? <p className="m-auto text-[13px] font-semibold text-down">{error}</p> : !days ? <p className="m-auto text-[13px] text-muted">Loading…</p> : <FuturesChart days={days} />}
@@ -65,8 +70,8 @@ export function FuturesView() {
 
         <section className="panel flex h-[70dvh] flex-col overflow-hidden xl:h-auto xl:min-h-0">
           <div className="border-b border-line px-4 py-2.5">
-            <p className="text-[13px] font-bold">Daily build-up (near month)</p>
-            <p className="text-[11.5px] text-muted">Each day compares the same contract with its own previous close and open interest.</p>
+            <p className="flex items-center gap-1.5 text-[13px] font-bold">Daily build-up (near month)
+              <InfoTip label="About build-up">Each day compares the same contract with its own previous close and open interest, so a roll to the next month is never read as a change. Price up and OI up is long build-up; price down and OI up, short build-up; price up and OI down, short covering; both down, long unwinding.</InfoTip></p>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <table className="num w-full text-[12px]">

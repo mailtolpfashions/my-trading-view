@@ -27,7 +27,7 @@ import { IndicatorRenderer } from 'lightweight-charts-indicators/render';
 import { Settings2 } from 'lucide-react';
 import { DrawingLayer, type AlertLine } from '@/lib/chart/drawings/layer';
 import { computeLib, fetchCatalog, type LibIndicator, type LibStudy } from '@/lib/chart/library';
-import { COLORS, TWO_POINT, channelOffset, hitTest, loadDrawings, logicalToTime, measureText, newId, saveDrawings, timeToLogical, type Drawing, type Point, type Tool } from '@/lib/chart/drawings/model';
+import { COLORS, ONE_POINT, TWO_POINT, channelOffset, hitTest, isPosition, mirroredStop, loadDrawings, logicalToTime, measureText, newId, saveDrawings, timeToLogical, type Drawing, type Point, type Tool } from '@/lib/chart/drawings/model';
 import { DOWN, UP, studyById, type PointColors } from '@/lib/chart/studies';
 import { fmt, tfLabel } from '@/lib/format';
 import { CHART_COLORS, chartThemeOptions, useTheme } from '@/lib/theme';
@@ -72,7 +72,17 @@ type Props = {
   scaleMode?: ScaleMode;
   /** Set to a function returning the chart (all panes, with drawings) as a canvas, for saving an image. */
   shotRef?: { current: (() => HTMLCanvasElement) | null };
+  /** Other symbols drawn as lines on the price pane (the workspace switches the scale to % so they line up). */
+  compare?: CompareLine[];
+  onRemoveCompare?: (symbol: string) => void;
+  settings?: ChartSettings;
 };
+
+export type CompareLine = { symbol: string; name: string; color: string; candles: Candle[] };
+
+/** Chart look, chosen in the chart settings panel (kept in this browser). */
+export type ChartSettings = { upColor: string; downColor: string; grid: boolean; volume: boolean; watermark: boolean };
+export const DEFAULT_CHART_SETTINGS: ChartSettings = { upColor: UP, downColor: DOWN, grid: true, volume: true, watermark: true };
 
 type LibResult = { plots: Record<string, { time: number; value: number; color?: string }[]> };
 
@@ -84,6 +94,7 @@ export function ChartView(p: Props) {
   const mainRef = useRef<ISeriesApi<SeriesType> | null>(null);
   const volRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const wmRef = useRef<ITextWatermarkPluginApi<Time> | null>(null);
+  const compareRef = useRef(new Map<string, ISeriesApi<'Line'>>());
   const builtRef = useRef<Built[]>([]);
   const builtKey = useRef('');
   const viewKey = useRef('');
@@ -153,10 +164,39 @@ export function ChartView(p: Props) {
       // These belonged to the removed chart; the effects below rebuild them on the next chart.
       mainRef.current = null;
       volRef.current = null;
+      compareRef.current.clear();
       builtRef.current = [];
       builtKey.current = '';
     };
   }, []);
+
+  // ---- settings: candle colours, grid lines, volume ----
+  const settingsKey = JSON.stringify(p.settings ?? null);
+  useEffect(() => {
+    const chart = chartRef.current, main = mainRef.current;
+    if (!chart || !main) return;
+    const up = p.settings?.upColor ?? UP, down = p.settings?.downColor ?? DOWN;
+    if (p.chartType === 'candles' || p.chartType === 'ha') main.applyOptions({ upColor: up, downColor: down, wickUpColor: up, wickDownColor: down });
+    if (p.chartType === 'bars') main.applyOptions({ upColor: up, downColor: down });
+    const grid = p.settings?.grid ?? true;
+    chart.applyOptions({ grid: { vertLines: { visible: grid }, horzLines: { visible: grid } } });
+    const hasVolume = p.candles.some((b) => b.volume > 0);
+    volRef.current?.applyOptions({ visible: hasVolume && (p.settings?.volume ?? true) });
+  }, [settingsKey, p.chartType, p.loadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- compare symbols: one line each on the price pane ----
+  const compareKey = (p.compare ?? []).map((x) => `${x.symbol}:${x.color}:${x.candles.length}:${x.candles.at(-1)?.time ?? 0}`).join('|');
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    for (const series of compareRef.current.values()) { try { chart.removeSeries(series); } catch { /* removed with its chart */ } }
+    compareRef.current.clear();
+    for (const x of p.compare ?? []) {
+      const series = chart.addSeries(LineSeries, { color: x.color, lineWidth: 2, priceLineVisible: false, lastValueVisible: true, title: x.symbol, crosshairMarkerVisible: true }, 0);
+      series.setData(x.candles.map((b) => ({ time: toChart(b.time), value: b.close })));
+      compareRef.current.set(x.symbol, series);
+    }
+  }, [compareKey, p.loadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- price scale mode ----
   useEffect(() => {
@@ -172,15 +212,16 @@ export function ChartView(p: Props) {
     const chart = chartRef.current!;
     clearLib(); // library renderers hold the old main series; they are rebuilt below
     if (mainRef.current) chart.removeSeries(mainRef.current);
-    const ohlc = { upColor: UP, downColor: DOWN, wickUpColor: UP, wickDownColor: DOWN, borderVisible: false };
+    const up = p.settings?.upColor ?? UP, down = p.settings?.downColor ?? DOWN;
+    const ohlc = { upColor: up, downColor: down, wickUpColor: up, wickDownColor: down, borderVisible: false };
     mainRef.current =
       p.chartType === 'line' ? chart.addSeries(LineSeries, { color: '#f59a0b', lineWidth: 2 })
       : p.chartType === 'area' ? chart.addSeries(AreaSeries, { lineColor: '#f59a0b', topColor: 'rgba(245,154,11,0.24)', bottomColor: 'rgba(245,154,11,0.02)', lineWidth: 2 })
-      : p.chartType === 'bars' ? chart.addSeries(BarSeries, { upColor: UP, downColor: DOWN })
+      : p.chartType === 'bars' ? chart.addSeries(BarSeries, { upColor: up, downColor: down })
       : chart.addSeries(CandlestickSeries, ohlc);
     mainRef.current.setData([]); // filled by the data effect below
     mainRef.current.attachPrimitive(layer.current); // drawings follow the main series
-  }, [p.chartType]);
+  }, [p.chartType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- data, studies and view ----
   useEffect(() => {
@@ -197,7 +238,7 @@ export function ChartView(p: Props) {
         : shown.map((b) => ({ time: toChart(b.time), open: b.open, high: b.high, low: b.low, close: b.close })),
     );
     const hasVolume = c.some((b) => b.volume > 0); // Yahoo has no volume for indices
-    volRef.current!.applyOptions({ visible: hasVolume });
+    volRef.current!.applyOptions({ visible: hasVolume && (p.settings?.volume ?? true) });
     volRef.current!.setData(hasVolume ? c.map((b) => ({ time: toChart(b.time), value: b.volume, color: b.close >= b.open ? 'rgba(10,155,118,0.28)' : 'rgba(229,72,77,0.28)' })) : []);
 
     // Rebuild indicator series only when the selection changes; otherwise just refresh their data.
@@ -331,12 +372,12 @@ export function ChartView(p: Props) {
 
   useEffect(() => {
     wmRef.current?.applyOptions({
-      lines: [
+      lines: p.settings?.watermark === false ? [] : [
         { text: `${p.symbol}, ${tfLabel(p.tf)}`, color: colors.watermark, fontSize: 72, fontStyle: '600' },
         { text: p.name, color: colors.watermark, fontSize: 26 },
       ],
     });
-  }, [p.symbol, p.name, p.tf, colors]);
+  }, [p.symbol, p.name, p.tf, colors, p.settings?.watermark]);
 
   // ---- drawings: trend lines, rays, horizontal/vertical lines, zones, notes, measure, alert-by-click ----
   const [tool, setTool] = useState<Tool>('cursor');
@@ -391,7 +432,7 @@ export function ChartView(p: Props) {
       if (!pt) return;
       const color = COLORS[0];
       if (L.tool === 'alert') { p.onAlertAt?.(Math.round(pt.price * 20) / 20); pickTool('cursor'); return; }
-      if (L.tool === 'hline' || L.tool === 'vline') { add({ id: newId(), kind: L.tool, p1: pt, color }); pickTool('cursor'); return; }
+      if (ONE_POINT.includes(L.tool)) { add({ id: newId(), kind: L.tool as Drawing['kind'], p1: pt, color }); pickTool('cursor'); return; }
       // Opened after this pointer event finishes, so the release doesn't immediately take focus away from the box.
       if (L.tool === 'text') { setTimeout(() => setTextAt({ x: e.point.x, y: e.point.y, point: pt }), 0); return; }
       if (L.tool === 'measure') {
@@ -407,7 +448,12 @@ export function ChartView(p: Props) {
       }
       if (TWO_POINT.includes(L.tool)) {
         if (!L.start) { L.start = pt; layer.current.set({ preview: { id: 'preview', kind: L.tool as Drawing['kind'], p1: pt, p2: pt, color } }); }
-        else { add({ id: newId(), kind: L.tool as Drawing['kind'], p1: L.start, p2: pt, color }); L.start = null; layer.current.set({ preview: null }); pickTool('cursor'); }
+        else {
+          const kind = L.tool as Drawing['kind'];
+          // A position starts with risk = reward; drag its stop handle to change it.
+          add({ id: newId(), kind, p1: L.start, p2: pt, ...(isPosition(kind) ? { p3: mirroredStop(L.start, pt) } : {}), color });
+          L.start = null; layer.current.set({ preview: null }); pickTool('cursor');
+        }
       }
     };
     const onMove = (e: MouseEventParams<Time>) => {
@@ -592,6 +638,17 @@ export function ChartView(p: Props) {
               </button>
             </div>
           )}
+          {(p.compare ?? []).map((x) => {
+            const at = bar ? x.candles.find((b) => b.time === bar.time) : undefined;
+            return (
+              <div key={x.symbol} className="pointer-events-auto flex w-fit items-center gap-1.5 text-[12px] text-ink-2">
+                <span className="h-2 w-2 rounded-full" style={{ background: x.color }} aria-hidden="true" />
+                <span className="font-semibold" style={{ color: x.color }}>{x.symbol}</span>
+                <span className="num">{at ? fmt(at.close) : '—'}</span>
+                <button type="button" onClick={() => p.onRemoveCompare?.(x.symbol)} className="rounded px-1 text-muted hover:bg-raised hover:text-ink" aria-label={`Remove ${x.symbol} from compare`}><X size={12} /></button>
+              </div>
+            );
+          })}
           {studyRows.filter((b) => b.pane === 0).map((b) => row(b.id))}
           {libRows.filter((x) => x.pane === 0).map(libRow)}
         </div>

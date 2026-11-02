@@ -1,14 +1,23 @@
 import { FEED_URL, feedFetch } from './feed';
 
-export type ChainSide = { closePaise: number; settlePaise: number; oi: number; volume: number; traded: boolean; iv: number | null; delta: number | null; theta: number | null; vega: number | null; gamma: number | null };
+export type ChainSide = {
+  closePaise: number; settlePaise: number; oi: number; volume: number; traded: boolean; iv: number | null; delta: number | null; theta: number | null; vega: number | null; gamma: number | null;
+  /** Change in open interest from the previous trading day (same contract), null if not listed then. */
+  oiChange?: number | null;
+  prevClosePaise?: number | null;
+};
 export type ChainRow = { strikePaise: number; CE: ChainSide | null; PE: ChainSide | null };
 export type Chain = {
-  underlying: 'NIFTY' | 'BANKNIFTY';
+  underlying: string;
   date: string;
   expiry: string;
   expiries: string[];
   lotSize: number | null;
+  isIndex?: boolean;
   spotPaise: number | null;
+  /** Previous trading day (base for OI change). */
+  prevDate?: string | null;
+  strikeStepPaise?: number | null;
   forwardPaise: number | null;
   atmStrikePaise: number | null;
   rows: ChainRow[];
@@ -49,18 +58,34 @@ export const fmtStrike = (paise: number) => (paise / 100).toLocaleString('en-IN'
 
 export const fmtDate =(d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
 
-/** Strategy templates relative to ATM (in strike steps); `expiryOffset` 1 = the expiry after the selected one. */
-export const TEMPLATES: { id: string; name: string; legs: { kind: 'CE' | 'PE'; side: 'BUY' | 'SELL'; offset: number; expiryOffset?: number }[] }[] = [
-  { id: 'short-straddle', name: 'Short straddle', legs: [{ kind: 'CE', side: 'SELL', offset: 0 }, { kind: 'PE', side: 'SELL', offset: 0 }] },
-  { id: 'long-straddle', name: 'Long straddle', legs: [{ kind: 'CE', side: 'BUY', offset: 0 }, { kind: 'PE', side: 'BUY', offset: 0 }] },
-  { id: 'short-strangle', name: 'Short strangle', legs: [{ kind: 'CE', side: 'SELL', offset: 4 }, { kind: 'PE', side: 'SELL', offset: -4 }] },
-  { id: 'iron-condor', name: 'Iron condor', legs: [{ kind: 'PE', side: 'SELL', offset: -4 }, { kind: 'PE', side: 'BUY', offset: -8 }, { kind: 'CE', side: 'SELL', offset: 4 }, { kind: 'CE', side: 'BUY', offset: 8 }] },
-  { id: 'iron-fly', name: 'Iron butterfly', legs: [{ kind: 'CE', side: 'SELL', offset: 0 }, { kind: 'PE', side: 'SELL', offset: 0 }, { kind: 'CE', side: 'BUY', offset: 6 }, { kind: 'PE', side: 'BUY', offset: -6 }] },
-  { id: 'bull-call', name: 'Bull call spread', legs: [{ kind: 'CE', side: 'BUY', offset: 0 }, { kind: 'CE', side: 'SELL', offset: 4 }] },
-  { id: 'bear-put', name: 'Bear put spread', legs: [{ kind: 'PE', side: 'BUY', offset: 0 }, { kind: 'PE', side: 'SELL', offset: -4 }] },
-  { id: 'call-calendar', name: 'Call calendar (sell this expiry, buy next)', legs: [{ kind: 'CE', side: 'SELL', offset: 0 }, { kind: 'CE', side: 'BUY', offset: 0, expiryOffset: 1 }] },
-  { id: 'put-calendar', name: 'Put calendar (sell this expiry, buy next)', legs: [{ kind: 'PE', side: 'SELL', offset: 0 }, { kind: 'PE', side: 'BUY', offset: 0, expiryOffset: 1 }] },
-  { id: 'call-diagonal', name: 'Call diagonal (sell OTM this expiry, buy ATM next)', legs: [{ kind: 'CE', side: 'SELL', offset: 4 }, { kind: 'CE', side: 'BUY', offset: 0, expiryOffset: 1 }] },
+/**
+ * Strategy templates relative to ATM (in strike steps); `expiryOffset` 1 = the expiry after the selected one; `lots`
+ * defaults to 1 (ratio legs use 2). Grouped by the view each expresses, as they appear in the builder's menu.
+ */
+export type TemplateGroup = 'Bullish' | 'Bearish' | 'Neutral' | 'Volatile' | 'Calendar';
+export const TEMPLATE_GROUPS: TemplateGroup[] = ['Bullish', 'Bearish', 'Neutral', 'Volatile', 'Calendar'];
+type TemplateLeg = { kind: 'CE' | 'PE'; side: 'BUY' | 'SELL'; offset: number; expiryOffset?: number; lots?: number };
+export const TEMPLATES: { id: string; name: string; group: TemplateGroup; legs: TemplateLeg[] }[] = [
+  { id: 'bull-call', name: 'Bull call spread', group: 'Bullish', legs: [{ kind: 'CE', side: 'BUY', offset: 0 }, { kind: 'CE', side: 'SELL', offset: 4 }] },
+  { id: 'bull-put', name: 'Bull put spread', group: 'Bullish', legs: [{ kind: 'PE', side: 'SELL', offset: 0 }, { kind: 'PE', side: 'BUY', offset: -4 }] },
+  { id: 'call-ratio', name: 'Call ratio spread (1 × 2)', group: 'Bullish', legs: [{ kind: 'CE', side: 'BUY', offset: 0 }, { kind: 'CE', side: 'SELL', offset: 4, lots: 2 }] },
+  { id: 'jade-lizard', name: 'Jade lizard', group: 'Bullish', legs: [{ kind: 'PE', side: 'SELL', offset: -4 }, { kind: 'CE', side: 'SELL', offset: 4 }, { kind: 'CE', side: 'BUY', offset: 8 }] },
+  { id: 'bear-put', name: 'Bear put spread', group: 'Bearish', legs: [{ kind: 'PE', side: 'BUY', offset: 0 }, { kind: 'PE', side: 'SELL', offset: -4 }] },
+  { id: 'bear-call', name: 'Bear call spread', group: 'Bearish', legs: [{ kind: 'CE', side: 'SELL', offset: 0 }, { kind: 'CE', side: 'BUY', offset: 4 }] },
+  { id: 'put-ratio', name: 'Put ratio spread (1 × 2)', group: 'Bearish', legs: [{ kind: 'PE', side: 'BUY', offset: 0 }, { kind: 'PE', side: 'SELL', offset: -4, lots: 2 }] },
+  { id: 'reverse-jade-lizard', name: 'Reverse jade lizard', group: 'Bearish', legs: [{ kind: 'CE', side: 'SELL', offset: 4 }, { kind: 'PE', side: 'SELL', offset: -4 }, { kind: 'PE', side: 'BUY', offset: -8 }] },
+  { id: 'short-straddle', name: 'Short straddle', group: 'Neutral', legs: [{ kind: 'CE', side: 'SELL', offset: 0 }, { kind: 'PE', side: 'SELL', offset: 0 }] },
+  { id: 'short-strangle', name: 'Short strangle', group: 'Neutral', legs: [{ kind: 'CE', side: 'SELL', offset: 4 }, { kind: 'PE', side: 'SELL', offset: -4 }] },
+  { id: 'iron-condor', name: 'Iron condor', group: 'Neutral', legs: [{ kind: 'PE', side: 'SELL', offset: -4 }, { kind: 'PE', side: 'BUY', offset: -8 }, { kind: 'CE', side: 'SELL', offset: 4 }, { kind: 'CE', side: 'BUY', offset: 8 }] },
+  { id: 'iron-fly', name: 'Iron butterfly', group: 'Neutral', legs: [{ kind: 'CE', side: 'SELL', offset: 0 }, { kind: 'PE', side: 'SELL', offset: 0 }, { kind: 'CE', side: 'BUY', offset: 6 }, { kind: 'PE', side: 'BUY', offset: -6 }] },
+  { id: 'call-butterfly', name: 'Call butterfly', group: 'Neutral', legs: [{ kind: 'CE', side: 'BUY', offset: -4 }, { kind: 'CE', side: 'SELL', offset: 0, lots: 2 }, { kind: 'CE', side: 'BUY', offset: 4 }] },
+  { id: 'batman', name: 'Batman (two ratio spreads)', group: 'Neutral', legs: [{ kind: 'CE', side: 'BUY', offset: 2 }, { kind: 'CE', side: 'SELL', offset: 5, lots: 2 }, { kind: 'PE', side: 'BUY', offset: -2 }, { kind: 'PE', side: 'SELL', offset: -5, lots: 2 }] },
+  { id: 'long-straddle', name: 'Long straddle', group: 'Volatile', legs: [{ kind: 'CE', side: 'BUY', offset: 0 }, { kind: 'PE', side: 'BUY', offset: 0 }] },
+  { id: 'long-strangle', name: 'Long strangle', group: 'Volatile', legs: [{ kind: 'CE', side: 'BUY', offset: 4 }, { kind: 'PE', side: 'BUY', offset: -4 }] },
+  { id: 'reverse-iron-condor', name: 'Reverse iron condor', group: 'Volatile', legs: [{ kind: 'PE', side: 'BUY', offset: -4 }, { kind: 'PE', side: 'SELL', offset: -8 }, { kind: 'CE', side: 'BUY', offset: 4 }, { kind: 'CE', side: 'SELL', offset: 8 }] },
+  { id: 'call-calendar', name: 'Call calendar (sell this expiry, buy next)', group: 'Calendar', legs: [{ kind: 'CE', side: 'SELL', offset: 0 }, { kind: 'CE', side: 'BUY', offset: 0, expiryOffset: 1 }] },
+  { id: 'put-calendar', name: 'Put calendar (sell this expiry, buy next)', group: 'Calendar', legs: [{ kind: 'PE', side: 'SELL', offset: 0 }, { kind: 'PE', side: 'BUY', offset: 0, expiryOffset: 1 }] },
+  { id: 'call-diagonal', name: 'Call diagonal (sell OTM this expiry, buy ATM next)', group: 'Calendar', legs: [{ kind: 'CE', side: 'SELL', offset: 4 }, { kind: 'CE', side: 'BUY', offset: 0, expiryOffset: 1 }] },
 ];
 
 /**

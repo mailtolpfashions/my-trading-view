@@ -303,7 +303,7 @@ model SignalIssue {
 
 model FnoEod {
   date        String // trading date, YYYY-MM-DD
-  underlying  String // NIFTY | BANKNIFTY
+  underlying  String // NSE F&O symbol: NIFTY, BANKNIFTY, FINNIFTY, … or a stock such as RELIANCE
   kind        String // FUT | CE | PE
   expiry      String // YYYY-MM-DD
   /// Strike in paise (0 for futures)
@@ -330,9 +330,49 @@ model FnoDayMeta {
   /// Underlying index close in paise (from the file, or NSE's official index-close file)
   spotPaise  Int?
   source     String // udiff | old
+  /// Index derivative (true) or stock derivative (false)
+  isIndex    Boolean  @default(true)
   fetchedAt  DateTime @default(now())
 
   @@id([date, underlying])
+  @@index([underlying, date])
+}
+
+/// Statistics of one expiry's option chain on one day, computed from that day's NSE F&O file when it is saved
+/// (apps/feed/src/fno/derive.ts). IV and gamma are model estimates (Black-76 on the put-call-parity forward).
+model FnoDerivedDay {
+  date            String
+  underlying      String
+  expiry          String
+  /// Calendar days from date to expiry
+  daysToExpiry    Int
+  /// Lot size of this expiry's contracts (differs between expiries while NSE moves to a new lot size)
+  lotSize         Int?
+  spotPaise       Int?
+  forwardPaise    Int?
+  strikeStepPaise Int?
+  /// Listed strike nearest the forward (or spot when no forward)
+  atmStrikePaise  Int?
+  atmIv           Float?
+  /// ATM call close + put close; traded = both legs traded that day
+  straddlePaise   Int?
+  straddleTraded  Boolean  @default(false)
+  maxPainPaise    Int?
+  /// Open interest in shares and volume in contracts, as NSE publishes them
+  ceOi            BigInt
+  peOi            BigInt
+  ceVolume        BigInt
+  peVolume        BigInt
+  /// Net gamma exposure, rupees per 1% move (calls +, puts −)
+  gexNet          Float?
+  callWallPaise   Int?
+  putWallPaise    Int?
+  gammaFlipPaise  Int?
+  /// Legs with open interest but no trade, whose IV was interpolated for gamma exposure
+  gexIvFilled     Int      @default(0)
+
+  @@id([date, underlying, expiry])
+  @@index([underlying, date])
 }
 
 /// One row per date attempted, so holidays and finished days are never downloaded twice.
@@ -414,6 +454,9 @@ model FnoFetch {
   date      String   @id
   /// saved | not-published | error
   status    String
+  /// What was saved: 'index' (all index F&O) or 'all' (index and stock F&O). Null: only NIFTY and BANKNIFTY (before
+  /// 2 Nov 2026), so the day is downloaded again.
+  scope     String?
   message   String?
   attempts  Int      @default(1)
   updatedAt DateTime @updatedAt

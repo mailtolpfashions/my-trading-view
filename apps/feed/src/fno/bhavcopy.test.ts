@@ -24,13 +24,23 @@ describe('F&O bhavcopy', () => {
     expect(fnoBhavcopyUrl('2023-06-23')).toBe('https://nsearchives.nseindia.com/content/historical/DERIVATIVES/2023/JUN/fo23JUN2023bhav.csv.zip');
   });
 
-  it('parses UDiFF index options and futures, with lot size and underlying price, ignoring stock F&O', () => {
+  it('parses UDiFF index options and futures, with lot size and underlying price, ignoring stock F&O by default', () => {
     const d = parseUdiffFo(UDIFF, '2026-10-23');
     expect(d.rows).toHaveLength(3);
+    expect([...d.indices]).toEqual(['NIFTY']);
     expect(d.lotSize).toEqual({ NIFTY: 65 });
     expect(d.spot).toEqual({ NIFTY: 22600 });
     expect(d.rows[1]).toEqual({ underlying: 'NIFTY', kind: 'PE', expiry: '2026-10-27', strike: 22600, open: 140, high: 190.5, low: 98.1, close: 121.35, settle: 121.35, oi: 5210430, volume: 98765432, traded: true });
     expect(d.rows[2]).toMatchObject({ kind: 'FUT', strike: null, close: 22661.3, traded: true });
+  });
+
+  it('includes stock options and futures with scope "all", with their own lot size and price', () => {
+    const d = parseUdiffFo(UDIFF, '2026-10-23', 'all');
+    expect(d.rows).toHaveLength(4);
+    expect(d.rows[3]).toMatchObject({ underlying: 'RELIANCE', kind: 'CE', strike: 1200, traded: true });
+    expect(d.lotSize).toEqual({ NIFTY: 65, RELIANCE: 500 });
+    expect(d.spot).toEqual({ NIFTY: 22600, RELIANCE: 1190 });
+    expect(d.indices.has('RELIANCE')).toBe(false);
   });
 
   it('marks contracts with no trades as untraded, even though they carry a close', () => {
@@ -47,10 +57,38 @@ describe('F&O bhavcopy', () => {
     expect(d.spot.NIFTY).toBeNull();
   });
 
+  it('includes old-layout stock F&O with scope "all", leaving the stock lot size unknown (flagged, not guessed)', () => {
+    const d = parseOldFo(OLD, '2023-06-23', 'all');
+    expect(d.rows).toHaveLength(3);
+    expect(d.lotSize).toEqual({ NIFTY: 50, RELIANCE: null });
+    expect(d.indices.has('NIFTY') && !d.indices.has('RELIANCE')).toBe(true);
+  });
+
   it('derives a lot size only when exactly one known size fits', () => {
     expect(deriveLotSize(50.06 * 100 * 18705.9, 100, 18705.9)).toBe(50);
     expect(deriveLotSize(44 * 100 * 1000, 100, 1000)).toBeNull(); // between 40 and 50: ambiguous -> flagged
     expect(deriveLotSize(0, 0, 1000)).toBeNull();
+  });
+
+  it('keeps each expiry’s own lot size while NSE moves to a new one, and uses the nearest for the day', () => {
+    // CHOLAFIN futures on 30 Oct 2026: Nov and Dec at the old lot 625, Jan 2027 at the new lot 300 (other columns as published).
+    const row = (expiry: string, lot: number) => `2026-10-30,2026-10-30,FO,NSE,STF,1,,CHOLAFIN,,${expiry},${expiry},,,CHOLAFINFUT,1600,1610,1590,1605,1605,1600,1600,1605,1000,0,10,1,1,F1,${lot},,,,,`;
+    const csv = [UDIFF.split('\n')[0], row('2027-01-25', 300), row('2026-11-23', 625), row('2026-12-29', 625)].join('\n');
+    const d = parseUdiffFo(csv, '2026-10-30', 'all');
+    expect(d.lotByExpiry).toEqual({ CHOLAFIN: { '2027-01-25': 300, '2026-11-23': 625, '2026-12-29': 625 } });
+    expect(d.lotSize.CHOLAFIN).toBe(625); // nearest expiry, whatever the row order
+  });
+
+  it('accepts NSE futures whose close lies outside the traded range, or with trades but no open/high/low', () => {
+    // KAYNES futures rows from NSE's files of 15 and 23 Oct 2026 (other columns as published).
+    const csv = [UDIFF.split('\n')[0],
+      '2026-10-15,2026-10-15,FO,NSE,STF,1,,KAYNES,,2026-11-23,2026-11-23,,,KAYNES26NOVFUT,3207.50,3207.50,3207.50,3196.40,3207.50,3190.00,3190.00,3196.40,712950,0,123,1,1,F1,100,,,,,',
+      '2026-10-23,2026-10-23,FO,NSE,STF,2,,KAYNES,,2026-12-29,2026-12-29,,,KAYNES26DECFUT,0,0,0,3220.00,0,3200.00,3200.00,3221.79,33900,0,13,1,1,F1,100,,,,,',
+    ].join('\n');
+    const d = parseUdiffFo(csv, '2026-10-15', 'all');
+    expect(d.rows.map((r) => r.close)).toEqual([3196.4, 3220]);
+    const bad = csv.replace('3207.50,3207.50,3207.50', '3300.00,3207.50,3207.50'); // open above the high
+    expect(() => parseUdiffFo(bad, '2026-10-15', 'all')).toThrow(/Inconsistent OHLC/);
   });
 
   it('fails loudly on a format change', () => {

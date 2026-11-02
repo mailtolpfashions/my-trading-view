@@ -5,6 +5,7 @@ import { INDICATOR_DEFAULTS, type Comparator, type Condition, type IndicatorName
 import { EOD_TIMEFRAMES, type Timeframe } from '@mtv/shared';
 import { INDICATOR_LABELS, PARAM_LABELS, PRESETS } from '@/lib/backtest';
 import { tfLabel } from '@/lib/format';
+import { InfoTip } from '@/components/info-tip';
 
 const COMPARATORS: [Comparator, string][] = [['crossesAbove', 'crosses above'], ['crossesBelow', 'crosses below'], ['>', 'is above'], ['<', 'is below'], ['>=', 'is at or above'], ['<=', 'is at or below']];
 const PRICE_FIELDS = ['close', 'open', 'high', 'low', 'volume'] as const;
@@ -141,9 +142,12 @@ export function StrategyBuilder({ strategy, tf, symbol, busy, onChange, onTf, on
               onChange={(e) => onChange({ ...s, initialCapitalPaise: Math.max(0, Math.floor(Number(e.target.value.replace(/[^\d]/g, '')) || 0)) * 100 })} />
           </label>
         </div>
-        <p className="text-[11px] leading-snug text-muted">
-          Rules are checked when a bar closes and trades happen at the next bar&rsquo;s open. If a bar touches both stop and target, the stop counts first. Intraday:
-          no entries from 15:15, exit by 15:20 IST. Every trade pays brokerage, STT, exchange, SEBI, stamp duty and GST.
+        <p className="flex items-center gap-1.5 text-[11.5px] text-muted">How trades are simulated
+          <InfoTip label="How trades are simulated">
+            <p>Rules are checked when a bar closes and trades happen at the next bar&rsquo;s open. If a bar touches both stop and target, the stop counts first.</p>
+            <p>Intraday: no entries from 15:15, exit by 15:20 IST.</p>
+            <p>Every trade pays brokerage, STT, exchange, SEBI, stamp duty and GST.</p>
+          </InfoTip>
         </p>
       </div>
       <div className="border-t border-line p-3">

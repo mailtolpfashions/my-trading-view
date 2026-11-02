@@ -35,6 +35,11 @@ export interface OptionsData {
   expiries(underlying: string, date: string): Promise<string[]>;
   chain(underlying: string, date: string, expiry: string, kind: 'CE' | 'PE'): Promise<ContractQuote[]>;
   quotes(underlying: string, date: string, contracts: ContractKey[]): Promise<Map<string, ContractQuote>>;
+  /**
+   * Lot size of one expiry's contracts on a day, when known. While NSE moves to a new lot size, contracts listed
+   * after the change carry the new lot and earlier ones the old; without this, meta().lotSize is used for every leg.
+   */
+  lotFor?(underlying: string, date: string, expiry: string): Promise<number | null>;
 }
 
 export const contractId = (c: ContractKey) => `${c.expiry}|${c.strikePaise}|${c.kind}`;
@@ -232,7 +237,8 @@ export async function runOptionsBacktest(s: OptionsStrategy, data: OptionsData, 
         pick = [...chain].sort((a, b) => Math.abs(a.closePaise - target) - Math.abs(b.closePaise - target) || (spec.kind === 'CE' ? b.strikePaise - a.strikePaise : a.strikePaise - b.strikePaise))[0];
         if (!pick) return void skipped.push({ date, reason: `No traded ${spec.kind} for ${expiry}` });
       }
-      legs.push({ expiry, strikePaise: pick.strikePaise, kind: spec.kind, side: spec.side, qty: spec.lots * meta.lotSize, entryPaise: pick.closePaise, exitPaise: 0, settledDays: 0 });
+      const lot = (await data.lotFor?.(s.underlying, date, expiry)) ?? meta.lotSize;
+      legs.push({ expiry, strikePaise: pick.strikePaise, kind: spec.kind, side: spec.side, qty: spec.lots * lot, entryPaise: pick.closePaise, exitPaise: 0, settledDays: 0 });
     }
     const entryCharges = legs.reduce((sum, l) => sum + computeOptionCharges({ side: l.side, qty: l.qty, premiumPaise: l.entryPaise, date }).total, 0);
     const basis = Math.abs(legs.reduce((sum, l) => sum + (l.side === 'SELL' ? 1 : -1) * l.qty * l.entryPaise, 0));

@@ -39,6 +39,23 @@ describe('options simulator', () => {
     ],
   };
 
+  it('sizes each leg by its own expiry’s lot when the data knows it (NSE moving to a new lot size)', async () => {
+    // Day lot 75 (near expiry); the later expiry's contracts already carry the new lot 65.
+    const twoExpiries = memory({
+      '2026-10-22': { spot: 22600, c: [[W1, 22600, 'CE', 120], [W2, 22600, 'CE', 180]] },
+      '2026-10-23': { spot: 22650, c: [[W1, 22600, 'CE', 140], [W2, 22600, 'CE', 200]] },
+    });
+    const r = await simulatePosition({
+      underlying: 'NIFTY', entryDate: '2026-10-22', broker: zerodha,
+      legs: [
+        { expiry: W1, strikePaise: 22600_00, kind: 'CE', side: 'SELL', lots: 1, entryPaise: 120_00 },
+        { expiry: W2, strikePaise: 22600_00, kind: 'CE', side: 'BUY', lots: 1, entryPaise: 180_00 },
+      ],
+    }, { ...twoExpiries, lotFor: async (_u, _d, expiry) => (expiry === W2 ? 65 : 75) });
+    expect(r.legs.map((l) => l.qty)).toEqual([75, 65]);
+    expect(r.days[1].grossPaise).toBe(-75 * (140_00 - 120_00) + 65 * (200_00 - 180_00));
+  });
+
   it('marks to NSE close each day, uses the settlement price on untraded days, and settles at intrinsic on expiry', async () => {
     const r = await simulatePosition(straddle, data);
     expect(r.days.map((d) => d.date)).toEqual(['2026-10-22', '2026-10-23', '2026-10-26', '2026-10-27']);

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fmt } from '@/lib/format';
 import { PARTICIPANTS, dayRows, fetchFii, nextDayRows, periodRows, type DayRow, type FiiResponse, type PeriodRow } from '@/lib/fii';
+import { InfoTip } from '@/components/info-tip';
 
 type Tab = 'Days' | 'Months' | 'Years' | 'FII vs next day';
 const TABS: Tab[] = ['Days', 'Months', 'Years', 'FII vs next day'];
@@ -66,7 +67,11 @@ export function FiiFootprints() {
         <select aria-label="From year" className="h-7 rounded-full bg-raised px-2 text-[12px] font-semibold" value={fromYear} onChange={(e) => setFromYear(e.target.value)}>
           <option value="">All years</option>{years.map((y) => <option key={y} value={y}>From {y}</option>)}
         </select>
-        <span className="ml-auto text-[11px] text-muted">Positions from {coverage.positions} · FII statistics from {coverage.stats} · NSDL flows from {coverage.flows} · history still downloading</span>
+        <span className="ml-auto"><InfoTip label="Sources and coverage">
+          <p>Positions from {coverage.positions} · FII statistics from {coverage.stats} · NSDL flows from {coverage.flows}. History is still downloading.</p>
+          <p>Sources: {data.sources.positions}; {data.sources.stats}; {data.sources.flows}.</p>
+          <p>Research data, not investment advice.</p>
+        </InfoTip></span>
       </div>
 
       <div className="max-lg:max-h-[75dvh] min-h-0 flex-1 overflow-auto px-3 pb-3">
@@ -131,9 +136,6 @@ export function FiiFootprints() {
             </table>
           </>
         )}
-        <p className="pt-2 text-[11px] text-muted">
-          Sources: {data.sources.positions}; {data.sources.stats}; {data.sources.flows}. Research data, not investment advice.
-        </p>
       </div>
     </div>
   );

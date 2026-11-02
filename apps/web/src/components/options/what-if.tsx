@@ -4,6 +4,7 @@ import { black76, legValue, scenarioIv, SPOT_VOL_FIT, type IvModel, type ModelLe
 import { computeOptionCharges, formatRupees, type BrokerProfile } from '@mtv/paper';
 import { fmt } from '@/lib/format';
 import { fmtDate, fmtStrike, type BuilderLeg } from '@/lib/options';
+import { InfoTip } from '@/components/info-tip';
 
 export type WhatIfState = { spotPaise: number; days: number; model: IvModel; shiftPts: number };
 
@@ -27,8 +28,10 @@ const RATE = 0.065;
 const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400_000).toISOString().slice(0, 10);
 
 /** "What if NIFTY is at X on date D?" — projected premium of every leg, P&L before and after charges, Greeks. */
-export function WhatIf({ state, onChange, legs, modelLegs, spotPaise, carry, maxDays, chainDate, broker, lot }: {
+export function WhatIf({ state, onChange, legs, modelLegs, spotPaise, carry, maxDays, chainDate, broker, lot, name = 'NIFTY' }: {
   state: WhatIfState;
+  /** The underlying, as shown in labels. */
+  name?: string;
   onChange: (s: WhatIfState) => void;
   legs: BuilderLeg[];
   modelLegs: ModelLeg[];
@@ -66,21 +69,27 @@ export function WhatIf({ state, onChange, legs, modelLegs, spotPaise, carry, max
     <div className="space-y-2 rounded-[12px] border border-line p-2.5">
       <div className="flex items-center gap-2">
         <h3 className="text-[13px] font-extrabold tracking-[-0.01em]">What if</h3>
-        <span className="text-[11px] text-muted">move NIFTY, the date or IV and see every premium</span>
+        <InfoTip label="About the what-if estimate">
+          <p>Move {name}, the date or IV and see every premium.</p>
+          <p>Model estimate: the price formula (Black-76) is exact for a given IV, but the IV after a move is set by the market.
+          Tested on NSE closing prices {SPOT_VOL_FIT.from} to {SPOT_VOL_FIT.to}, this model&rsquo;s next-day premium was typically within ±{acc.all[0]}% (1 in 10 off by {acc.all[1]}% or more);
+          on days NIFTY moved 1.5% or more, ±{acc.big[0]}% (1 in 10 off by {acc.big[1]}% or more).</p>
+          <p>After charges = entry plus squaring off at the projected prices.</p>
+        </InfoTip>
         <button type="button" onClick={() => onChange({ ...state, spotPaise, days: Math.min(1, maxDays), shiftPts: 0 })} className="ml-auto rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold text-muted hover:bg-raised">Reset</button>
       </div>
 
       <div className="grid grid-cols-1 items-center gap-x-3 gap-y-1.5 text-[12px] sm:grid-cols-[auto_1fr] sm:gap-y-2">
-        <span className="font-semibold">NIFTY at</span>
+        <span className="font-semibold">{name} at</span>
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <input type="number" aria-label="NIFTY level" className="num h-7 w-24 rounded-md border border-line px-1.5 text-right" value={Math.round(S / 100)}
+          <input type="number" aria-label={`${name} level`} className="num h-7 w-24 rounded-md border border-line px-1.5 text-right" value={Math.round(S / 100)}
             onChange={(e) => { const v = Number(e.target.value); if (v > 0) set({ spotPaise: Math.round(v * 100) }); }} />
           <span className={`num w-28 font-semibold ${move > 0 ? 'text-up' : move < 0 ? 'text-down' : 'text-muted'}`}>{move >= 0 ? '+' : '−'}{fmt(Math.abs(move) / 100)} ({movePct >= 0 ? '+' : '−'}{Math.abs(movePct).toFixed(2)}%)</span>
           {[-500, -250, -step, step, 250, 500].map((pts) => (
             <button key={pts} type="button" onClick={() => set({ spotPaise: S + pts * 100 })}
               className={`num rounded-full px-2 py-0.5 text-[11.5px] font-bold ${pts < 0 ? 'bg-down-soft text-down' : 'bg-up-soft text-up'}`}>{pts > 0 ? '+' : '−'}{Math.abs(pts)}</button>
           ))}
-          <input type="range" aria-label="NIFTY move" className="w-full min-w-0 flex-1 accent-ink sm:min-w-40" min={-10} max={10} step={0.1} value={Math.max(-10, Math.min(10, movePct))}
+          <input type="range" aria-label={`${name} move`} className="w-full min-w-0 flex-1 accent-ink sm:min-w-40" min={-10} max={10} step={0.1} value={Math.max(-10, Math.min(10, movePct))}
             onChange={(e) => set({ spotPaise: Math.round(spotPaise * (1 + Number(e.target.value) / 100)) })} />
         </div>
 
@@ -135,11 +144,6 @@ export function WhatIf({ state, onChange, legs, modelLegs, spotPaise, carry, max
         ))}
       </div>
       {missing && <p className="text-[11px] text-down">A leg has no IV (it did not trade), so it cannot be projected.</p>}
-      <p className="text-[11px] leading-snug text-muted">
-        Model estimate: the price formula (Black-76) is exact for a given IV, but the IV after a move is set by the market.
-        Tested on NSE closing prices {SPOT_VOL_FIT.from} to {SPOT_VOL_FIT.to}, this model&rsquo;s next-day premium was typically within ±{acc.all[0]}% (1 in 10 off by {acc.all[1]}% or more);
-        on days NIFTY moved 1.5% or more, ±{acc.big[0]}% (1 in 10 off by {acc.big[1]}% or more). After charges = entry plus squaring off at the projected prices.
-      </p>
     </div>
   );
 }

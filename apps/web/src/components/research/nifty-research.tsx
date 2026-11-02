@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fmt } from '@/lib/format';
 import { MOVE_BUCKETS, fetchNiftyDays, filterRows, patternTable, periodTable, type NiftyDaysResponse, type PeriodRow } from '@/lib/research';
+import { InfoTip } from '@/components/info-tip';
 
 type Tab = 'Years' | 'Months' | 'Patterns' | 'Days' | 'Events';
 const TABS: Tab[] = ['Years', 'Months', 'Patterns', 'Days', 'Events'];
@@ -80,7 +81,13 @@ export function NiftyResearch() {
             <button key={t} type="button" onClick={() => setTab(t)} className={`rounded-full px-3 py-1 text-[12px] font-bold ${t === tab ? 'bg-inverse text-on-inverse' : 'text-ink-2'}`}>{t}</button>
           ))}
         </div>
-        <span className="ml-auto text-[11.5px] text-muted">{data.source} · {data.from} → {data.to} · {data.rows.length} trading days</span>
+        <span className="ml-auto flex items-center gap-1.5 text-[11.5px] text-muted">{data.from} → {data.to} · {data.rows.length} days
+          <InfoTip label="About this table">
+            <p>Source: {data.source}.</p>
+            <p>Counts and the actual best and worst days, never averages. History grows as the NSE archive download continues back to 2011.</p>
+            <p>Research data, not investment advice.</p>
+          </InfoTip>
+        </span>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-[12px]">
@@ -178,9 +185,6 @@ export function NiftyResearch() {
             </tbody>
           </table>
         )}
-        <p className="pt-2 text-[11px] text-muted">
-          Counts and the actual best and worst days, never averages. History grows as the NSE archive download continues back to 2011. Research data, not investment advice.
-        </p>
       </div>
     </div>
   );

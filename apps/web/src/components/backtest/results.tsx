@@ -8,6 +8,7 @@ import { DOWN, UP } from '@/lib/chart/studies';
 import { DataCheck } from '@/components/terminal/data-check';
 import { CHART_COLORS, useTheme, type ChartColors } from '@/lib/theme';
 import { fmt, tfLabel } from '@/lib/format';
+import { InfoTip } from '@/components/info-tip';
 
 const IST = 5.5 * 3600;
 const toChart = (t: number) => (t + IST) as UTCTimestamp;
@@ -73,7 +74,11 @@ export function BacktestResults({ data }: { data: BacktestResponse }) {
   return (
     <div className="flex min-h-0 flex-col gap-2 overflow-auto p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-[15px] font-extrabold tracking-[-0.02em]">{data.instrument.symbol} · {tfLabel(tf)}</p>
+        <p className="flex items-center gap-1.5 text-[15px] font-extrabold tracking-[-0.02em]">{data.instrument.symbol} · {tfLabel(tf)}
+          <InfoTip label="About this backtest">
+            <p>Backtests use historical data and simulated fills at bar prices; real results differ (slippage, spreads, liquidity, data defects shown by the data check).</p>
+            <p>Past performance does not guarantee future results. Not investment advice.</p>
+          </InfoTip></p>
         <p className="num text-[12px] text-muted">{m.from ? istDateTime(m.from, intraday) : ''} → {m.to ? istDateTime(m.to, intraday) : ''} · {m.bars.toLocaleString('en-IN')} bars</p>
         <span className="flex-1" />
         <DataCheck quality={quality} delayed={data.status.delayed} />
@@ -136,10 +141,6 @@ export function BacktestResults({ data }: { data: BacktestResponse }) {
         ) : <p className="px-3 pb-4 text-[13px] text-muted">No trades: the entry rules never fired in this period.</p>}
       </div>
 
-      <p className="text-[11px] leading-snug text-muted">
-        Backtests use historical data and simulated fills at bar prices; real results differ (slippage, spreads, liquidity, data defects shown above).
-        Past performance does not guarantee future results. Not investment advice.
-      </p>
     </div>
   );
 }

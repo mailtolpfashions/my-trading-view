@@ -18,6 +18,27 @@ export function usePersisted<T>(key: string, initial: T): [T, (v: T) => void] {
   return [v, set];
 }
 
+/**
+ * A chart setting saved per symbol (`key@SYMBOL`). A symbol with nothing saved starts from the last value used on any
+ * chart (`key`), so a new symbol opens with your usual setup; changing it saves both. With `inherit` false a symbol
+ * with nothing saved starts from `initial`.
+ */
+export function useSymbolPersisted<T>(symbol: string, key: string, initial: T, inherit = true): [T, (v: T) => void] {
+  const own = `${key}@${symbol}`;
+  const [v, setV] = useState<T>(initial);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(own) ?? (inherit ? localStorage.getItem(key) : null);
+      setV(raw ? JSON.parse(raw) : initial);
+    } catch { /* storage unavailable */ }
+  }, [own, key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const set = useCallback((next: T) => {
+    setV(next);
+    try { localStorage.setItem(own, JSON.stringify(next)); localStorage.setItem(key, JSON.stringify(next)); } catch { /* storage unavailable */ }
+  }, [own, key]);
+  return [v, set];
+}
+
 export function readPersisted<T>(key: string, fallback: T): T {
   try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as T) : fallback; } catch { return fallback; }
 }

@@ -21,8 +21,10 @@ export function niceTicks(min: number, max: number, target: number): number[] {
  * Payoff diagram: P&L at the first expiry (solid; exact when every leg expires then, otherwise later legs are valued
  * with Black-76) and a model estimate for today (dashed). x = underlying price, y = P&L in rupees.
  */
-export function PayoffChart({ legs, spotPaise, rate, carry, atYears, exact, atLabel, breakevens, scenario, onScenarioSpot }: {
+export function PayoffChart({ legs, spotPaise, rate, carry, atYears, exact, atLabel, breakevens, scenario, onScenarioSpot, name = 'NIFTY' }: {
   legs: ModelLeg[];
+  /** The underlying, as shown in labels. */
+  name?: string;
   spotPaise: number;
   rate: number;
   /** Annual rate at which the forward exceeds spot (from the market's forward). */
@@ -141,7 +143,7 @@ export function PayoffChart({ legs, spotPaise, rate, carry, atYears, exact, atLa
       )}
       <div className="mt-1 flex gap-4 text-[11px] text-muted">
         <span><span className="mr-1 inline-block h-0.5 w-4 bg-ink align-middle" />{exact ? 'At expiry (exact)' : `At first expiry, ${atLabel} (later legs: Black-76 estimate)`}</span>
-        {what && scenario && <span><span className="mr-1 inline-block h-0.5 w-4 bg-accent-deep align-middle" />What if ({scenario.label}, chosen IV){onScenarioSpot ? ' · click or drag on the chart to move NIFTY' : ''}</span>}
+        {what && scenario && <span><span className="mr-1 inline-block h-0.5 w-4 bg-accent-deep align-middle" />What if ({scenario.label}, chosen IV){onScenarioSpot ? ` · click or drag on the chart to move ${name}` : ''}</span>}
         {today ? <span><span className="mr-1 inline-block h-0 w-4 border-t-2 border-dashed border-blue align-middle" />Today (model estimate, Black-76)</span> : <span>Today&rsquo;s curve needs IV for every leg</span>}
       </div>
     </div>

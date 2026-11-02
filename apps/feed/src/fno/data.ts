@@ -21,6 +21,10 @@ export const prismaOptionsData: OptionsData = {
     const rows = await prisma.fnoEod.findMany({ where: { underlying, date, expiry, kind }, select: { strikePaise: true, closePaise: true, settlePaise: true, traded: true } });
     return rows.map(quote);
   },
+  async lotFor(underlying, date, expiry) {
+    const r = await prisma.fnoDerivedDay.findUnique({ where: { date_underlying_expiry: { date, underlying, expiry } }, select: { lotSize: true } });
+    return r?.lotSize ?? null;
+  },
   async quotes(underlying, date, contracts: ContractKey[]) {
     if (!contracts.length) return new Map();
     const rows = await prisma.fnoEod.findMany({

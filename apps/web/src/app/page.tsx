@@ -14,17 +14,17 @@ const CTA = LANDING ? BETA_MAIL : '/dashboard';
 const MODULES = [
   { icon: FlaskConical, name: 'Backtesting', text: 'Test stock and option strategies on NSE history from 2011. Brokerage, STT, exchange fees, stamp duty and GST are charged at the rates that applied on each trade date.' },
   { icon: Calculator, name: 'Strategy builder', text: 'Payoff, Greeks and breakevens after charges. Margin is worked out from NSE’s SPAN file, including hedge benefit. Change the price, date or IV to see how the position moves.' },
-  { icon: Table2, name: 'Option chain', text: 'NIFTY and BANKNIFTY strikes with OI, IV and Greeks from NSE’s closing data.' },
+  { icon: Table2, name: 'Option chain', text: 'Every NSE F&O index and stock, with OI, OI change, IV and Greeks from NSE’s closing data.' },
   { icon: LineChart, name: 'Futures', text: 'Premium to spot, open interest, rollover and daily build-up from NSE’s F&O files.' },
   { icon: CandlestickChart, name: 'Charts', text: 'Daily, weekly and monthly charts with indicators and drawing tools.' },
   { icon: BarChart3, name: 'Research', text: 'NIFTY by day, month and year, FII positions, condition studies and a stock scanner.' },
-  { icon: History, name: 'Practice mode', text: 'Coming soon. Replay past days bar by bar and practise entries and exits.' },
+  { icon: History, name: 'Practice mode', text: 'Replay past days bar by bar and practise entries and exits on data at least 30 days old.' },
 ];
 
 const FAQ = [
   { q: 'Is this investment advice?', a: 'No. Nandibull is a research and backtesting tool. We don’t give buy or sell calls, and we are not registered with SEBI as an investment adviser or research analyst.' },
   { q: 'Are prices live?', a: 'No. All prices are NSE’s end-of-day data and each one shows its date. Use your broker for live prices and orders.' },
-  { q: 'How far back does the data go?', a: 'Stocks, indices, and NIFTY and BANKNIFTY futures and options go back to 2011.' },
+  { q: 'How far back does the data go?', a: 'Stocks, indices, and index futures and options go back to 2011. Stock futures and options start in July 2024.' },
   LANDING
     ? { q: 'Is it free?', a: 'It is free during the beta. Pricing will be announced at launch.' }
     : PAID_PLANS

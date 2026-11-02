@@ -59,7 +59,19 @@ export function parseConstituents(csv: string): string[] {
   return lines.slice(1).map((l) => l.split(',')[col]?.trim()).filter((s): s is string => !!s);
 }
 
-const LISTS = { 'NIFTY 50': 'ind_nifty50list.csv', 'NIFTY 500': 'ind_nifty500list.csv' } as const;
+/** NSE constituent files (nsearchives content/indices), keyed by the index name in NSE's daily index-close file. */
+export const LISTS = {
+  'NIFTY 50': 'ind_nifty50list.csv', 'NIFTY NEXT 50': 'ind_niftynext50list.csv', 'NIFTY 100': 'ind_nifty100list.csv', 'NIFTY 200': 'ind_nifty200list.csv',
+  'NIFTY 500': 'ind_nifty500list.csv', 'NIFTY MIDCAP 100': 'ind_niftymidcap100list.csv', 'NIFTY MIDCAP 150': 'ind_niftymidcap150list.csv',
+  'NIFTY SMALLCAP 100': 'ind_niftysmallcap100list.csv', 'NIFTY SMALLCAP 250': 'ind_niftysmallcap250list.csv', 'NIFTY MIDCAP SELECT': 'ind_niftymidcapselect_list.csv',
+  'NIFTY BANK': 'ind_niftybanklist.csv', 'NIFTY FINANCIAL SERVICES': 'ind_niftyfinancelist.csv', 'NIFTY PRIVATE BANK': 'ind_nifty_privatebanklist.csv',
+  'NIFTY PSU BANK': 'ind_niftypsubanklist.csv', 'NIFTY IT': 'ind_niftyitlist.csv', 'NIFTY AUTO': 'ind_niftyautolist.csv', 'NIFTY FMCG': 'ind_niftyfmcglist.csv',
+  'NIFTY METAL': 'ind_niftymetallist.csv', 'NIFTY PHARMA': 'ind_niftypharmalist.csv', 'NIFTY HEALTHCARE INDEX': 'ind_niftyhealthcarelist.csv',
+  'NIFTY REALTY': 'ind_niftyrealtylist.csv', 'NIFTY MEDIA': 'ind_niftymedialist.csv', 'NIFTY ENERGY': 'ind_niftyenergylist.csv', 'NIFTY OIL & GAS': 'ind_niftyoilgaslist.csv',
+  'NIFTY CONSUMER DURABLES': 'ind_niftyconsumerdurableslist.csv', 'NIFTY INFRASTRUCTURE': 'ind_niftyinfralist.csv', 'NIFTY COMMODITIES': 'ind_niftycommoditieslist.csv',
+  'NIFTY PSE': 'ind_niftypselist.csv', 'NIFTY CPSE': 'ind_niftycpselist.csv', 'NIFTY MNC': 'ind_niftymnclist.csv', 'NIFTY INDIA CONSUMPTION': 'ind_niftyconsumptionlist.csv',
+  'NIFTY INDIA DEFENCE': 'ind_niftyindiadefence_list.csv',
+} as const;
 export type IndexList = keyof typeof LISTS;
 const CACHE = path.resolve(import.meta.dirname, '../../.cache/indices');
 const DAY_MS = 86400_000;

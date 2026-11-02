@@ -12,7 +12,7 @@ import type {
   Coordinate, IChartApi, IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesApi, ISeriesPrimitive, ISeriesPrimitiveAxisView,
   Logical, PrimitivePaneViewZOrder, SeriesAttachedParameter, SeriesType, Time,
 } from 'lightweight-charts';
-import { FIB_LEVELS, channelOffset, fibPrice, timeToLogical, type Drawing, type Placed, type Point, type XY } from './model';
+import { FIB_LEVELS, channelOffset, fibPrice, isPosition, mirroredStop, timeToLogical, type Drawing, type Placed, type Point, type XY } from './model';
 
 export type AlertLine = { price: number; label: string };
 export type Measure = { from: Point; to: Point; text: string };
@@ -30,7 +30,15 @@ type LayerState = {
 };
 
 const AMBER = '#f59a0b';
-const FONT = '600 11.5px "Plus Jakarta Sans", system-ui, sans-serif';
+/** Canvas text can't read CSS variables: resolve next/font's generated name for Outfit once. */
+let family: string | null = null;
+const font = (weight: number, size: number) => {
+  family ??= (typeof document !== 'undefined' && getComputedStyle(document.documentElement).getPropertyValue('--font-outfit').trim()) || 'system-ui';
+  return `${weight} ${size}px ${family}, system-ui, sans-serif`;
+};
+const UP_COL = '#0a9b76', DOWN_COL = '#e5484d';
+const fmtSigned = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const pct = (v: number, base: number) => (base ? `${v >= 0 ? '+' : '−'}${Math.abs((v / base) * 100).toFixed(2)}%` : '');
 const fmtPrice = (p: number) => p.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const IST = 5.5 * 3600;
 /** Axis label for a drawing's time; date only on daily and longer bars. */
@@ -70,7 +78,7 @@ class LayerRenderer implements IPrimitivePaneRenderer {
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
       const W = mediaSize.width, H = mediaSize.height;
       ctx.save();
-      ctx.font = FONT;
+      ctx.font = font(600, 11.5);
       ctx.lineCap = 'round';
       for (const al of this.layer.state.alerts) {
         const y = this.layer.priceY(al.price);
@@ -84,13 +92,13 @@ class LayerRenderer implements IPrimitivePaneRenderer {
       }
       const ink = this.layer.state.ink;
       const all = [...this.layer.state.drawings, ...(this.layer.state.preview ? [this.layer.state.preview] : [])].map((d) => (d.color === '#121212' ? { ...d, color: ink } : d));
-      for (const pl of this.layer.placeAll(all)) drawOne(ctx, pl, W, H, pl.d.id === this.layer.state.selected);
+      for (const pl of this.layer.placeAll(all)) drawOne(ctx, pl, W, H, pl.d.id === this.layer.state.selected, this.layer.state.times);
       const m = this.layer.state.measure;
       if (m) {
         const a = this.layer.pointXY(m.from), b = this.layer.pointXY(m.to);
         if (a && b) {
           const up = m.to.price >= m.from.price;
-          const col = up ? '#089981' : '#f23645';
+          const col = up ? UP_COL : DOWN_COL;
           ctx.fillStyle = withAlpha(col, 0.14);
           ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
           ctx.strokeStyle = col; ctx.lineWidth = 1;
@@ -113,7 +121,7 @@ function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number
   ctx.fillText(text, left + 6, y + 0.5);
 }
 
-function drawOne(ctx: CanvasRenderingContext2D, { d, a, b, levels, a2, b2, c }: Placed, W: number, H: number, selected: boolean) {
+function drawOne(ctx: CanvasRenderingContext2D, { d, a, b, levels, a2, b2, c }: Placed, W: number, H: number, selected: boolean, times: number[]) {
   ctx.strokeStyle = d.color;
   ctx.lineWidth = selected ? 2.5 : 2;
   switch (d.kind) {
@@ -131,6 +139,63 @@ function drawOne(ctx: CanvasRenderingContext2D, { d, a, b, levels, a2, b2, c }: 
     case 'hline':
       ctx.beginPath(); ctx.moveTo(0, a.y); ctx.lineTo(W, a.y); ctx.stroke();
       break;
+    case 'hray':
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(W, a.y); ctx.stroke();
+      break;
+    case 'arrow': {
+      if (!b) break;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      const ang = Math.atan2(b.y - a.y, b.x - a.x), len = 12;
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - len * Math.cos(ang - 0.45), b.y - len * Math.sin(ang - 0.45));
+      ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - len * Math.cos(ang + 0.45), b.y - len * Math.sin(ang + 0.45));
+      ctx.stroke();
+      break;
+    }
+    case 'prange':
+    case 'drange': {
+      if (!b || !d.p2) break;
+      const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+      const up = d.p2.price >= d.p1.price;
+      const col = d.kind === 'prange' ? (up ? UP_COL : DOWN_COL) : d.color;
+      ctx.fillStyle = withAlpha(col, 0.12); ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+      ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+      if (d.kind === 'prange') {
+        ctx.beginPath(); ctx.moveTo(x0, a.y); ctx.lineTo(x1, a.y); ctx.moveTo(x0, b.y); ctx.lineTo(x1, b.y); ctx.stroke();
+        const mx = (x0 + x1) / 2;
+        ctx.beginPath(); ctx.moveTo(mx, a.y); ctx.lineTo(mx, b.y); ctx.stroke();
+        const dp = d.p2.price - d.p1.price;
+        label(ctx, `${fmtSigned(dp)} (${pct(dp, d.p1.price)})`, mx, up ? y0 - 14 : y1 + 14, col, '#ffffff', 'center');
+      } else {
+        ctx.beginPath(); ctx.moveTo(a.x, y0); ctx.lineTo(a.x, y1); ctx.moveTo(b.x, y0); ctx.lineTo(b.x, y1); ctx.stroke();
+        const my = (y0 + y1) / 2;
+        ctx.beginPath(); ctx.moveTo(a.x, my); ctx.lineTo(b.x, my); ctx.stroke();
+        const bars = Math.round(Math.abs((timeToLogical(times, d.p2.time) ?? 0) - (timeToLogical(times, d.p1.time) ?? 0)));
+        const days = Math.round(Math.abs(d.p2.time - d.p1.time) / 86400);
+        label(ctx, `${bars} bars · ${days} days`, (x0 + x1) / 2, y1 + 14, col, '#ffffff', 'center');
+      }
+      break;
+    }
+    case 'long':
+    case 'short': {
+      if (!b || !d.p2) break;
+      const stop = d.p3 ?? mirroredStop(d.p1, d.p2);
+      const sy = c?.y ?? a.y + (a.y - b.y);
+      const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x, a.x + 60);
+      ctx.fillStyle = withAlpha(UP_COL, 0.16); ctx.fillRect(x0, Math.min(a.y, b.y), x1 - x0, Math.abs(b.y - a.y));
+      ctx.fillStyle = withAlpha(DOWN_COL, 0.16); ctx.fillRect(x0, Math.min(a.y, sy), x1 - x0, Math.abs(sy - a.y));
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = UP_COL; ctx.beginPath(); ctx.moveTo(x0, b.y); ctx.lineTo(x1, b.y); ctx.stroke();
+      ctx.strokeStyle = DOWN_COL; ctx.beginPath(); ctx.moveTo(x0, sy); ctx.lineTo(x1, sy); ctx.stroke();
+      ctx.strokeStyle = d.color; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x0, a.y); ctx.lineTo(x1, a.y); ctx.stroke();
+      const reward = d.p2.price - d.p1.price, risk = stop.price - d.p1.price;
+      const rr = risk ? Math.abs(reward / risk) : 0;
+      const mx = (x0 + x1) / 2;
+      label(ctx, `Target ${fmtPrice(d.p2.price)} (${pct(reward, d.p1.price)})`, mx, b.y + (b.y < a.y ? -14 : 14), UP_COL, '#ffffff', 'center');
+      label(ctx, `Stop ${fmtPrice(stop.price)} (${pct(risk, d.p1.price)})`, mx, sy + (sy < a.y ? -14 : 14), DOWN_COL, '#ffffff', 'center');
+      label(ctx, `${d.kind === 'long' ? 'Long' : 'Short'} ${fmtPrice(d.p1.price)} · R:R ${rr.toFixed(2)}`, mx, a.y, d.color, '#ffffff', 'center');
+      break;
+    }
     case 'vline':
       ctx.beginPath(); ctx.moveTo(a.x, 0); ctx.lineTo(a.x, H); ctx.stroke();
       break;
@@ -175,15 +240,16 @@ function drawOne(ctx: CanvasRenderingContext2D, { d, a, b, levels, a2, b2, c }: 
       break;
     }
     case 'text':
-      ctx.font = '600 13px "Plus Jakarta Sans", system-ui, sans-serif';
+      ctx.font = font(600, 13);
       ctx.fillStyle = d.color;
       ctx.textBaseline = 'middle';
       ctx.fillText(d.text ?? '', a.x, a.y);
       if (selected) { ctx.lineWidth = 1; ctx.strokeRect(a.x - 4, a.y - 11, ctx.measureText(d.text ?? '').width + 8, 22); }
-      ctx.font = FONT;
+      ctx.font = font(600, 11.5);
       break;
   }
   if (selected && d.kind !== 'hline' && d.kind !== 'vline' && d.kind !== 'text') {
+    if (d.kind === 'hray') b = c = undefined;
     ctx.strokeStyle = d.color;
     for (const p of [a, b, c]) if (p) {
       ctx.fillStyle = '#ffffff'; ctx.lineWidth = 1.5;
@@ -224,7 +290,7 @@ export class DrawingLayer extends PluginBase {
   priceAxisViews() {
     const out: ISeriesPrimitiveAxisView[] = [];
     for (const d of this.state.drawings) {
-      if (d.kind !== 'hline' && !(d.id === this.state.selected && (d.kind === 'trend' || d.kind === 'ray' || d.kind === 'rect' || d.kind === 'fib' || d.kind === 'channel'))) continue;
+      if (d.kind !== 'hline' && d.kind !== 'hray' && !(d.id === this.state.selected && d.kind !== 'vline' && d.kind !== 'text')) continue;
       for (const p of [d.p1, d.p2]) if (p) { const y = this.priceY(p.price); if (y != null) out.push(new AxisLabel(y as Coordinate, fmtPrice(p.price), d.color)); }
     }
     for (const al of this.state.alerts) { const y = this.priceY(al.price); if (y != null) out.push(new AxisLabel(y as Coordinate, fmtPrice(al.price), AMBER, '#2b1a00')); }
@@ -274,6 +340,7 @@ export class DrawingLayer extends PluginBase {
         pl.levels = [];
         for (const level of FIB_LEVELS) { const y = this.priceY(fibPrice(d.p1, d.p2, level)); if (y != null) pl.levels.push({ level, y }); }
       }
+      if (isPosition(d.kind) && d.p2) pl.c = this.pointXY({ time: d.p2.time, price: (d.p3 ?? mirroredStop(d.p1, d.p2)).price }) ?? undefined; // stop handle
       if (d.kind === 'channel' && d.p2 && d.p3) {
         const off = channelOffset(d.p1, d.p2, d.p3);
         pl.a2 = this.pointXY({ time: d.p1.time, price: d.p1.price + off }) ?? undefined;

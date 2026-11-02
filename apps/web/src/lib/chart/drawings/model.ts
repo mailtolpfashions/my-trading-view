@@ -4,14 +4,23 @@
 // by interpolating between the bars around it, so a line drawn on a 5-minute chart lands on the same moment on a
 // daily chart, and points beyond the last bar extend at the chart's bar interval.
 
-export type Tool = 'cursor' | 'trend' | 'ray' | 'hline' | 'vline' | 'rect' | 'fib' | 'channel' | 'text' | 'measure' | 'alert';
-export type DrawingKind = 'trend' | 'ray' | 'hline' | 'vline' | 'rect' | 'fib' | 'channel' | 'text';
+export type Tool = 'cursor' | 'trend' | 'ray' | 'hline' | 'hray' | 'vline' | 'arrow' | 'rect' | 'prange' | 'drange' | 'long' | 'short' | 'fib' | 'channel' | 'text' | 'measure' | 'alert';
+export type DrawingKind = 'trend' | 'ray' | 'hline' | 'hray' | 'vline' | 'arrow' | 'rect' | 'prange' | 'drange' | 'long' | 'short' | 'fib' | 'channel' | 'text';
 export type Point = { time: number; price: number };
-/** `p3` (parallel channel only): a point on the parallel line, setting the channel's width. */
+/**
+ * `p3`: for a parallel channel, a point on the parallel line (the channel's width); for a long or short position,
+ * the stop (p1 is the entry, p2 the target).
+ */
 export type Drawing = { id: string; kind: DrawingKind; p1: Point; p2?: Point; p3?: Point; text?: string; color: string };
 
 /** Tools that need two clicks (start and end). The parallel channel takes a third click for its width. */
-export const TWO_POINT: Tool[] = ['trend', 'ray', 'rect', 'fib', 'measure'];
+export const TWO_POINT: Tool[] = ['trend', 'ray', 'arrow', 'rect', 'prange', 'drange', 'long', 'short', 'fib', 'measure'];
+/** Tools placed with one click. */
+export const ONE_POINT: Tool[] = ['hline', 'hray', 'vline'];
+
+/** A position's stop when only entry and target are set: the same distance on the other side (risk = reward). */
+export const mirroredStop = (entry: Point, target: Point): Point => ({ time: target.time, price: entry.price - (target.price - entry.price) });
+export const isPosition = (k: DrawingKind) => k === 'long' || k === 'short';
 
 /** TradingView's default Fibonacci retracement levels: 1 at the first point, 0 at the second. */
 export const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618, 2.618, 3.618, 4.236];
@@ -70,6 +79,7 @@ export function hitTest(placed: Placed[], p: XY, width: number, tol = 6): { id: 
   for (let i = placed.length - 1; i >= 0; i--) {
     const { d, a, b, levels, a2, b2, c } = placed[i];
     if (Math.hypot(p.x - a.x, p.y - a.y) <= tol + 2 && d.kind !== 'hline' && d.kind !== 'vline') return { id: d.id, handle: 'p1' };
+    const box = (ys: number[]) => b && p.x >= Math.min(a.x, b.x) - tol && p.x <= Math.max(a.x, b.x) + tol && p.y >= Math.min(...ys) - tol && p.y <= Math.max(...ys) + tol;
     if (b && Math.hypot(p.x - b.x, p.y - b.y) <= tol + 2) return { id: d.id, handle: 'p2' };
     if (c && Math.hypot(p.x - c.x, p.y - c.y) <= tol + 2) return { id: d.id, handle: 'p3' };
     const xIn = (u: XY, v: XY) => p.x >= Math.min(u.x, v.x) - tol && p.x <= Math.max(u.x, v.x) + tol;
@@ -78,6 +88,9 @@ export function hitTest(placed: Placed[], p: XY, width: number, tol = 6): { id: 
       : d.kind === 'channel' && b && a2 && b2 ? distanceToSegment(p, a, b) <= tol || distanceToSegment(p, a2, b2) <= tol
         || (xIn(a, b) && (() => { const t = (p.x - a.x) / (b.x - a.x || 1); const y1 = a.y + t * (b.y - a.y), y2 = a2.y + t * (b2.y - a2.y); return p.y >= Math.min(y1, y2) && p.y <= Math.max(y1, y2); })())
       : d.kind === 'hline' ? Math.abs(p.y - a.y) <= tol && p.x <= width
+      : d.kind === 'hray' ? Math.abs(p.y - a.y) <= tol && p.x >= a.x - tol && p.x <= width
+      : (d.kind === 'prange' || d.kind === 'drange') && b ? box([a.y, b.y])
+      : (d.kind === 'long' || d.kind === 'short') && b ? box([a.y, b.y, c?.y ?? a.y + (a.y - b.y)])
       : d.kind === 'vline' ? Math.abs(p.x - a.x) <= tol
       : d.kind === 'text' ? p.x >= a.x - tol && p.x <= a.x + Math.max(40, (d.text?.length ?? 0) * 7.5) && Math.abs(p.y - a.y) <= 12
       : d.kind === 'rect' && b ? p.x >= Math.min(a.x, b.x) - tol && p.x <= Math.max(a.x, b.x) + tol && p.y >= Math.min(a.y, b.y) - tol && p.y <= Math.max(a.y, b.y) + tol

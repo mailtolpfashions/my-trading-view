@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, CandlestickChart, FlaskConical, Layers, Microscope, Plus, TrendingDown, TrendingUp, X } from 'lucide-react';
+import { Activity, ArrowRight, BarChart3, CandlestickChart, FlaskConical, GraduationCap, Layers, Microscope, Plus, TrendingDown, TrendingUp, Wrench, X } from 'lucide-react';
+import { InfoTip } from '@/components/info-tip';
+import { ARTICLES } from '@/lib/learn';
+import { FUTURES_TOOLS, MARKET_TOOLS, OPTION_TOOLS, UTILITY_TOOLS } from '@/lib/tools';
+import { fetchCandles } from '@/lib/feed';
 import { fetchOverview, type Breadth, type FiiPositions, type IndexCard, type Overview, type StockMove } from '@/lib/dashboard';
 import { fmt } from '@/lib/format';
 import { fmtDate } from '@/lib/options';
@@ -39,7 +43,14 @@ export function Dashboard() {
         <div className="flex flex-wrap items-end gap-3 pt-3">
           <div>
             <h1 className="text-[30px] leading-tight font-bold tracking-[-0.03em] sm:text-[34px]">Market overview</h1>
-            <p className="mt-1 text-[14px] text-muted">{data ? `NSE closing data for ${fmtDate(data.asOf)}` : error ? '' : 'Loading…'}</p>
+            <p className="mt-1 flex items-center gap-1.5 text-[14px] text-muted">{data ? `NSE closing data for ${fmtDate(data.asOf)}` : error ? '' : 'Loading…'}
+              {data && (
+                <InfoTip label="Sources">
+                  <p>Sources: {Object.values(data.sources).join('; ')}.</p>
+                  <p>NIFTY 50 and NIFTY 500 use NSE&rsquo;s current constituent lists. Research data, not investment advice.</p>
+                </InfoTip>
+              )}
+            </p>
           </div>
           <div className="flex w-full gap-2.5 sm:ml-auto sm:w-auto">
             <Link href={chartHref('NIFTY')} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-[12px] bg-inverse px-5 text-[14px] font-semibold text-on-inverse hover:bg-inverse-hover sm:flex-none">
@@ -78,12 +89,49 @@ export function Dashboard() {
           </div>
         </div>
 
-        {data && (
-          <p className="text-[12px] leading-snug text-muted">
-            Sources: {Object.values(data.sources).join('; ')}. NIFTY 50 and NIFTY 500 use NSE&rsquo;s current constituent lists. Research data, not investment advice.
-          </p>
-        )}
+        <AllTools />
       </div>
+    </div>
+  );
+}
+
+const SPARK_DAYS = 63; // about three months of sessions
+
+/** The last ~3 months of daily closes as a small area chart: green if the index is up over the period, red if down. */
+function Sparkline({ symbol }: { symbol: string }) {
+  const [closes, setCloses] = useState<{ date: string; close: number }[] | null>(null);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetchCandles(symbol, 'D', ctrl.signal).then(
+      (r) => setCloses(r.candles.slice(-SPARK_DAYS).map((k) => ({ date: new Date((k.time + 5.5 * 3600) * 1000).toISOString().slice(0, 10), close: k.close }))),
+      () => { if (!ctrl.signal.aborted) setCloses([]); },
+    );
+    return () => ctrl.abort();
+  }, [symbol]);
+  if (!closes) return <div className="h-12 w-full animate-pulse rounded-[8px] bg-raised" aria-hidden="true" />;
+  if (closes.length < 2) return <div className="h-12" aria-hidden="true" />;
+  const W = 160, H = 48, v = closes.map((x) => x.close);
+  const lo = Math.min(...v), hi = Math.max(...v), r = hi - lo || 1;
+  const pts = v.map((y, i) => [(i / (v.length - 1)) * W, 3 + (1 - (y - lo) / r) * (H - 6)] as const);
+  const line = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join('');
+  const change = ((v[v.length - 1] - v[0]) / v[0]) * 100;
+  const color = change >= 0 ? 'var(--color-up)' : 'var(--color-down)';
+  const id = `sp-${symbol}`;
+  return (
+    <div className="relative">
+      <span className={`num absolute -top-4 right-0 text-[10.5px] font-semibold ${change >= 0 ? 'text-up' : 'text-down'}`}>3M {change >= 0 ? '+' : '−'}{Math.abs(change).toFixed(1)}%</span>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-12 w-full" role="img"
+        aria-label={`${closes[0].date} to ${closes[closes.length - 1].date}: ${change >= 0 ? 'up' : 'down'} ${Math.abs(change).toFixed(1)}%`}>
+        <title>{`3 months (${closes[0].date} → ${closes[closes.length - 1].date}): ${change >= 0 ? '+' : '−'}${Math.abs(change).toFixed(2)}%`}</title>
+        <defs>
+          <linearGradient id={id} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stopColor={color} stopOpacity="0.22" />
+            <stop offset="1" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={`${line}L${W},${H}L0,${H}Z`} fill={`url(#${id})`} />
+        <path d={line} fill="none" stroke={color} strokeWidth="1.8" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+      </svg>
     </div>
   );
 }
@@ -98,11 +146,16 @@ function IndexTile({ c }: { c: IndexCard }) {
         <span className="truncate text-[15.5px] font-semibold">{PULSE_NAMES[c.symbol] ?? c.symbol}</span>
         <span className="ml-auto text-[11px] font-semibold text-muted">NSE</span>
       </div>
-      <p className="num text-[19px] font-bold tracking-[-0.02em] sm:text-[23px]">{fmt(c.close)}</p>
-      <p className={`num mt-1 flex flex-wrap items-center gap-x-1.5 text-[12px] font-semibold sm:text-[13px] ${tone(c.change)}`}>
-        {c.change != null && <Trend size={15} aria-hidden="true" />}
-        {c.change == null ? '—' : `${signed(c.change)} (${signed(c.changePct!)}%)`}
-      </p>
+      <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+        <div className="min-w-0 shrink-0">
+          <p className="num text-[19px] font-bold tracking-[-0.02em] sm:text-[23px]">{fmt(c.close)}</p>
+          <p className={`num mt-1 flex flex-wrap items-center gap-x-1.5 text-[12px] font-semibold sm:text-[13px] ${tone(c.change)}`}>
+            {c.change != null && <Trend size={15} aria-hidden="true" />}
+            {c.change == null ? '—' : `${signed(c.change)} (${signed(c.changePct!)}%)`}
+          </p>
+        </div>
+        <div className="min-w-[110px] flex-1 basis-[110px]"><Sparkline symbol={c.symbol} /></div>
+      </div>
       <div className="mt-3" title={`Day range ${fmt(c.low)} – ${fmt(c.high)}, closed at ${fmt(c.close)}`}>
         <div className="relative h-1.5 rounded-full bg-raised">
           <span className="absolute top-1/2 h-3.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent" style={{ left: `${at}%` }} />
@@ -243,6 +296,38 @@ function QuickStart() {
             </span>
             <ArrowRight size={15} className="ml-auto shrink-0 text-muted" />
           </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Every tool, by group: the most used ones as links, and a link to the rest. */
+function AllTools() {
+  const groups = [
+    { title: 'Option tools', icon: BarChart3, href: '/options/open-interest', count: OPTION_TOOLS.length, links: ['open-interest', 'pcr', 'max-pain', 'iv', 'gex', 'straddle'].map((slug) => ({ href: `/options/${slug}`, label: OPTION_TOOLS.find((t) => t.slug === slug)!.label })) },
+    { title: 'Options & simulator', icon: Layers, href: '/options', count: 3, links: [{ href: '/options', label: 'Option chain' }, { href: '/options', label: 'Strategy builder' }, { href: '/backtest/options', label: 'Options backtest' }] },
+    { title: 'Futures', icon: TrendingUp, href: '/futures', count: FUTURES_TOOLS.length + 1, links: [{ href: '/futures', label: 'Futures by day' }, ...FUTURES_TOOLS.map((t) => ({ href: `/futures/${t.slug}`, label: t.label }))] },
+    { title: 'Market', icon: Activity, href: '/market/rrg', count: MARKET_TOOLS.length + 1, links: [...MARKET_TOOLS.map((t) => ({ href: `/market/${t.slug}`, label: t.label })), { href: '/research/fii', label: 'FII footprints' }] },
+    { title: 'Tools', icon: Wrench, href: '/tools/lot-size', count: UTILITY_TOOLS.length, links: UTILITY_TOOLS.map((t) => ({ href: `/tools/${t.slug}`, label: t.label })) },
+    { title: 'Learn', icon: GraduationCap, href: '/learn', count: ARTICLES.length, links: ARTICLES.slice(0, 4).map((a) => ({ href: `/learn/${a.slug}`, label: a.title })) },
+  ];
+  return (
+    <section aria-labelledby="all-tools">
+      <h2 id="all-tools" className="mb-3 text-[17px] font-semibold">All tools</h2>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {groups.map(({ title, icon: Icon, href, count, links }) => (
+          <div key={title} className="panel flex flex-col p-5">
+            <Link href={href} className="group flex items-center gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] bg-accent-soft text-accent-deep"><Icon size={18} aria-hidden="true" /></span>
+              <span className="text-[15px] font-semibold group-hover:text-accent-deep">{title}</span>
+              <span className="ml-auto text-[12px] text-muted">{count}</span>
+              <ArrowRight size={15} className="text-muted" aria-hidden="true" />
+            </Link>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {links.map((l) => <Link key={l.label} href={l.href} className="rounded-full bg-raised px-3 py-1 text-[12.5px] font-semibold text-ink-2 hover:bg-accent-soft hover:text-accent-deep">{l.label}</Link>)}
+            </div>
+          </div>
         ))}
       </div>
     </section>

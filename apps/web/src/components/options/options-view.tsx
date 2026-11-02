@@ -5,19 +5,25 @@ import { Minus, Plus, Trash2 } from 'lucide-react';
 import { legValue, pnlAt, summarise, summariseCurve, summariseNet, yearsToExpiry, type Leg, type ModelLeg } from '@mtv/options';
 import { BROKERS, brokerById, computeOptionCharges, expirySettlementCharges, formatRupees, toPaise, type Charges } from '@mtv/paper';
 import { fmt } from '@/lib/format';
-import { TEMPLATES, buildSmile, fetchChain, fetchFnoRange, fetchMargin, fmtDate, fmtStrike, legGreeks, type BuilderLeg, type Chain, type ChainSide, type MarginResponse } from '@/lib/options';
+import { TEMPLATES, TEMPLATE_GROUPS, buildSmile, fetchChain, fetchFnoRange, fetchMargin, fmtDate, fmtStrike, legGreeks, type BuilderLeg, type Chain, type ChainSide, type MarginResponse } from '@/lib/options';
 import { PayoffChart } from './payoff-chart';
 import { WhatIf, type WhatIfState } from './what-if';
 import { Simulator } from './simulator';
+import { TemplateGallery } from './template-gallery';
+import { InfoTip } from '@/components/info-tip';
 import { SPOT_VOL_FIT } from '@mtv/options';
+import { UnderlyingPicker } from '@/components/tools/controls';
+import { TradingDatePicker } from '@/components/tools/trading-date-picker';
 
 const RATE = 0.065; // matches the feed's model rate; affects estimates only
-const STEP: Record<string, number> = { NIFTY: 50_00, BANKNIFTY: 100_00 };
 const VISIBLE_STEPS = 14;
 let seq = 0;
 
 export function OptionsView() {
-  const [underlying, setUnderlying] = useState<'NIFTY' | 'BANKNIFTY'>('NIFTY');
+  const [underlying, setUnderlying] = useState('NIFTY');
+  // What the chain shows beside the premiums: open interest, its change, or the Greeks.
+  const [oiView, setOiView] = useState<'oi' | 'change' | 'greeks'>('oi');
+  const greeksView = oiView === 'greeks';
   const [expiry, setExpiry] = useState<string | undefined>();
   // "As of": a past trading day to build on (the simulator follows it from there); undefined = the latest day.
   const [asOfDate, setAsOfDate] = useState<string | undefined>();
@@ -54,6 +60,8 @@ export function OptionsView() {
   useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(null), 3000); return () => clearTimeout(t); }, [notice]);
 
   const lot = chain?.lotSize ?? null;
+  /** Strike interval near the money, from the strikes NSE lists for this chain. */
+  const step = chain?.strikeStepPaise ?? 0;
   const side = (strike: number, kind: 'CE' | 'PE'): ChainSide | null => chain?.rows.find((r) => r.strikePaise === strike)?.[kind] ?? null;
 
   function addLeg(kind: 'CE' | 'PE', s: 'BUY' | 'SELL', strike: number) {
@@ -82,7 +90,8 @@ export function OptionsView() {
     if (!c) {
       try { c = await fetchChain(underlying, l.expiry, chain?.date); chainCache.current.set(key, c); } catch { return setNotice(`Could not load the ${fmtDate(l.expiry)} chain.`); }
     }
-    const strike = l.strikePaise + dir * STEP[underlying];
+    if (!step) return;
+    const strike = l.strikePaise + dir * step;
     const q = c.rows.find((r) => r.strikePaise === strike)?.[l.kind];
     if (!q) return setNotice(`${fmtStrike(strike)} ${l.kind} is not listed for ${fmtDate(l.expiry)}.`);
     setLegs((list) => list.map((x) => (x.id === id ? { ...x, strikePaise: strike, pricePaise: q.closePaise, iv: q.iv, greeks: legGreeks(q) } : x)));
@@ -103,10 +112,11 @@ export function OptionsView() {
         try { chains.set(off, await fetchChain(underlying, exp, chain.date)); } catch { return setNotice(`Could not load the ${fmtDate(exp)} chain.`); }
       }
       const c = chains.get(off)!;
-      const strike = chain.atmStrikePaise + l.offset * STEP[underlying];
+      if (!step) return setNotice('Strike interval unknown for this chain.');
+      const strike = chain.atmStrikePaise + l.offset * step;
       const q = c.rows.find((r) => r.strikePaise === strike)?.[l.kind];
       if (!q) return setNotice(`${fmtStrike(strike)} ${l.kind} is not listed for ${fmtDate(c.expiry)}.`);
-      out.push({ id: `l${++seq}`, kind: l.kind, side: l.side, strikePaise: strike, expiry: c.expiry, lots: 1, pricePaise: q.closePaise, iv: q.iv, greeks: legGreeks(q) });
+      out.push({ id: `l${++seq}`, kind: l.kind, side: l.side, strikePaise: strike, expiry: c.expiry, lots: l.lots ?? 1, pricePaise: q.closePaise, iv: q.iv, greeks: legGreeks(q) });
     }
     setLegs(out);
     setTemplate({ id, legs: out });
@@ -189,20 +199,28 @@ export function OptionsView() {
   const m = margin.data;
 
   const visible = chain?.atmStrikePaise != null
-    ? chain.rows.filter((r) => Math.abs(r.strikePaise - chain.atmStrikePaise!) <= VISIBLE_STEPS * STEP[underlying])
+    ? chain.rows.filter((r) => Math.abs(r.strikePaise - chain.atmStrikePaise!) <= VISIBLE_STEPS * (step || Infinity))
     : chain?.rows ?? [];
   const scroller = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = scroller.current, row = el?.querySelector<HTMLElement>('[data-spot-row]');
     if (el && row) el.scrollTop = row.offsetTop - el.clientHeight / 2;
   }, [chain]);
-  const maxOi = Math.max(1, ...visible.flatMap((r) => [r.CE?.oi ?? 0, r.PE?.oi ?? 0]));
+  const oiOf = (q: ChainSide) => (oiView === 'oi' ? q.oi : q.oiChange ?? 0);
+  const maxOi = Math.max(1, ...visible.flatMap((r) => [Math.abs(r.CE ? oiOf(r.CE) : 0), Math.abs(r.PE ? oiOf(r.PE) : 0)]));
   const spot = chain?.spotPaise ?? null;
 
   const cell = (q: ChainSide | null, kind: 'CE' | 'PE', strike: number) => {
-    if (!q) return <td colSpan={3} className="text-center text-muted">—</td>;
+    if (!q) return <td colSpan={greeksView ? 5 : 3} className="text-center text-muted">—</td>;
     const itm = spot != null && (kind === 'CE' ? strike < spot : strike > spot);
-    const oi = <td className={`relative px-2 text-right ${itm ? 'bg-itm' : ''}`}><i className={`absolute top-1.5 bottom-1.5 ${kind === 'CE' ? 'right-0' : 'left-0'} rounded-full opacity-30 ${kind === 'CE' ? 'bg-down' : 'bg-up'}`} style={{ width: `${(q.oi / maxOi) * 100}%` }} /><span className="relative">{(q.oi / 1e5).toFixed(1)}L</span></td>;
+    const v = oiOf(q);
+    const oiText = oiView === 'oi' ? `${(q.oi / 1e5).toFixed(1)}L` : q.oiChange == null ? '—' : `${v >= 0 ? '+' : '−'}${(Math.abs(v) / 1e5).toFixed(1)}L`;
+    const oi = (
+      <td className={`relative px-2 text-right ${itm ? 'bg-itm' : ''} ${oiView === 'change' && v ? (v > 0 ? 'text-up' : 'text-down') : ''}`} title={`OI ${(q.oi / 1e5).toFixed(2)}L${q.oiChange != null ? ` · change ${q.oiChange >= 0 ? '+' : '−'}${(Math.abs(q.oiChange) / 1e5).toFixed(2)}L` : ''}`}>
+        <i className={`absolute top-1.5 bottom-1.5 ${kind === 'CE' ? 'right-0' : 'left-0'} rounded-full opacity-30 ${kind === 'CE' ? 'bg-down' : 'bg-up'}`} style={{ width: `${(Math.abs(v) / maxOi) * 100}%` }} />
+        <span className="relative">{oiText}</span>
+      </td>
+    );
     const iv = <td className={`px-2 text-right text-muted ${itm ? 'bg-itm' : ''}`}>{q.iv == null ? '—' : (q.iv * 100).toFixed(1)}</td>;
     // Legs already in the strategy at this strike: net lots, + bought, − sold.
     const held = legs.filter((l) => l.kind === kind && l.strikePaise === strike && l.expiry === chain?.expiry);
@@ -227,6 +245,17 @@ export function OptionsView() {
         </span>
       </td>
     );
+    if (greeksView) {
+      // Δ Γ Θ Vega per unit, mirrored so delta sits next to the premium on both sides. Untraded legs have none.
+      const g = (v: number | null, d: number, title: string) => (
+        <td className={`px-1.5 text-right ${itm ? 'bg-itm' : ''} ${v == null ? 'text-muted' : ''}`} title={title}>{v == null ? '—' : v.toFixed(d)}</td>
+      );
+      const delta = g(q.delta, 2, 'Delta: premium change for a 1-point move');
+      const gamma = g(q.gamma, 4, 'Gamma: delta change for a 1-point move');
+      const theta = <td className={`px-1.5 text-right ${itm ? 'bg-itm' : ''} ${q.theta == null ? 'text-muted' : 'text-down'}`} title="Theta: premium change for one calendar day">{q.theta == null ? '—' : q.theta.toFixed(2)}</td>;
+      const vega = g(q.vega, 2, 'Vega: premium change for a 1-point change in IV');
+      return kind === 'CE' ? <>{vega}{theta}{gamma}{delta}{ltp}</> : <>{ltp}{delta}{gamma}{theta}{vega}</>;
+    }
     return kind === 'CE' ? <>{oi}{iv}{ltp}</> : <>{ltp}{iv}{oi}</>;
   };
 
@@ -235,10 +264,11 @@ export function OptionsView() {
       {/* chain */}
       <section className="panel flex h-[78dvh] min-h-[420px] flex-col overflow-hidden xl:h-auto xl:min-h-0">
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
-          <div className="flex rounded-full bg-raised p-[3px]">
-            {(['NIFTY', 'BANKNIFTY'] as const).map((u) => (
-              <button key={u} type="button" onClick={() => { if (u !== underlying) { setUnderlying(u); setExpiry(undefined); if (legs.length) setNotice(`Legs cleared: switched to ${u}.`); setLegs([]); } }}
-                className={`rounded-full px-3 py-1 text-[12.5px] font-bold ${u === underlying ? 'bg-inverse text-on-inverse' : 'text-ink-2'}`}>{u}</button>
+          <UnderlyingPicker value={underlying} onChange={(u) => { if (u !== underlying) { setUnderlying(u); setExpiry(undefined); if (legs.length) setNotice(`Legs cleared: switched to ${u}.`); setLegs([]); } }} />
+          <div className="flex rounded-full bg-raised p-[3px]" role="tablist" aria-label="Open interest column">
+            {([['oi', 'OI'], ['change', 'OI chg'], ['greeks', 'Greeks']] as const).map(([k, label]) => (
+              <button key={k} type="button" role="tab" aria-selected={oiView === k} onClick={() => setOiView(k)}
+                className={`rounded-full px-2.5 py-1 text-[12px] font-bold ${oiView === k ? 'bg-inverse text-on-inverse' : 'text-ink-2'}`}>{label}</button>
             ))}
           </div>
           {chain && (
@@ -248,13 +278,18 @@ export function OptionsView() {
             </select>
           )}
           {chain && (
-            <label className="ml-auto flex items-center gap-1.5 text-[11.5px] text-muted" title="Build on a past day's NSE close, then simulate it day by day to expiry">
+            <span className="ml-auto flex items-center gap-1.5 text-[11.5px] text-muted" title="Build on a past day's NSE close, then simulate it day by day to expiry">
               As of
-              <input type="date" className="num h-8 rounded-full bg-raised px-2.5 text-[12.5px] font-semibold text-ink" value={chain.date}
-                min={range.from ?? undefined} max={range.to ?? undefined} onChange={(e) => e.target.value && pickDate(e.target.value)} aria-label="Chain date" />
-            </label>
+              <TradingDatePicker underlying={underlying} value={chain.date} onChange={(d) => pickDate(d ?? undefined)} min={range.from ?? undefined} max={range.to ?? undefined} className="h-8 bg-raised shadow-none" />
+            </span>
           )}
           {past && <button type="button" onClick={() => pickDate(undefined)} className="rounded-full px-2.5 py-1 text-[12px] font-semibold text-ink-2 hover:bg-raised">Latest</button>}
+          <InfoTip label="How to use the option chain">
+            <p>Hover over a premium and click <b>B</b> to buy or <b>S</b> to sell; the leg goes into the strategy builder.</p>
+            <p>* means the contract had no trades that day: NSE carried the previous close forward. IV and Greeks are Black-76 estimates from traded premiums only.</p>
+            <p><b>Greeks</b> are per unit of the underlying (multiply by lot size × lots for a position): delta is the premium change for a 1-point move, gamma the change in delta for a 1-point move, theta the premium change for one calendar day, and vega the premium change for a 1-point change in IV.</p>
+            <p>Pick an earlier <b>As of</b> date to build a position on a past day and then simulate it day by day to expiry.</p>
+          </InfoTip>
         </div>
         {chain && (
           <div className="grid grid-cols-2 gap-1.5 px-3 py-2 text-[11px] sm:grid-cols-4">
@@ -269,7 +304,11 @@ export function OptionsView() {
         <div ref={scroller} className="min-h-0 flex-1 overflow-auto px-1.5 pb-2">
           <table className="num w-full text-[12px]">
             <thead className="sticky top-0 z-10 bg-panel shadow-[0_1px_0_var(--color-line)] text-[10.5px] font-bold tracking-[0.05em] text-muted">
-              <tr><th className="px-2 py-1.5 text-right">CALL OI</th><th className="px-2 text-right">IV</th><th className="px-2 text-right">CE</th><th className="px-2 text-center">STRIKE</th><th className="px-2 text-right">PE</th><th className="px-2 text-right">IV</th><th className="px-2 text-right">PUT OI</th></tr>
+              {greeksView ? (
+                <tr><th className="px-1.5 py-1.5 text-right">VEGA</th><th className="px-1.5 text-right">THETA</th><th className="px-1.5 text-right">GAMMA</th><th className="px-1.5 text-right">DELTA</th><th className="px-2 text-right">CE</th><th className="px-2 text-center">STRIKE</th><th className="px-2 text-right">PE</th><th className="px-1.5 text-right">DELTA</th><th className="px-1.5 text-right">GAMMA</th><th className="px-1.5 text-right">THETA</th><th className="px-1.5 text-right">VEGA</th></tr>
+              ) : (
+                <tr><th className="px-2 py-1.5 text-right">{oiView === 'oi' ? 'CALL OI' : 'CALL OI CHG'}</th><th className="px-2 text-right">IV</th><th className="px-2 text-right">CE</th><th className="px-2 text-center">STRIKE</th><th className="px-2 text-right">PE</th><th className="px-2 text-right">IV</th><th className="px-2 text-right">{oiView === 'oi' ? 'PUT OI' : 'PUT OI CHG'}</th></tr>
+              )}
             </thead>
             <tbody>
               {visible.map((r, i) => {
@@ -279,7 +318,7 @@ export function OptionsView() {
                   <Fragment key={r.strikePaise}>
                   {spotHere && (
                     <tr aria-label={`Spot ${fmt(spot / 100)}`} data-spot-row>
-                      <td colSpan={7} className="relative h-[20px] p-0">
+                      <td colSpan={greeksView ? 11 : 7} className="relative h-[20px] p-0">
                         <span className="absolute inset-x-0 top-1/2 z-[1] h-0.5 -translate-y-1/2 bg-accent" />
                         <span className="absolute top-1/2 left-1/2 z-[2] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent px-2.5 py-0.5 text-[10.5px] font-bold text-accent-ink">Spot {fmt(spot / 100)}</span>
                       </td>
@@ -299,25 +338,33 @@ export function OptionsView() {
             </tbody>
           </table>
         </div>
-        <p className="border-t border-line px-3 py-1.5 text-[10.5px] text-muted">Hover over a price and click B to buy or S to sell. * = no trades that day. IV and Greeks are Black-76 estimates from traded premiums.</p>
       </section>
 
       {/* builder */}
       <section className="panel flex flex-col overflow-hidden xl:min-h-0">
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
-          <h2 className="text-[14px] font-extrabold tracking-[-0.02em]">Strategy builder</h2>
-          <select className="ml-auto h-8 rounded-full bg-raised px-3 text-[12.5px] font-semibold" value={broker.id} onChange={(e) => pickBroker(e.target.value)} aria-label="Broker for charges" title="Brokerage schedule used for charges">
-            {BROKERS.map((b) => <option key={b.id} value={b.id}>{b.name} charges</option>)}
-          </select>
-          <select className="h-8 w-full rounded-full bg-raised px-3 text-[12.5px] font-semibold sm:w-44" value={template && template.legs === legs ? template.id : ''} onChange={(e) => void applyTemplate(e.target.value)} aria-label="Strategy template">
+          <h2 className="flex items-center gap-1.5 text-[14px] font-extrabold tracking-[-0.02em]">Strategy builder
+            <InfoTip label="About these numbers">
+              {legs.length > 0 && multi
+                ? <p>Legs span more than one expiry: max profit/loss and breakevens are estimates at the first expiry, with later legs valued by Black-76 on their own IV, after charges (later legs squared off).</p>
+                : <p>Max profit/loss and breakevens are for holding to expiry, after charges, and are exact for these prices.</p>}
+              <p>The &ldquo;Today&rdquo; curve, IV and Greeks are Black-76 model estimates. Prices are NSE&rsquo;s official close{chain ? ` of ${fmtDate(chain.date)}` : ''}, not live quotes.</p>
+              {margin.data && <p>Margin: SPAN computed with NSE Clearing&rsquo;s method from its official start-of-day risk parameter file ({margin.data.file}), plus NSE&rsquo;s exposure margin of 2% of notional on short options and futures (4% on a short option&rsquo;s expiry day). This is the exchange minimum; a broker may block more.</p>}
+              {margin.data?.historical && <p><b>Past day:</b> SPAN is from that day&rsquo;s NSE file; the exposure margin and expiry-day rules are today&rsquo;s, and have not yet been checked against the rates NSE applied then.</p>}
+              <p>Templates illustrate option structures; they are not recommendations. A calculator for your own analysis, not investment advice.</p>
+            </InfoTip>
+          </h2>
+          <select className="h-8 w-full rounded-full bg-raised px-3 text-[12.5px] font-semibold sm:ml-auto sm:w-44" value={template && template.legs === legs ? template.id : ''} onChange={(e) => void applyTemplate(e.target.value)} aria-label="Strategy template">
             <option value="">Choose a template…</option>
-            {TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {TEMPLATE_GROUPS.map((g) => (
+              <optgroup key={g} label={g}>{TEMPLATES.filter((t) => t.group === g).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
+            ))}
           </select>
           {legs.length > 0 && <button type="button" onClick={() => setLegs([])} className="rounded-full px-3 py-1 text-[12px] font-semibold text-muted hover:bg-down-soft hover:text-down">Clear</button>}
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
-          {!legs.length && <p className="py-10 text-center text-[13px] text-muted">Add legs from the option chain, or choose a template.</p>}
+          {!legs.length && (chain ? <TemplateGallery chain={chain} onPick={(id) => void applyTemplate(id)} /> : <p className="py-10 text-center text-[13px] text-muted">Add legs from the option chain, or choose a template.</p>)}
           {legs.length > 0 && (
             <table className="num w-full text-[12.5px]">
               <thead className="text-[10.5px] font-bold tracking-[0.05em] text-muted"><tr><th className="py-1 text-left">SIDE</th><th className="text-left">CONTRACT</th><th className="text-right">LOTS</th><th className="text-right">PRICE</th><th className="text-right">QTY</th><th /></tr></thead>
@@ -332,9 +379,9 @@ export function OptionsView() {
                       <span className="inline-flex items-center gap-1">
                         {underlying} {fmtDate(l.expiry).slice(0, 6)}
                         <span className="inline-flex items-center rounded-md border border-line">
-                          <button type="button" aria-label="Lower strike" title={`Strike − ${fmtStrike(STEP[underlying])}`} onClick={() => void shiftStrike(l.id, -1)} className="rounded-l-md px-1 py-0.5 hover:bg-raised"><Minus size={11} /></button>
+                          <button type="button" aria-label="Lower strike" title={step ? `Strike − ${fmtStrike(step)}` : undefined} onClick={() => void shiftStrike(l.id, -1)} className="rounded-l-md px-1 py-0.5 hover:bg-raised"><Minus size={11} /></button>
                           <span className="num min-w-[46px] px-0.5 text-center">{fmtStrike(l.strikePaise)}</span>
-                          <button type="button" aria-label="Higher strike" title={`Strike + ${fmtStrike(STEP[underlying])}`} onClick={() => void shiftStrike(l.id, 1)} className="rounded-r-md px-1 py-0.5 hover:bg-raised"><Plus size={11} /></button>
+                          <button type="button" aria-label="Higher strike" title={step ? `Strike + ${fmtStrike(step)}` : undefined} onClick={() => void shiftStrike(l.id, 1)} className="rounded-r-md px-1 py-0.5 hover:bg-raised"><Plus size={11} /></button>
                         </span>
                         {l.kind}
                       </span>
@@ -409,19 +456,45 @@ export function OptionsView() {
                 <b>Breakevens after charges:</b>{' '}
                 <span className="num">{net?.breakevens.length ? net.breakevens.map((b) => `${fmt(b / 100)} (${(((b - chain.spotPaise!) / chain.spotPaise!) * 100).toFixed(2)}%)`).join('  ·  ') : 'none'}</span>
                 <span className="num text-muted">{'  '}· before charges {summary.breakevens.length ? summary.breakevens.map((b) => fmt(b / 100)).join(', ') : 'none'}</span>
+                {!multi && net?.chargesGrow && (
+                  <InfoTip label="Exercise STT if held to expiry" className="ml-1">
+                    Held to expiry {[net.chargesGrow.above && `above ${fmtStrike(net.chargesGrow.above.strikePaise)}`, net.chargesGrow.below && `below ${fmtStrike(net.chargesGrow.below.strikePaise)}`].filter(Boolean).join(' or ')},
+                    {' '}exercise STT on the long leg adds about {formatRupees(Math.round((net.chargesGrow.above ?? net.chargesGrow.below)!.chargeSlope * 100 * 100))} per 100 points the underlying moves further; max loss above is at the outer strike. Squaring off before expiry avoids it.
+                  </InfoTip>
+                )}
               </p>
-              )}
-              {!multi && net?.chargesGrow && (
-                <p className="text-[11.5px] text-ink-2">
-                  Held to expiry {[net.chargesGrow.above && `above ${fmtStrike(net.chargesGrow.above.strikePaise)}`, net.chargesGrow.below && `below ${fmtStrike(net.chargesGrow.below.strikePaise)}`].filter(Boolean).join(' or ')},
-                  {' '}exercise STT on the long leg adds about {formatRupees(Math.round((net.chargesGrow.above ?? net.chargesGrow.below)!.chargeSlope * 100 * 100))} per 100 points the index moves further; max loss above is at the outer strike. Squaring off before expiry avoids it.
-                </p>
               )}
               {past
                 ? <Simulator underlying={underlying} entryDate={chain.date} legs={legs} brokerId={broker.id} brokerName={broker.name} />
-                : <p className="rounded-[10px] bg-raised px-2.5 py-1.5 text-[11.5px] text-ink-2">To see how a position would have played out, pick an earlier <b>As of</b> date above the chain, build it there, and simulate it day by day to expiry.</p>}
+                : null}
+              <PayoffChart name={underlying} legs={modelLegs} spotPaise={chain.spotPaise} rate={RATE} carry={carry} atYears={tFirst} exact={!multi} atLabel={fmtDate(expiries[0] ?? chain.expiry)}
+                breakevens={multi ? (multiOutcome && !multiOutcome.missingIv ? multiOutcome.gross.breakevens : []) : summary.breakevens}
+                scenario={scenario ? { spotPaise: scenario.spotPaise, t: scenario.days / 365, sc: { model: scenario.model, spot0: chain.spotPaise, shift: scenario.shiftPts / 100, fit: SPOT_VOL_FIT.buckets }, label: scenario.days === 0 ? 'now' : `+${scenario.days}d` } : undefined}
+                onScenarioSpot={(S) => setWhatIf((w) => (w ? { ...w, spotPaise: S } : w))} />
+              {scenario && lot && (
+                <WhatIf name={underlying} state={scenario} onChange={setWhatIf} legs={legs} modelLegs={modelLegs} spotPaise={chain.spotPaise} carry={carry} maxDays={maxDays} chainDate={chain.date} broker={broker} lot={lot} />
+              )}
+              {greeks && (
+                <div className="grid grid-cols-3 gap-1.5 text-[12px]">
+                  <div className="rounded-[10px] bg-raised px-2.5 py-1.5"><p className="text-[11px] text-muted">Delta (units)</p><p className="num font-semibold">{greeks.delta.toFixed(1)}</p></div>
+                  <div className="rounded-[10px] bg-raised px-2.5 py-1.5"><p className="text-[11px] text-muted">Theta (₹/day)</p><p className={`num font-semibold ${greeks.theta >= 0 ? 'text-up' : 'text-down'}`}>{fmt(greeks.theta)}</p></div>
+                  <div className="rounded-[10px] bg-raised px-2.5 py-1.5"><p className="text-[11px] text-muted">Vega (₹ per 1% IV)</p><p className="num font-semibold">{fmt(greeks.vega)}</p></div>
+                </div>
+              )}
+              {greeks?.missing && <p className="text-[11px] text-down">Some legs have no IV (untraded), so Greeks exclude them.</p>}
               <details className="rounded-[10px] border border-line px-2.5 py-1.5 text-[12px]">
-                <summary className="cursor-pointer font-semibold">Charges breakdown · {broker.name} · rates in force today</summary>
+                <summary className="cursor-pointer font-semibold">Charges breakdown · {broker.name} · rates in force today
+                  <InfoTip label="About these charges" className="ml-1.5">
+                    Exit assumes every leg is squared off at the prices above. Held to expiry instead, long in-the-money options pay STT of 0.15% of intrinsic value
+                    {broker.exerciseBrokerage ? ` and ${broker.name} charges ₹20 + GST brokerage on each exercised or assigned leg` : ''}; max profit, max loss and breakevens above include this.
+                    {' '}Brokerage per <a className="underline" href={broker.source} target="_blank" rel="noreferrer">{broker.name}&rsquo;s published schedule</a>.
+                  </InfoTip>
+                </summary>
+                <label className="mt-1.5 flex items-center gap-2 text-[12px] font-semibold text-ink-2">Broker
+                  <select className="h-8 rounded-full bg-raised px-3 text-[12.5px] font-semibold text-ink" value={broker.id} onChange={(e) => pickBroker(e.target.value)} aria-label="Broker for charges" title="Brokerage schedule used for all charges on this page">
+                    {BROKERS.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </label>
                 <table className="num mt-1.5 w-full">
                   <thead className="text-[10.5px] font-bold tracking-[0.05em] text-muted"><tr><th className="text-left">CHARGE</th><th className="text-right">ENTRY</th><th className="text-right">EXIT</th><th className="text-right">TOTAL</th></tr></thead>
                   <tbody>
@@ -435,36 +508,7 @@ export function OptionsView() {
                     ))}
                   </tbody>
                 </table>
-                <p className="mt-1.5 text-[11px] leading-snug text-muted">
-                  Exit assumes every leg is squared off at the prices above. Held to expiry instead, long in-the-money options pay STT of 0.15% of intrinsic value
-                  {broker.exerciseBrokerage ? ` and ${broker.name} charges ₹20 + GST brokerage on each exercised or assigned leg` : ''}; max profit, max loss and breakevens above include this.
-                  {' '}Brokerage per <a className="underline" href={broker.source} target="_blank" rel="noreferrer">{broker.name}&rsquo;s published schedule</a>.
-                </p>
               </details>
-              <PayoffChart legs={modelLegs} spotPaise={chain.spotPaise} rate={RATE} carry={carry} atYears={tFirst} exact={!multi} atLabel={fmtDate(expiries[0] ?? chain.expiry)}
-                breakevens={multi ? (multiOutcome && !multiOutcome.missingIv ? multiOutcome.gross.breakevens : []) : summary.breakevens}
-                scenario={scenario ? { spotPaise: scenario.spotPaise, t: scenario.days / 365, sc: { model: scenario.model, spot0: chain.spotPaise, shift: scenario.shiftPts / 100, fit: SPOT_VOL_FIT.buckets }, label: scenario.days === 0 ? 'now' : `+${scenario.days}d` } : undefined}
-                onScenarioSpot={(S) => setWhatIf((w) => (w ? { ...w, spotPaise: S } : w))} />
-              {scenario && lot && (
-                <WhatIf state={scenario} onChange={setWhatIf} legs={legs} modelLegs={modelLegs} spotPaise={chain.spotPaise} carry={carry} maxDays={maxDays} chainDate={chain.date} broker={broker} lot={lot} />
-              )}
-              {greeks && (
-                <div className="grid grid-cols-3 gap-1.5 text-[12px]">
-                  <div className="rounded-[10px] bg-raised px-2.5 py-1.5"><p className="text-[11px] text-muted">Delta (units)</p><p className="num font-semibold">{greeks.delta.toFixed(1)}</p></div>
-                  <div className="rounded-[10px] bg-raised px-2.5 py-1.5"><p className="text-[11px] text-muted">Theta (₹/day)</p><p className={`num font-semibold ${greeks.theta >= 0 ? 'text-up' : 'text-down'}`}>{fmt(greeks.theta)}</p></div>
-                  <div className="rounded-[10px] bg-raised px-2.5 py-1.5"><p className="text-[11px] text-muted">Vega (₹ per 1% IV)</p><p className="num font-semibold">{fmt(greeks.vega)}</p></div>
-                </div>
-              )}
-              {greeks?.missing && <p className="text-[11px] text-down">Some legs have no IV (untraded), so Greeks exclude them.</p>}
-              <p className="text-[11px] leading-snug text-muted">
-                {multi
-                  ? <>Legs span more than one expiry: max profit/loss and breakevens are estimates at the first expiry, with later legs valued by Black-76 on their own IV, after charges (later legs squared off).</>
-                  : <>Max profit/loss and breakevens are for holding to expiry, after charges, and are exact for these prices.</>}
-                {' '}&ldquo;Today&rdquo; curve, IV and Greeks are Black-76 model estimates. Prices are NSE&rsquo;s official close of {fmtDate(chain.date)}, not live quotes.
-                {m && <> Margin: SPAN computed with NSE Clearing&rsquo;s method from its official start-of-day risk parameter file ({m.file}), plus NSE&rsquo;s exposure margin of 2% of notional on short options and futures (4% on a short option&rsquo;s expiry day). This is the exchange minimum; a broker may block more.</>}
-                {m?.historical && <> <b className="text-ink-2">Past day:</b> SPAN is from that day&rsquo;s NSE file; the exposure margin and expiry-day rules above are today&rsquo;s, and have not yet been checked against the rates NSE applied on {fmtDate(chain.date)}.</>}
-                {' '}Templates illustrate option structures; they are not recommendations. A calculator for your own analysis, not investment advice.
-              </p>
             </>
           )}
         </div>

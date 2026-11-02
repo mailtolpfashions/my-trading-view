@@ -107,10 +107,12 @@ export async function simulatePosition(s: SimInput, data: OptionsData): Promise<
 
   const notes: string[] = [];
   const entryQuotes = await data.quotes(s.underlying, s.entryDate, s.legs);
-  const legs = s.legs.map((l) => {
+  // Each leg's own expiry lot when known (they differ while NSE moves to a new lot size).
+  const legLots = await Promise.all(s.legs.map((l) => data.lotFor?.(s.underlying, s.entryDate, l.expiry) ?? Promise.resolve(null)));
+  const legs = s.legs.map((l, i) => {
     const q = entryQuotes.get(contractId(l));
     if (!q) throw new SimError(`${l.strikePaise / 100} ${l.kind} ${l.expiry} is not in NSE's file for ${s.entryDate}`);
-    return { ...l, qty: l.lots * lotSize, enteredUntraded: !q.traded };
+    return { ...l, qty: l.lots * (legLots[i] ?? lotSize), enteredUntraded: !q.traded };
   });
   if (legs.some((l) => l.enteredUntraded)) notes.push('A leg did not trade on the entry day: its entry price is NSE\'s carried-forward close, not a traded price.');
   const entryChargesPaise = legs.reduce((sum, l) => sum + computeOptionCharges({ side: l.side, qty: l.qty, premiumPaise: l.entryPaise, date: s.entryDate, broker }).total, 0);

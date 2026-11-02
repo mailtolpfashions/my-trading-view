@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { channelOffset, distanceToSegment, fibPrice, hitTest, logicalToTime, measureText, timeToLogical, type Drawing } from './model';
+import { channelOffset, distanceToSegment, fibPrice, hitTest, logicalToTime, measureText, mirroredStop, timeToLogical, type Drawing } from './model';
 
 describe('time ↔ bar position', () => {
   const t = [1000, 1300, 1600, 1900]; // 5-minute bars
@@ -57,5 +57,25 @@ describe('measure readout', () => {
   it('shows change, percent, bars and time span', () => {
     expect(measureText({ time: 0, price: 22000 }, { time: 3 * 3600 + 900, price: 22110 }, 39)).toBe('+110.00 (+0.50%) · 39 bars · 3h 15m');
     expect(measureText({ time: 0, price: 100 }, { time: 2 * 86400, price: 95 }, 2)).toBe('−5.00 (−5.00%) · 2 bars · 2d 0h');
+  });
+});
+
+describe('new drawing tools', () => {
+  it('a position starts with the stop the same distance from entry as the target', () => {
+    expect(mirroredStop({ time: 1, price: 100 }, { time: 5, price: 110 })).toEqual({ time: 5, price: 90 });
+    expect(mirroredStop({ time: 1, price: 100 }, { time: 5, price: 92 })).toEqual({ time: 5, price: 108 });
+  });
+  it('a horizontal ray is hit only from its start to the right', () => {
+    const d: Drawing = { id: 'r', kind: 'hray', p1: { time: 0, price: 0 }, color: '#000' };
+    const placed = [{ d, a: { x: 100, y: 50 } }];
+    expect(hitTest(placed, { x: 300, y: 52 }, 800)?.id).toBe('r');
+    expect(hitTest(placed, { x: 40, y: 50 }, 800)).toBeNull();
+  });
+  it('a long position is hit anywhere between its target and stop', () => {
+    const d: Drawing = { id: 'p', kind: 'long', p1: { time: 0, price: 100 }, p2: { time: 9, price: 110 }, p3: { time: 9, price: 95 }, color: '#000' };
+    const placed = [{ d, a: { x: 100, y: 200 }, b: { x: 300, y: 100 }, c: { x: 300, y: 250 } }];
+    expect(hitTest(placed, { x: 200, y: 240 }, 800)?.id).toBe('p'); // inside the stop zone
+    expect(hitTest(placed, { x: 200, y: 300 }, 800)).toBeNull();
+    expect(hitTest(placed, { x: 300, y: 250 }, 800)?.handle).toBe('p3'); // the stop handle
   });
 });

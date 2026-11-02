@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  CandlestickChart, ChevronsLeft, ChevronsRight, FlaskConical, History, Layers, LayoutDashboard, Menu, Microscope, Search, TrendingUp, X,
+  Activity, BarChart3, CandlestickChart, GraduationCap, Wrench, ChevronsLeft, ChevronsRight, FlaskConical, History, Layers, LayoutDashboard, Menu, Microscope, Search, TrendingUp, X,
 } from 'lucide-react';
 import { LogoMark } from '@/components/logo';
 import { SymbolSearch } from '@/components/terminal/symbol-search';
@@ -14,17 +14,22 @@ import { fmt } from '@/lib/format';
 import { readPersisted, usePersisted, writePersisted } from '@/lib/persisted';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { RESEARCH_VIEWS } from '@/lib/research-views';
+import { FUTURES_TOOLS, MARKET_TOOLS, OPTION_TOOLS, UTILITY_TOOLS } from '@/lib/tools';
 import { DEFAULT_WATCH, PULSE, PULSE_NAMES, ShellContext, chartHref, type Shell } from './shell-context';
 
-type NavItem = { href: string; match: string; label: string; icon: typeof LayoutDashboard; soon?: boolean };
+type NavItem = { href: string; match: string; label: string; icon: typeof LayoutDashboard; soon?: boolean; exact?: boolean };
 const NAV: NavItem[] = [
   { href: '/dashboard', match: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/chart', match: '/chart', label: 'Chart', icon: CandlestickChart },
-  { href: '/options', match: '/options', label: 'Options & simulator', icon: Layers },
+  { href: '/options', match: '/options', label: 'Options & simulator', icon: Layers, exact: true },
+  { href: '/options/open-interest', match: '/options', label: 'Option tools', icon: BarChart3 },
   { href: '/futures', match: '/futures', label: 'Futures', icon: TrendingUp },
+  { href: '/market/rrg', match: '/market', label: 'Market', icon: Activity },
   { href: '/backtest', match: '/backtest', label: 'Backtest', icon: FlaskConical },
   { href: '/research', match: '/research', label: 'Research', icon: Microscope },
-  { href: '/practice', match: '/practice', label: 'Practice', icon: History, soon: true },
+  { href: '/practice', match: '/practice', label: 'Practice', icon: History },
+  { href: '/tools/lot-size', match: '/tools', label: 'Tools', icon: Wrench },
+  { href: '/learn', match: '/learn', label: 'Learn', icon: GraduationCap },
 ];
 
 /**
@@ -87,7 +92,7 @@ export function AppShell({ user, children }: { user: TerminalUser | null; childr
             {labels && <p className="px-3 pb-2 text-[11.5px] font-semibold text-muted">Workspace</p>}
             <ul className="flex flex-col gap-1">
               {NAV.map((n) => {
-                const on = pathname === n.match || pathname.startsWith(n.match + '/');
+                const on = n.exact ? pathname === n.match : n.href.startsWith('/options/') ? pathname.startsWith('/options/') : pathname === n.match || pathname.startsWith(n.match + '/');
                 const href = n.href === '/chart' ? chartHref(lastSymbol) : n.href;
                 const Icon = n.icon;
                 return (
@@ -100,6 +105,59 @@ export function AppShell({ user, children }: { user: TerminalUser | null; childr
                       {labels && <span>{n.label}</span>}
                       {labels && n.soon && <span className="ml-auto rounded-full bg-raised px-2 py-0.5 text-[10.5px] font-semibold text-muted">Soon</span>}
                     </Link>
+                    {n.href === '/options/open-interest' && on && labels && (
+                      <ul className="my-1 ml-[30px] flex flex-col border-l border-line-strong">
+                        {OPTION_TOOLS.map((t) => {
+                          const subOn = pathname === `/options/${t.slug}`;
+                          return (
+                            <li key={t.slug}>
+                              <Link href={`/options/${t.slug}`} aria-current={subOn ? 'page' : undefined}
+                                className={`block px-4 py-[6px] text-[13px] ${subOn ? 'font-semibold text-accent-deep' : 'text-ink-2 hover:text-ink'}`}>{t.label}</Link>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                    {n.href === '/futures' && on && labels && (
+                      <ul className="my-1 ml-[30px] flex flex-col border-l border-line-strong">
+                        {[{ slug: '', label: 'Futures by day' }, ...FUTURES_TOOLS].map((t) => {
+                          const href = t.slug ? `/futures/${t.slug}` : '/futures';
+                          const subOn = pathname === href;
+                          return (
+                            <li key={href}>
+                              <Link href={href} aria-current={subOn ? 'page' : undefined}
+                                className={`block px-4 py-[6px] text-[13px] ${subOn ? 'font-semibold text-accent-deep' : 'text-ink-2 hover:text-ink'}`}>{t.label}</Link>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                    {n.match === '/tools' && on && labels && (
+                      <ul className="my-1 ml-[30px] flex flex-col border-l border-line-strong">
+                        {UTILITY_TOOLS.map((t) => {
+                          const subOn = pathname === `/tools/${t.slug}`;
+                          return (
+                            <li key={t.slug}>
+                              <Link href={`/tools/${t.slug}`} aria-current={subOn ? 'page' : undefined}
+                                className={`block px-4 py-[6px] text-[13px] ${subOn ? 'font-semibold text-accent-deep' : 'text-ink-2 hover:text-ink'}`}>{t.label}</Link>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                    {n.match === '/market' && on && labels && (
+                      <ul className="my-1 ml-[30px] flex flex-col border-l border-line-strong">
+                        {MARKET_TOOLS.map((t) => {
+                          const subOn = pathname === `/market/${t.slug}`;
+                          return (
+                            <li key={t.slug}>
+                              <Link href={`/market/${t.slug}`} aria-current={subOn ? 'page' : undefined}
+                                className={`block px-4 py-[6px] text-[13px] ${subOn ? 'font-semibold text-accent-deep' : 'text-ink-2 hover:text-ink'}`}>{t.label}</Link>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
                     {n.href === '/research' && labels && (
                       <ul className="my-1 ml-[30px] flex flex-col border-l border-line-strong">
                         {RESEARCH_VIEWS.map((v) => {

@@ -5,6 +5,7 @@
 import { prisma } from '@mtv/db';
 import type { Candle } from '@mtv/shared';
 import { NotPublished, nseGet } from '../nse-http';
+import { missIsFinal } from '../fetch-log';
 import { indexCloseUrl, officialIndexCloses, parseIndexClose, unzipFirstCsv } from '../official/nse-files';
 import { datesToFetch } from '../fno/store';
 import { INDICES, faceValueOf } from '../symbols';
@@ -136,7 +137,9 @@ export async function syncEod(from: string, log: (m: string) => void): Promise<n
   if (running) return null;
   running = true;
   try {
-    const done = new Set((await prisma.eodFetch.findMany({ where: { status: { in: ['saved', 'not-published'] } }, select: { date: true } })).map((f) => f.date));
+    // Saved days are done; a "not published" day only once that answer is final (see fetch-log.ts).
+    const fetched = await prisma.eodFetch.findMany({ where: { status: { in: ['saved', 'not-published'] } }, select: { date: true, status: true, updatedAt: true } });
+    const done = new Set(fetched.filter((f) => f.status === 'saved' || missIsFinal(f.date, f.updatedAt)).map((f) => f.date));
     const todo = datesToFetch(from, Date.now() / 1000, true).filter((d) => !done.has(d)).reverse(); // incl. weekend special sessions
     if (todo.length) log(`NSE equity history: ${todo.length} trading days to download`);
     let saved = 0;
@@ -210,6 +213,11 @@ function lineage(symbol: string): MemBar[] {
  */
 import type { DataBreak } from './adjust';
 export type DailyHistory = { candles: Candle[]; adjustments: Adjustment[]; unhandled: UnhandledAction[]; breaks: DataBreak[]; from: string; to: string };
+
+/** Daily closes (rupees) of any index in NSE's index-close file, by its NSE name (e.g. 'NIFTY AUTO'), oldest first. */
+export function indexCloses(nseName: string): { date: string; close: number }[] {
+  return (indexByName.get(nseName) ?? []).map((b) => ({ date: b.date, close: b.closePaise / 100 }));
+}
 
 /** Adjusted daily candles for a stock, or for one of our indices. Null if we hold no history for it. */
 export function dailyHistory(symbol: string): DailyHistory | null {

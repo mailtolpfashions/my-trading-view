@@ -237,7 +237,7 @@ export class KiteProvider implements MarketDataProvider {
     const rows = [...byStrike.values()].sort((a, b) => a.strikePaise - b.strikePaise);
     const F = applyGreeks(rows, spot, yearsToExpiry(Date.now() / 1000, exp));
     return {
-      underlying, date: today, expiry: exp, expiries, lotSize: contracts[0]?.lot ?? null, spotPaise: spot,
+      underlying, date: today, expiry: exp, expiries, lotSize: contracts[0]?.lot ?? null, isIndex: true, spotPaise: spot, prevDate: null, strikeStepPaise: null,
       forwardPaise: F == null ? null : Math.round(F), atmStrikePaise: strikes[atmIndex] != null ? Math.round(strikes[atmIndex] * 100) : null, rows,
     };
   }
