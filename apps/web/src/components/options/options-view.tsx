@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Minus, Plus, Trash2 } from 'lucide-react';
 import { legValue, pnlAt, summarise, summariseCurve, summariseNet, yearsToExpiry, type Leg, type ModelLeg } from '@mtv/options';
 import { BROKERS, brokerById, computeOptionCharges, expirySettlementCharges, formatRupees, toPaise, type Charges } from '@mtv/paper';
@@ -8,8 +8,9 @@ import { fmt } from '@/lib/format';
 import { TEMPLATES, TEMPLATE_GROUPS, buildSmile, fetchChain, fetchFnoRange, fetchMargin, fmtDate, fmtStrike, legGreeks, type BuilderLeg, type Chain, type ChainSide, type MarginResponse } from '@/lib/options';
 import { PayoffChart } from './payoff-chart';
 import { WhatIf, type WhatIfState } from './what-if';
-import { Simulator } from './simulator';
+import { Simulator, type SimDayLink } from './simulator';
 import { TemplateGallery } from './template-gallery';
+import { SavedPositions, type SavedPosition } from './saved-positions';
 import { InfoTip } from '@/components/info-tip';
 import { SPOT_VOL_FIT } from '@mtv/options';
 import { UnderlyingPicker } from '@/components/tools/controls';
@@ -36,6 +37,16 @@ export function OptionsView() {
   const [template, setTemplate] = useState<{ id: string; legs: BuilderLeg[] } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const chainCache = useRef(new Map<string, Chain>());
+  /** Restores a saved position: its underlying, its day (prices are per day) and its legs. */
+  function loadSaved(p: SavedPosition) {
+    chainCache.current.clear();
+    setUnderlying(p.underlying);
+    setAsOfDate(p.date);
+    setExpiry(p.legs[0]?.expiry);
+    setLegs(p.legs.map((l) => ({ ...l, id: `l${++seq}` })));
+    setTemplate(null);
+    setNotice(`Loaded ${p.name}`);
+  }
   const [brokerId, setBrokerId] = useState('zerodha');
   useEffect(() => { try { setBrokerId(localStorage.getItem('mtv.broker') ?? 'zerodha'); } catch { /* storage unavailable */ } }, []);
   const pickBroker = (id: string) => { setBrokerId(id); try { localStorage.setItem('mtv.broker', id); } catch { /* storage unavailable */ } };
@@ -168,6 +179,12 @@ export function OptionsView() {
 
   // What-if scenario: NIFTY level, days ahead, IV model and shift. Starts at today's spot, next day.
   const [whatIf, setWhatIf] = useState<WhatIfState | null>(null);
+  // The simulator's selected day: the what-if jumps to that day's close and the days passed since entry.
+  const [simDay, setSimDay] = useState<SimDayLink | null>(null);
+  const followSimDay = useCallback((d: SimDayLink | null) => {
+    setSimDay(d);
+    if (d) setWhatIf((w) => (w ? { ...w, spotPaise: d.spotPaise, days: d.daysSinceEntry } : w));
+  }, []);
   const maxDays = Math.max(0, Math.round(tFirst * 365));
   useEffect(() => { if (chain?.spotPaise) setWhatIf((w) => (w && w.spotPaise && Math.abs(w.spotPaise / chain.spotPaise! - 1) < 0.2 ? w : { spotPaise: chain.spotPaise!, days: 1, model: 'spotvol', shiftPts: 0 })); }, [chain?.spotPaise]);
   const scenario = whatIf ? { ...whatIf, days: Math.min(whatIf.days, maxDays) } : null;
@@ -258,6 +275,14 @@ export function OptionsView() {
     }
     return kind === 'CE' ? <>{oi}{iv}{ltp}</> : <>{ltp}{iv}{oi}</>;
   };
+
+  // One payoff chart: in the builder, or inside the simulator's chart tabs while a simulation is showing.
+  const payoffChart = summary && chain?.spotPaise ? (
+    <PayoffChart name={underlying} actual={past && simDay ? { spotPaise: simDay.spotPaise, pnlPaise: simDay.grossPaise, label: fmtDate(simDay.date) } : undefined} legs={modelLegs} spotPaise={chain.spotPaise} rate={RATE} carry={carry} atYears={tFirst} exact={!multi} atLabel={fmtDate(expiries[0] ?? chain.expiry)}
+      breakevens={multi ? (multiOutcome && !multiOutcome.missingIv ? multiOutcome.gross.breakevens : []) : summary.breakevens}
+      scenario={scenario ? { spotPaise: scenario.spotPaise, t: scenario.days / 365, sc: { model: scenario.model, spot0: chain.spotPaise, shift: scenario.shiftPts / 100, fit: SPOT_VOL_FIT.buckets }, label: scenario.days === 0 ? 'now' : `+${scenario.days}d` } : undefined}
+      onScenarioSpot={(S) => setWhatIf((w) => (w ? { ...w, spotPaise: S } : w))} />
+  ) : null;
 
   return (
     <div className="grid grid-cols-1 content-start gap-2 lg:min-h-0 lg:auto-rows-max lg:overflow-y-auto xl:auto-rows-auto xl:content-stretch xl:overflow-visible xl:grid-cols-[minmax(400px,1fr)_minmax(500px,1.15fr)]">
@@ -354,16 +379,25 @@ export function OptionsView() {
               <p>Templates illustrate option structures; they are not recommendations. A calculator for your own analysis, not investment advice.</p>
             </InfoTip>
           </h2>
-          <select className="h-8 w-full rounded-full bg-raised px-3 text-[12.5px] font-semibold sm:ml-auto sm:w-44" value={template && template.legs === legs ? template.id : ''} onChange={(e) => void applyTemplate(e.target.value)} aria-label="Strategy template">
-            <option value="">Choose a template…</option>
-            {TEMPLATE_GROUPS.map((g) => (
-              <optgroup key={g} label={g}>{TEMPLATES.filter((t) => t.group === g).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
-            ))}
-          </select>
-          {legs.length > 0 && <button type="button" onClick={() => setLegs([])} className="rounded-full px-3 py-1 text-[12px] font-semibold text-muted hover:bg-down-soft hover:text-down">Clear</button>}
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {/* Empty builder: the template cards below replace this menu. */}
+            {legs.length > 0 && (
+              <select className="h-8 w-full rounded-full bg-raised px-3 text-[12.5px] font-semibold sm:w-44" value={template && template.legs === legs ? template.id : ''} onChange={(e) => void applyTemplate(e.target.value)} aria-label="Strategy template">
+                <option value="">Choose a template…</option>
+                {TEMPLATE_GROUPS.map((g) => (
+                  <optgroup key={g} label={g}>{TEMPLATES.filter((t) => t.group === g).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>
+                ))}
+              </select>
+            )}
+            <SavedPositions underlying={underlying} date={chain?.date ?? null} legs={legs} onLoad={loadSaved}
+              suggestedName={`${underlying} ${(template && template.legs === legs ? TEMPLATES.find((t) => t.id === template.id)?.name : null) ?? `${legs.length}-leg position`} · ${chain ? fmtDate(chain.date) : ''}`} />
+            {legs.length > 0 && <button type="button" onClick={() => setLegs([])} className="rounded-full px-3 py-1 text-[12px] font-semibold text-muted hover:bg-down-soft hover:text-down">Clear</button>}
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
+          {/* On a past day the simulator comes first: it is what the position is built for. */}
+          {past && chain && legs.length > 0 && <Simulator underlying={underlying} entryDate={chain.date} legs={legs} brokerId={broker.id} brokerName={broker.name} onDay={followSimDay} payoff={payoffChart} />}
           {!legs.length && (chain ? <TemplateGallery chain={chain} onPick={(id) => void applyTemplate(id)} /> : <p className="py-10 text-center text-[13px] text-muted">Add legs from the option chain, or choose a template.</p>)}
           {legs.length > 0 && (
             <table className="num w-full text-[12.5px]">
@@ -464,13 +498,7 @@ export function OptionsView() {
                 )}
               </p>
               )}
-              {past
-                ? <Simulator underlying={underlying} entryDate={chain.date} legs={legs} brokerId={broker.id} brokerName={broker.name} />
-                : null}
-              <PayoffChart name={underlying} legs={modelLegs} spotPaise={chain.spotPaise} rate={RATE} carry={carry} atYears={tFirst} exact={!multi} atLabel={fmtDate(expiries[0] ?? chain.expiry)}
-                breakevens={multi ? (multiOutcome && !multiOutcome.missingIv ? multiOutcome.gross.breakevens : []) : summary.breakevens}
-                scenario={scenario ? { spotPaise: scenario.spotPaise, t: scenario.days / 365, sc: { model: scenario.model, spot0: chain.spotPaise, shift: scenario.shiftPts / 100, fit: SPOT_VOL_FIT.buckets }, label: scenario.days === 0 ? 'now' : `+${scenario.days}d` } : undefined}
-                onScenarioSpot={(S) => setWhatIf((w) => (w ? { ...w, spotPaise: S } : w))} />
+              {!(past && simDay) && payoffChart}
               {scenario && lot && (
                 <WhatIf name={underlying} state={scenario} onChange={setWhatIf} legs={legs} modelLegs={modelLegs} spotPaise={chain.spotPaise} carry={carry} maxDays={maxDays} chainDate={chain.date} broker={broker} lot={lot} />
               )}

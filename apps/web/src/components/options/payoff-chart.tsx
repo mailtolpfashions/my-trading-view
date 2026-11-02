@@ -21,7 +21,7 @@ export function niceTicks(min: number, max: number, target: number): number[] {
  * Payoff diagram: P&L at the first expiry (solid; exact when every leg expires then, otherwise later legs are valued
  * with Black-76) and a model estimate for today (dashed). x = underlying price, y = P&L in rupees.
  */
-export function PayoffChart({ legs, spotPaise, rate, carry, atYears, exact, atLabel, breakevens, scenario, onScenarioSpot, name = 'NIFTY' }: {
+export function PayoffChart({ legs, spotPaise, rate, carry, atYears, exact, atLabel, breakevens, scenario, onScenarioSpot, name = 'NIFTY', actual }: {
   legs: ModelLeg[];
   /** The underlying, as shown in labels. */
   name?: string;
@@ -37,6 +37,8 @@ export function PayoffChart({ legs, spotPaise, rate, carry, atYears, exact, atLa
   breakevens: number[];
   /** What-if: P&L curve `t` years ahead under an IV scenario, with a marker at the chosen underlying level. */
   scenario?: { spotPaise: number; t: number; sc: Scenario; label: string };
+  /** Actual P&L before charges on a simulated day (NSE closes), drawn as a marker at that day's close. */
+  actual?: { spotPaise: number; pnlPaise: number; label: string };
   /** Click or drag on the chart to move the what-if level. */
   onScenarioSpot?: (spotPaise: number) => void;
 }) {
@@ -45,7 +47,7 @@ export function PayoffChart({ legs, spotPaise, rate, carry, atYears, exact, atLa
 
   const data = useMemo(() => {
     const strikes = legs.map((l) => l.strikePaise);
-    const span = Math.max(spotPaise * 0.06, ...strikes.map((k) => Math.abs(k - spotPaise) * 1.4), ...breakevens.map((b) => Math.abs(b - spotPaise) * 1.2), scenario ? Math.abs(scenario.spotPaise - spotPaise) * 1.25 : 0);
+    const span = Math.max(spotPaise * 0.06, ...strikes.map((k) => Math.abs(k - spotPaise) * 1.4), ...breakevens.map((b) => Math.abs(b - spotPaise) * 1.2), scenario ? Math.abs(scenario.spotPaise - spotPaise) * 1.25 : 0, actual ? Math.abs(actual.spotPaise - spotPaise) * 1.25 : 0);
     const lo = Math.max(1, spotPaise - span), hi = spotPaise + span;
     const xs = Array.from({ length: 241 }, (_, i) => lo + ((hi - lo) * i) / 240);
     const pts = [...new Set([...xs, ...strikes.filter((k) => k > lo && k < hi)])].sort((a, b) => a - b);
@@ -58,12 +60,12 @@ export function PayoffChart({ legs, spotPaise, rate, carry, atYears, exact, atLa
     const today = atYears > 0 ? curve(0) : null;
     const what = scenario ? curve(Math.min(scenario.t, atYears), scenario.sc) : null;
     const whatAt = scenario ? pnlAt(legs, scenario.spotPaise, Math.min(scenario.t, atYears), rate, carry, scenario.sc) : null;
-    const all = [...expiry, ...(today ?? []), ...(what ?? [])];
+    const all = [...expiry, ...(today ?? []), ...(what ?? []), ...(actual ? [actual.pnlPaise / 100] : [])];
     let yMin = Math.min(0, ...all), yMax = Math.max(0, ...all);
     const padY = (yMax - yMin) * 0.08 || 1;
     yMin -= padY; yMax += padY;
     return { lo, hi, pts, expiry, today, what, whatAt, yMin, yMax };
-  }, [legs, spotPaise, rate, carry, atYears, exact, breakevens, scenario]);
+  }, [legs, spotPaise, rate, carry, atYears, exact, breakevens, scenario, actual]);
 
   const { lo, hi, pts, expiry, today, what, whatAt, yMin, yMax } = data;
   const x = (S: number) => PAD.l + ((S - lo) / (hi - lo)) * (W - PAD.l - PAD.r);
@@ -121,6 +123,14 @@ export function PayoffChart({ legs, spotPaise, rate, carry, atYears, exact, atLa
             <text x={x(scenario.spotPaise) + 6} y={H - PAD.b - 6} className="num fill-accent-label text-[10px] font-semibold">What if {fmt(scenario.spotPaise / 100)}{whatAt != null ? ` · ${formatRupees(Math.round(whatAt))}` : ''}</text>
           </g>
         )}
+        {actual && actual.spotPaise > lo && actual.spotPaise < hi && (
+          <g>
+            <rect x={x(actual.spotPaise) - 5} y={y(actual.pnlPaise / 100) - 5} width={10} height={10} transform={`rotate(45 ${x(actual.spotPaise)} ${y(actual.pnlPaise / 100)})`} className="fill-blue stroke-panel" strokeWidth={1.5} />
+            <text x={x(actual.spotPaise) + (x(actual.spotPaise) > W * 0.7 ? -9 : 9)} y={y(actual.pnlPaise / 100) + (actual.pnlPaise >= 0 ? -8 : 14)} textAnchor={x(actual.spotPaise) > W * 0.7 ? 'end' : 'start'} className="num fill-blue text-[10px] font-semibold">
+              Actual {actual.label} · {formatRupees(actual.pnlPaise)}
+            </text>
+          </g>
+        )}
         <line x1={x(spotPaise)} x2={x(spotPaise)} y1={PAD.t} y2={H - PAD.b} stroke="#f59a0b" strokeWidth={1.5} />
         <text x={x(spotPaise) + 4} y={PAD.t + 10} className="num fill-accent-label text-[10px] font-semibold">Spot {fmt(spotPaise / 100)}</text>
         {breakevens.filter((b) => b > lo && b < hi).map((b) => (
@@ -145,6 +155,7 @@ export function PayoffChart({ legs, spotPaise, rate, carry, atYears, exact, atLa
         <span><span className="mr-1 inline-block h-0.5 w-4 bg-ink align-middle" />{exact ? 'At expiry (exact)' : `At first expiry, ${atLabel} (later legs: Black-76 estimate)`}</span>
         {what && scenario && <span><span className="mr-1 inline-block h-0.5 w-4 bg-accent-deep align-middle" />What if ({scenario.label}, chosen IV){onScenarioSpot ? ` · click or drag on the chart to move ${name}` : ''}</span>}
         {today ? <span><span className="mr-1 inline-block h-0 w-4 border-t-2 border-dashed border-blue align-middle" />Today (model estimate, Black-76)</span> : <span>Today&rsquo;s curve needs IV for every leg</span>}
+        {actual && <span><span className="mr-1 inline-block h-2 w-2 rotate-45 bg-blue align-middle" />Actual on {actual.label} (NSE closes, before charges)</span>}
       </div>
     </div>
   );

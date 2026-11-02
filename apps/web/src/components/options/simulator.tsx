@@ -1,28 +1,43 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Pause, Play } from 'lucide-react';
 import { formatRupees } from '@mtv/paper';
 import { fmt } from '@/lib/format';
 import { fmtDate, fmtStrike, runSimulation, type BuilderLeg, type SimResult } from '@/lib/options';
 import { niceTicks } from './payoff-chart';
+import { firstExit, type Exit, type ExitRules } from '@/lib/sim-exit';
 import { InfoTip } from '@/components/info-tip';
 
 const W = 760, H = 220, PAD = { l: 64, r: 16, t: 12, b: 26 };
 const SOURCE: Record<string, string> = { close: '', settle: '*', expired: ' (settled)', missing: ' (no data)' };
+
+/** The simulated day shown, for the payoff chart: that day's close and the P&L before charges at it. */
+export type SimDayLink = { date: string; daysSinceEntry: number; spotPaise: number; grossPaise: number };
 
 /**
  * Options simulator: the position built on a past day, followed on NSE's official closes day by day to expiry.
  * Each day shows what squaring off that day would have returned after every charge; on expiry, legs settle against
  * the index's official close.
  */
-export function Simulator({ underlying, entryDate, legs, brokerId, brokerName }: { underlying: string; entryDate: string; legs: BuilderLeg[]; brokerId: string; brokerName: string }) {
+export function Simulator({ underlying, entryDate, legs, brokerId, brokerName, onDay, payoff }: { underlying: string; entryDate: string; legs: BuilderLeg[]; brokerId: string; brokerName: string; onDay?: (d: SimDayLink | null) => void; payoff?: React.ReactNode }) {
   const inputKey = JSON.stringify([underlying, entryDate, brokerId, legs.map((l) => [l.kind, l.side, l.strikePaise, l.expiry, l.lots, l.pricePaise])]);
   const [run, setRun] = useState<{ key: string; result: SimResult } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dayIdx, setDayIdx] = useState(0);
+  const [rules, setRules] = useState<ExitRules>({ stopLoss: null, target: null, exitDate: null });
   const result = run?.key === inputKey ? run.result : null; // a changed position needs a new run
+  // Tell the builder which day is shown, so the payoff chart can follow it.
+  const shown = result ? result.days[Math.min(dayIdx, result.days.length - 1)] : null;
+  useEffect(() => {
+    if (!onDay) return;
+    onDay(shown && shown.spotPaise != null ? {
+      date: shown.date, spotPaise: shown.spotPaise, grossPaise: shown.grossPaise,
+      daysSinceEntry: Math.round((Date.parse(`${shown.date}T00:00:00Z`) - Date.parse(`${entryDate}T00:00:00Z`)) / 86400_000),
+    } : null);
+  }, [shown, entryDate, onDay]);
+  useEffect(() => () => onDay?.(null), [onDay]);
 
   async function start() {
     setBusy(true); setError(null);
@@ -46,6 +61,7 @@ export function Simulator({ underlying, entryDate, legs, brokerId, brokerName }:
             <p>Prices are NSE&rsquo;s official daily close; * = the contract did not trade that day, so NSE&rsquo;s settlement price is used. On its expiry day a leg settles at intrinsic value against the index&rsquo;s official close, NSE&rsquo;s final settlement rule.</p>
             <p>&ldquo;If squared off&rdquo; pays entry charges plus {brokerName} brokerage and statutory charges at the rates in force on each date; held to expiry, long in-the-money legs pay exercise STT instead.</p>
             <p>Daily closes only: what happened during the day is not known. IV and Greeks are Black-76 estimates. A record of the past, not a forecast or advice.</p>
+            <p>The payoff chart below follows the day shown here: its what-if moves to that day&rsquo;s close and the days passed, and a blue marker shows the actual P&amp;L (before charges) from NSE&rsquo;s closes that day.</p>
           </InfoTip>
         </h3>
         <button type="button" onClick={() => void start()} disabled={busy || !legs.length}
@@ -54,13 +70,28 @@ export function Simulator({ underlying, entryDate, legs, brokerId, brokerName }:
         </button>
       </div>
       {error && <p role="alert" className="mt-2 rounded-[10px] bg-down-soft px-2.5 py-1.5 text-[12px] font-semibold text-down">{error}</p>}
-      {result && <SimView r={result} dayIdx={Math.min(dayIdx, result.days.length - 1)} setDayIdx={setDayIdx} underlying={underlying} brokerName={brokerName} />}
+      {result && <SimView r={result} dayIdx={Math.min(dayIdx, result.days.length - 1)} setDayIdx={setDayIdx} underlying={underlying} brokerName={brokerName} rules={rules} setRules={setRules} payoff={payoff} />}
     </section>
   );
 }
 
-function SimView({ r, dayIdx, setDayIdx, underlying, brokerName }: { r: SimResult; dayIdx: number; setDayIdx: (i: number) => void; underlying: string; brokerName: string }) {
+const SPEEDS = [{ ms: 400, label: 'Fast' }, { ms: 900, label: 'Normal' }, { ms: 1800, label: 'Slow' }];
+
+function SimView({ r, dayIdx, setDayIdx, underlying, brokerName, rules, setRules, payoff }: { r: SimResult; dayIdx: number; setDayIdx: (i: number) => void; underlying: string; brokerName: string; rules: ExitRules; setRules: (x: ExitRules) => void; payoff?: React.ReactNode }) {
   const days = r.days;
+  const [chart, setChart] = useState<'payoff' | 'days'>(payoff ? 'payoff' : 'days');
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(900);
+  // Autoplay: one trading day per tick, stopping on the last day.
+  useEffect(() => {
+    if (!playing) return;
+    if (dayIdx >= days.length - 1) { setPlaying(false); return; }
+    const t = setTimeout(() => setDayIdx(dayIdx + 1), speed);
+    return () => clearTimeout(t);
+  }, [playing, dayIdx, speed, days.length, setDayIdx]);
+  const go = (i: number) => { setPlaying(false); setDayIdx(Math.max(0, Math.min(days.length - 1, i))); };
+  const exit = useMemo(() => firstExit(r, rules), [r, rules]);
+  const num = (v: string) => { const n = Number(v.replace(/[^\d.]/g, '')); return v.trim() && n > 0 ? n : null; };
   const d = days[dayIdx];
   const spot0 = days[0].spotPaise;
   const best = days.reduce((a, x) => (x.netIfExitPaise > a.netIfExitPaise ? x : a), days[0]);
@@ -71,12 +102,54 @@ function SimView({ r, dayIdx, setDayIdx, underlying, brokerName }: { r: SimResul
 
   return (
     <div className="mt-2.5 space-y-2.5">
-      <div className="flex items-center gap-2">
-        <button type="button" aria-label="Previous day" onClick={() => setDayIdx(Math.max(0, dayIdx - 1))} disabled={dayIdx === 0} className="rounded-full p-1 hover:bg-raised disabled:opacity-40"><ChevronLeft size={16} /></button>
-        <input type="range" min={0} max={days.length - 1} value={dayIdx} onChange={(e) => setDayIdx(Number(e.target.value))} className="flex-1 accent-ink" aria-label="Simulation day" />
-        <button type="button" aria-label="Next day" onClick={() => setDayIdx(Math.min(days.length - 1, dayIdx + 1))} disabled={dayIdx === days.length - 1} className="rounded-full p-1 hover:bg-raised disabled:opacity-40"><ChevronRight size={16} /></button>
-        <span className="num w-[150px] text-right text-[12px] font-semibold">{fmtDate(d.date)} · day {dayIdx + 1}/{days.length}</span>
+      {/* day controls: one trading day per step (NSE end-of-day data has no intraday steps) */}
+      <div className="grid grid-cols-[repeat(3,minmax(0,1fr))_minmax(150px,2fr)_repeat(3,minmax(0,1fr))] overflow-hidden rounded-[10px] border border-line text-[12px] font-semibold">
+        {([['Entry', 0, <ChevronsLeft key="a" size={14} />], ['−5d', dayIdx - 5, null], ['−1d', dayIdx - 1, <ChevronLeft key="b" size={14} />]] as const).map(([label, to, icon]) => (
+          <button key={label} type="button" onClick={() => go(to)} disabled={dayIdx === 0} className="flex h-9 items-center justify-center gap-1 border-r border-line hover:bg-raised disabled:opacity-40">{icon}{label}</button>
+        ))}
+        <select value={dayIdx} onChange={(e) => go(Number(e.target.value))} aria-label="Simulation day" className="num h-9 border-r border-line bg-panel px-2 text-center font-bold">
+          {days.map((x, i) => <option key={x.date} value={i}>{fmtDate(x.date)} · day {i + 1}/{days.length}</option>)}
+        </select>
+        {([['+1d', dayIdx + 1, <ChevronRight key="c" size={14} />], ['+5d', dayIdx + 5, null], [r.end === 'expired' ? 'Expiry' : 'Last day', days.length - 1, <ChevronsRight key="d" size={14} />]] as const).map(([label, to, icon]) => (
+          <button key={label} type="button" onClick={() => go(to)} disabled={dayIdx === days.length - 1} className="flex h-9 items-center justify-center gap-1 border-r border-line last:border-r-0 hover:bg-raised disabled:opacity-40">{label}{icon}</button>
+        ))}
       </div>
+      <div className="flex flex-wrap items-center gap-2 text-[12px]">
+        <button type="button" onClick={() => { if (!playing && dayIdx >= days.length - 1) setDayIdx(0); setPlaying(!playing); }}
+          className="flex h-8 items-center gap-1.5 rounded-full bg-accent-soft px-3 font-bold text-accent-deep hover:bg-accent hover:text-accent-ink">
+          {playing ? <Pause size={13} /> : <Play size={13} />} {playing ? 'Pause' : 'Autoplay'}
+        </button>
+        <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Autoplay speed" className="h-8 rounded-full bg-raised px-2.5 font-semibold">
+          {SPEEDS.map((x) => <option key={x.ms} value={x.ms}>{x.label} · {(x.ms / 1000).toFixed(1)}s a day</option>)}
+        </select>
+        <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
+        <span className="flex items-center gap-1 font-semibold text-ink-2">Exit rules
+          <InfoTip label="About exit rules">
+            <p>Checked at each day&rsquo;s close after the entry day, on the P&amp;L after charges if squared off that day. The first rule to fire is the exit: on its day the exit date counts first, then the stop loss, then the target.</p>
+            <p>Only daily closes are known, so a stop or target touched during a day but not at its close does not fire, and the exit is at the close, not at the rule&rsquo;s level.</p>
+          </InfoTip>
+        </span>
+        <label className="flex items-center gap-1 text-ink-2">Stop loss ₹<input inputMode="numeric" placeholder="Off" defaultValue={rules.stopLoss ?? ''} onBlur={(e) => setRules({ ...rules, stopLoss: num(e.target.value) })} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} className="num h-8 w-[84px] rounded-full bg-raised px-2.5 font-semibold text-ink outline-none focus:ring-2 focus:ring-accent" /></label>
+        <label className="flex items-center gap-1 text-ink-2">Target ₹<input inputMode="numeric" placeholder="Off" defaultValue={rules.target ?? ''} onBlur={(e) => setRules({ ...rules, target: num(e.target.value) })} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} className="num h-8 w-[84px] rounded-full bg-raised px-2.5 font-semibold text-ink outline-none focus:ring-2 focus:ring-accent" /></label>
+        <label className="flex items-center gap-1 text-ink-2">Exit on
+          <select value={rules.exitDate ?? ''} onChange={(e) => setRules({ ...rules, exitDate: e.target.value || null })} className="h-8 rounded-full bg-raised px-2.5 font-semibold text-ink">
+            <option value="">Off</option>
+            {days.slice(1).map((x) => <option key={x.date} value={x.date}>{fmtDate(x.date)}</option>)}
+          </select>
+        </label>
+      </div>
+      {(rules.stopLoss != null || rules.target != null || rules.exitDate) && (
+        <button type="button" onClick={() => exit && go(exit.idx)} disabled={!exit}
+          className={`flex w-full items-center gap-3 rounded-[10px] px-3 py-2 text-left text-[12.5px] ${exit ? (days[exit.idx].netIfExitPaise >= 0 ? 'bg-up-soft' : 'bg-down-soft') : 'bg-raised'}`}>
+          {exit ? (
+            <>
+              <b>{exit.reason}</b>
+              <span className="text-ink-2">exit at the close of {fmtDate(days[exit.idx].date)} (day {exit.idx + 1})</span>
+              <span className={`num ml-auto font-bold ${tone(days[exit.idx].netIfExitPaise)}`}>{formatRupees(days[exit.idx].netIfExitPaise)} after charges</span>
+            </>
+          ) : <span className="text-ink-2">No rule fired: the position runs to {r.end === 'expired' ? 'expiry' : 'the last day of data'}.</span>}
+        </button>
+      )}
 
       <div className="grid grid-cols-4 gap-1.5">
         {([
@@ -92,7 +165,17 @@ function SimView({ r, dayIdx, setDayIdx, underlying, brokerName }: { r: SimResul
         ))}
       </div>
 
-      <SimChart r={r} dayIdx={dayIdx} onPick={setDayIdx} />
+      <div className="space-y-1.5">
+        {payoff && (
+          <div className="flex w-fit rounded-full bg-raised p-[3px]" role="tablist" aria-label="Chart">
+            {([['payoff', 'Payoff'], ['days', 'P&L by day']] as const).map(([k, label]) => (
+              <button key={k} type="button" role="tab" aria-selected={chart === k} onClick={() => setChart(k)}
+                className={`rounded-full px-3 py-1 text-[12px] font-bold ${chart === k ? 'bg-inverse text-on-inverse' : 'text-ink-2'}`}>{label}</button>
+            ))}
+          </div>
+        )}
+        {chart === 'payoff' && payoff ? payoff : <SimChart r={r} dayIdx={dayIdx} onPick={go} exit={exit} />}
+      </div>
 
       <table className="num w-full text-[12px]">
         <thead className="text-[10.5px] font-bold tracking-[0.05em] text-muted">
@@ -165,7 +248,7 @@ function SimView({ r, dayIdx, setDayIdx, underlying, brokerName }: { r: SimResul
 }
 
 /** Net P&L if squared off each day: one series, one axis; hover for the day, click to select it. */
-function SimChart({ r, dayIdx, onPick }: { r: SimResult; dayIdx: number; onPick: (i: number) => void }) {
+function SimChart({ r, dayIdx, onPick, exit }: { r: SimResult; dayIdx: number; onPick: (i: number) => void; exit: Exit | null }) {
   const [hover, setHover] = useState<number | null>(null);
   const days = r.days;
   const vals = useMemo(() => days.map((x) => x.netIfExitPaise / 100), [days]);
@@ -199,6 +282,12 @@ function SimChart({ r, dayIdx, onPick }: { r: SimResult; dayIdx: number; onPick:
         ))}
         <line x1={PAD.l} x2={W - PAD.r} y1={y(0)} y2={y(0)} className="stroke-zero" />
         <path d={path} fill="none" className="stroke-ink" strokeWidth={2} strokeLinejoin="round" />
+        {exit && (
+          <g>
+            <line x1={x(exit.idx)} x2={x(exit.idx)} y1={PAD.t} y2={H - PAD.b} stroke={vals[exit.idx] >= 0 ? 'var(--color-up)' : 'var(--color-down)'} strokeDasharray="4 3" strokeWidth={1.5} />
+            <text x={x(exit.idx) + (x(exit.idx) > W * 0.8 ? -4 : 4)} y={PAD.t + 10} textAnchor={x(exit.idx) > W * 0.8 ? 'end' : 'start'} className="text-[10.5px] font-semibold" fill={vals[exit.idx] >= 0 ? 'var(--color-up)' : 'var(--color-down)'}>{exit.reason}</text>
+          </g>
+        )}
         <line x1={x(dayIdx)} x2={x(dayIdx)} y1={PAD.t} y2={H - PAD.b} stroke="#f59a0b" strokeWidth={1.5} />
         <circle cx={x(dayIdx)} cy={y(vals[dayIdx])} r={5} fill="#f59a0b" stroke="#2b1a00" strokeWidth={1.5} />
         {hover != null && hover !== dayIdx && (
