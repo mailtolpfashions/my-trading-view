@@ -64,7 +64,7 @@ export function ConditionEditor({ value, onChange, meta, screenTf, emptyText, ro
           <div className="ml-auto flex items-center gap-1">
             <Button variant="ghost" className="h-9 px-2.5" onClick={() => step('undo')} disabled={!hist.past.length} aria-label="Undo" title="Undo"><Undo2 size={16} /></Button>
             <Button variant="ghost" className="h-9 px-2.5" onClick={() => step('redo')} disabled={!hist.future.length} aria-label="Redo" title="Redo"><Redo2 size={16} /></Button>
-            <Button variant="ghost" className="h-9 px-2.5" onClick={() => commit(group(tree.op))} disabled={!tree.children.length} title="Remove every condition"><Eraser size={16} /> Clear all</Button>
+            <Button variant="ghost" className="h-9 px-2.5" onClick={() => commit(group())} disabled={!tree.children.length} title="Remove every condition"><Eraser size={16} /> Clear all</Button>
           </div>
         )}
       </div>

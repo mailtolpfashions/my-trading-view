@@ -33,6 +33,9 @@ import { ScreenError, cachedHistory, runScreen, type ScreenRequest } from './scr
 import { UNIVERSE_INDICES, industries, resolveUniverse, type UniverseFilters, type UniverseSpec } from './screener/universe';
 import { CONDITION_LIBRARY, FIELDS, FUNCTIONS, PRESETS } from '@mtv/rules';
 import { UserStoreError, userStore } from './user/store';
+import { AlertEngine } from './alerts/engine';
+import { todayBrief } from './today/brief';
+import { channelInfo, send } from './alerts/channels';
 import { StrategyError, runStrategyBacktest, type BacktestRequest } from './strategy/backtest';
 import { StudyError, catalog as studyCatalog, computeStudy, encodeNonFinite } from './studies/library';
 import { findInstrument, loadEquities, searchInstruments } from './symbols';
@@ -85,7 +88,7 @@ const tokenFrom = (req: FastifyRequest) => {
 // needs a valid feed token.
 const PUBLIC = new Set(['/api/kite/login', '/api/kite/callback']);
 /** Routes that read the in-memory NSE history. */
-const NEEDS_HISTORY = new Set(['/api/market/rrg', '/api/market/breadth', '/api/market/breadth-all', '/api/dashboard', '/api/research/study', '/api/research/fii', '/api/candles', '/api/quotes', '/api/backtest', '/api/options-backtest', '/api/studies/compute', '/api/research/nifty-days', '/api/eod/history', '/api/scan', '/api/screener/run', '/api/screener/count', '/api/strategy/backtest']);
+const NEEDS_HISTORY = new Set(['/api/market/rrg', '/api/market/breadth', '/api/market/breadth-all', '/api/dashboard', '/api/research/study', '/api/research/fii', '/api/candles', '/api/quotes', '/api/backtest', '/api/options-backtest', '/api/studies/compute', '/api/research/nifty-days', '/api/eod/history', '/api/scan', '/api/screener/run', '/api/screener/count', '/api/strategy/backtest', '/api/today']);
 // Visitors without an account may use everything (owner routes check `admin` themselves), with a daily allowance
 // of runs (COUNTED_ROUTES). A run is counted only when it succeeds, so a rejected rule doesn't use one up.
 const quota = new VisitorQuota(VISITOR_DAILY_RUNS, VISITOR_DAILY_RUNS_PER_IP);
@@ -562,6 +565,31 @@ app.get('/api/user/strategies', userRoute(() => userStore.strategies()));
 app.post('/api/user/strategies', userRoute((b: Parameters<typeof userStore.saveStrategy>[0]) => userStore.saveStrategy(b)));
 app.post('/api/user/strategies/delete', userRoute((b: { id: string }) => userStore.deleteStrategy(b.id).then(() => ({ ok: true }))));
 
+// ---- The Today page: the day's mode and limits, and the brief ----
+app.get('/api/user/settings', userRoute(() => userStore.settings()));
+app.post('/api/user/settings', userRoute((b: Parameters<typeof userStore.saveSettings>[0]) => userStore.saveSettings(b)));
+app.get('/api/today', async () => todayBrief());
+
+// ---- Alerts on saved screens and strategy entry rules (src/alerts) ----
+app.get('/api/user/alerts', userRoute(() => userStore.alerts()));
+app.post('/api/user/alerts', userRoute((b: Parameters<typeof userStore.saveAlert>[0]) => userStore.saveAlert(b)));
+app.post('/api/user/alerts/delete', userRoute((b: { id: string }) => userStore.deleteAlert(b.id).then(() => ({ ok: true }))));
+app.post('/api/user/alerts/enabled', userRoute((b: { id: string; enabled: boolean }) => userStore.setAlertEnabled(b.id, !!b.enabled)));
+app.get('/api/user/alert-events', userRoute(() => userStore.alertEvents()));
+app.post('/api/user/alert-events/read', userRoute((b: { ids?: string[] }) => userStore.markAlertEventsRead(b.ids).then(() => ({ ok: true }))));
+app.get('/api/alerts/channels', async () => channelInfo());
+app.post<{ Body: { channel?: string } }>('/api/alerts/test', async (req, reply) => {
+  const ch = channelInfo().find((c) => c.channel === req.body?.channel);
+  if (!ch) return reply.code(400).send({ error: 'bad_channel', message: 'Unknown channel' });
+  if (!ch.ready) return reply.code(400).send({ error: 'not_configured', message: `Add ${ch.needs.join(', ')} to .env, then restart the data service` });
+  try {
+    await send(ch.channel, { title: 'Test alert from Nandibull', lines: ['If you can read this, alerts will reach you here.'], link: null });
+    return { ok: true };
+  } catch (e) {
+    return reply.code(502).send({ error: 'send_failed', message: (e as Error).message });
+  }
+});
+
 // ---- Equity strategy backtest (packages/backtest portfolio engine) ----
 app.post<{ Body: BacktestRequest }>('/api/strategy/backtest', async (req, reply) => {
   try {
@@ -640,6 +668,8 @@ else {
 }
 warmMarketViews((m) => app.log.info(m));
 setLiveLog((m) => app.log.info(m));
+const alerts = new AlertEngine((m) => app.log.info(m));
+if (process.env.FEED_NO_ALERTS !== '1') alerts.start();
 if (process.env.FEED_NO_LIVE !== '1' && (await loadSession())) void live.start();
 else live.status.state = 'login-required';
 await app.listen({ port: PORT, host: HOST });

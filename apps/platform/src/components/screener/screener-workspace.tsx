@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Eraser, FilePlus2, Play, Redo2, Save, Undo2 } from 'lucide-react';
+import { Bell, Eraser, FilePlus2, Play, Redo2, Save, Undo2 } from 'lucide-react';
 import { isIntraday, type Tf } from '@mtv/rules';
 import { fromTree, group, toTree, type Group } from '@/lib/builder';
 import { FeedError, feed } from '@/lib/feed';
@@ -150,7 +151,7 @@ export function ScreenerWorkspace() {
   };
 
   // Intraday screens can re-run on their own, 5 seconds after each minute closes.
-  const intradayScreen = isIntraday(screen.tf) || /[d+[mh]]/.test(screen.formula);
+  const intradayScreen = isIntraday(screen.tf) || /\[\d+[mh]\]/.test(screen.formula);
   const runRef = useRef(run);
   runRef.current = run;
   useEffect(() => {
@@ -197,6 +198,7 @@ export function ScreenerWorkspace() {
             </select>
             <Button onClick={() => save(false)} disabled={!dirty && !!screen.id} title={screen.id ? 'Save changes to this screen' : 'Save to My screens'}><Save size={15} /> Save</Button>
             {screen.id && <Button variant="ghost" onClick={() => save(true)}>Save as new</Button>}
+            {screen.id && <Link href={`/alerts?screen=${screen.id}`} className="inline-flex h-10 items-center gap-1.5 rounded-[12px] px-3 text-[14px] font-semibold text-ink-2 hover:bg-raised hover:text-ink"><Bell size={15} /> Alert</Link>}
             <Button variant="ghost" onClick={() => confirmLeave() && load({ ...NEW_SCREEN, formula: '' }, null)} title="Start an empty screen"><FilePlus2 size={15} /> New</Button>
           </>
         }>
@@ -234,7 +236,7 @@ export function ScreenerWorkspace() {
                   <div className="ml-auto flex items-center gap-1">
                     <Button variant="ghost" className="h-9 px-2.5" onClick={undo} disabled={!hist.past.length} aria-label="Undo" title="Undo"><Undo2 size={16} /></Button>
                     <Button variant="ghost" className="h-9 px-2.5" onClick={redo} disabled={!hist.future.length} aria-label="Redo" title="Redo"><Redo2 size={16} /></Button>
-                    <Button variant="ghost" className="h-9 px-2.5" onClick={() => commit(group(tree.op))} disabled={!tree.children.length} title="Remove every condition"><Eraser size={16} /> Clear all</Button>
+                    <Button variant="ghost" className="h-9 px-2.5" onClick={() => commit(group())} disabled={!tree.children.length} title="Remove every condition"><Eraser size={16} /> Clear all</Button>
                   </div>
                 )}
               </div>

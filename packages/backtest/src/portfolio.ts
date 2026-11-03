@@ -409,8 +409,10 @@ function summarise(trades: PortfolioTrade[], equity: { time: number; equityPaise
   const mean = ex.reduce((a, b) => a + b, 0) / (ex.length || 1);
   const sd = Math.sqrt(ex.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, ex.length - 1));
   const dsd = Math.sqrt(ex.reduce((a, b) => a + Math.min(0, b) ** 2, 0) / (ex.length || 1));
-  const sharpe = sd > 0 ? (mean / sd) * Math.sqrt(ppy) : null;
-  const sortino = dsd > 0 ? (mean / dsd) * Math.sqrt(ppy) : null;
+  // Ratios from a handful of bars, or with no trades at all, would be noise: they are left empty.
+  const enough = closed.length > 0 && rets.length >= 20;
+  const sharpe = enough && sd > 0 ? (mean / sd) * Math.sqrt(ppy) : null;
+  const sortino = enough && dsd > 0 ? (mean / dsd) * Math.sqrt(ppy) : null;
 
   // Month and year returns from equity at each period's last bar.
   const monthEnd = new Map<string, number>();

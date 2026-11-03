@@ -14,7 +14,8 @@
     "db:migrate": "npm run migrate -w @mtv/db",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "platform": "concurrently -n feed,platform -c yellow,green \"npm run start -w @mtv/feed\" \"npm run dev -w @mtv/platform\""
+    "platform": "npm run build -w @mtv/platform && concurrently -n feed,platform -c yellow,green \"npm run start -w @mtv/feed\" \"npm run start -w @mtv/platform\"",
+    "platform:dev": "concurrently -n feed,platform -c yellow,green \"npm run start -w @mtv/feed\" \"npm run dev -w @mtv/platform\""
   },
   "engines": {
     "node": ">=22"

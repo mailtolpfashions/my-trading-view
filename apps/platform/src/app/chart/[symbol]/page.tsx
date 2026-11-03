@@ -1,15 +1,16 @@
 import type { Metadata } from 'next';
-import { BasicChart, type ChartTf } from '@/components/chart/basic-chart';
+import { ChartWorkspace } from '@/components/terminal/chart-workspace';
 
-type Props = { params: Promise<{ symbol: string }>; searchParams: Promise<{ tf?: string }> };
+type Props = { params: Promise<{ symbol: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  return { title: decodeURIComponent((await params).symbol).toUpperCase() };
+  const symbol = decodeURIComponent((await params).symbol).toUpperCase();
+  return {
+    title: `${symbol} chart`,
+    description: `${symbol} daily, weekly and monthly chart on NSE’s official end-of-day data, adjusted for splits and bonuses, with indicators and drawing tools.`,
+  };
 }
 
-export default async function ChartPage({ params, searchParams }: Props) {
-  const symbol = decodeURIComponent((await params).symbol).toUpperCase();
-  const tf = (await searchParams).tf;
-  const ok: ChartTf[] = ['1m', '5m', '15m', '1h', 'D', 'W', 'M'];
-  return <BasicChart key={symbol} symbol={symbol} tf={ok.includes(tf as ChartTf) ? (tf as ChartTf) : 'D'} />;
+export default async function ChartPage({ params }: Props) {
+  return <ChartWorkspace symbol={decodeURIComponent((await params).symbol).toUpperCase()} />;
 }

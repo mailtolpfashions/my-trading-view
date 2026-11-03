@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowRight, FilePlus2, Play, Save, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowRight, Bell, FilePlus2, Play, Save, Trash2 } from 'lucide-react';
 import { parseFormula } from '@mtv/rules';
 import { FeedError, feed } from '@/lib/feed';
 import type { Meta, UniverseSpec } from '@/lib/screener';
@@ -97,6 +98,7 @@ export function StrategyWorkspace() {
           <>
             <Button onClick={() => save(false)} disabled={!dirty && !!doc.id}><Save size={15} /> Save</Button>
             {doc.id && <Button variant="ghost" onClick={() => save(true)}>Save as new</Button>}
+            {doc.id && <Link href={`/alerts?strategy=${doc.id}`} className="inline-flex h-10 items-center gap-1.5 rounded-[12px] px-3 text-[14px] font-semibold text-ink-2 hover:bg-raised hover:text-ink"><Bell size={15} /> Alert</Link>}
             <Button variant="ghost" onClick={() => confirmLeave() && open({ ...NEW_DOC }, null)}><FilePlus2 size={15} /> New</Button>
           </>
         }>
@@ -140,6 +142,18 @@ export function StrategyWorkspace() {
                 <Field label="To"><input type="date" value={s.to} onChange={(e) => set({ to: e.target.value })} className={`${inputCls} num`} /></Field>
                 <Field label="Risk-free rate % a year" tip="Used for Sharpe and Sortino. Set it to the current 91-day T-bill yield."><NumIn v={s.riskFreePct} on={(v) => set({ riskFreePct: v ?? 0 })} /></Field>
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="eyebrow">Quick period</span>
+                {([['1 year', 1], ['3 years', 3], ['5 years', 5], ['All data', 20]] as const).map(([label, years]) => (
+                  <button key={label} type="button" onClick={() => set({ from: yearsAgo(years), to: todayIst() })}
+                    className="h-8 rounded-[9px] border border-line-strong px-3 text-[13px] font-semibold text-ink-2 hover:text-ink">{label}</button>
+                ))}
+              </div>
+              {daysBetween(s.from, s.to) < 365 && (
+                <p className="rounded-[12px] bg-down-soft px-3 py-2 text-[13px] text-down">
+                  This test covers {Math.max(0, daysBetween(s.from, s.to))} day{daysBetween(s.from, s.to) === 1 ? '' : 's'}. A signal at one bar&apos;s close trades at the next bar&apos;s open, so short tests show few or no trades. Pick at least a year (use Quick period).
+                </p>
+              )}
             </div>
           )}
 
@@ -194,6 +208,10 @@ function Library({ list, activeId, onTemplate, onOpen, onDelete }: { list: Saved
     </div>
   );
 }
+
+const todayIst = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+const yearsAgo = (y: number) => { const d = new Date(Date.now() + 5.5 * 3600_000); d.setUTCFullYear(d.getUTCFullYear() - y); return d.toISOString().slice(0, 10); };
+const daysBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 86400_000);
 
 function Field({ label, tip, children }: { label: string; tip?: string; children: React.ReactNode }) {
   return <label className="grid gap-1"><span className="eyebrow flex items-center gap-1">{label}{tip && <InfoTip label={label}>{tip}</InfoTip>}</span>{children}</label>;

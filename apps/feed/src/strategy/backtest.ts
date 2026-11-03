@@ -37,6 +37,11 @@ export async function runStrategyBacktest(req: BacktestRequest) {
 
   const warnings: string[] = [];
   if (universe.kind === 'index' || universe.kind === 'fno') warnings.push(`This uses today's ${universe.kind === 'index' ? `${universe.name} members` : 'F&O stock list'}. Stocks that left it, often after falling, are missing from the past, so results can look better than they were. "All NSE stocks" includes delisted ones.`);
+  const lastDay = nifty?.to;
+  if (lastDay && req.strategy.to > lastDay) warnings.push(`NSE's end-of-day file after ${lastDay} is not in yet (it is published in the evening), so the test ends on ${lastDay}.`);
+  const bars = result.equity.length;
+  const per = { D: 'trading days', W: 'weeks', M: 'months' }[req.strategy.tf];
+  if (bars < { D: 60, W: 26, M: 12 }[req.strategy.tf]) warnings.push(`The test covers only ${bars} ${per}. A signal at one bar's close trades at the next bar's open, so very short tests show few or no trades; test at least a year for a meaningful result.`);
   const earliest = nifty?.from;
   if (earliest && req.strategy.from < earliest) warnings.push(`NSE history held here starts on ${earliest}; the test effectively starts then, not on ${req.strategy.from}.`);
   if (!eodComplete()) warnings.push('Older NSE history is still downloading, so some stocks have less history than they should.');

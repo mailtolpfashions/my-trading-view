@@ -14,6 +14,7 @@ export type LiveStatus = {
   history: { running: boolean; done: number; total: number; failed: number; days: number; finishedAt: number | null };
   correctedOn: string | null;
   options: { contracts: number; minutesToday: number };
+  liveCheck?: { date: string; stocks: number; minutes: number; closeSamePct: number; highLowSamePct: number; volumeWithin1Pct: number; missedMinutes: number } | null;
 };
 
 export const liveApi = {

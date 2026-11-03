@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowDown, ArrowUp, Copy, FolderPlus, Plus, Search, Type, X } from 'lucide-react';
 import { parseFormula, type Tf } from '@mtv/rules';
-import { OPS, addTo, duplicateItem, fromComparison, group, leaf, mapItem, moveItem, toComparison, type Comparison, type Group, type Item, type Leaf, type Op } from '@/lib/builder';
+import { OPS, addTo, duplicateItem, fromComparison, group, leaf, mapItem, moveItem, reading, setAllJoins, setJoin, toComparison, type Comparison, type Group, type Item, type Join, type Leaf, type Op } from '@/lib/builder';
 import { TF_LABEL, type Meta, type Param } from '@/lib/screener';
 import { TimeframeOptions } from '../timeframe-select';
 import { inputCls } from '../ui';
@@ -25,15 +25,16 @@ function GroupView({ g, isRoot, ctx, first, last }: { g: Group; isRoot?: boolean
     <div className={isRoot ? 'grid gap-3' : 'grid gap-3 rounded-[14px] border border-line-strong bg-raised/60 p-3'}>
       <div className="flex flex-wrap items-center gap-2">
         <NotToggle on={g.not} onChange={(not) => edit((x) => ({ ...x, not }))} />
-        <span className="text-[13px] text-ink-2">{isRoot ? ctx.rootLabel : 'This group matches'}</span>
-        <div role="radiogroup" aria-label="Match" className="inline-flex rounded-[10px] border border-line-strong bg-panel p-0.5">
-          {(['AND', 'OR'] as const).map((op) => (
-            <button key={op} type="button" role="radio" aria-checked={g.op === op} onClick={() => edit((x) => ({ ...x, op }))}
-              className={`h-7 rounded-[8px] px-2.5 text-[12.5px] font-semibold ${g.op === op ? 'bg-inverse text-on-inverse' : 'text-ink-2 hover:text-ink'}`}>
-              {op === 'AND' ? 'All of these' : 'Any of these'}
-            </button>
-          ))}
-        </div>
+        <span className="text-[13px] text-ink-2">{isRoot ? ctx.rootLabel : 'Group (in brackets)'}</span>
+        {g.children.length > 2 && (
+          <span className="flex items-center gap-1 text-[12px] text-muted">
+            Set all:
+            {(['AND', 'OR'] as const).map((j) => (
+              <button key={j} type="button" onClick={() => ctx.change(setAllJoins(ctx.root, g.id, j))}
+                className="h-6 rounded-[6px] border border-line-strong px-1.5 font-semibold text-ink-2 hover:text-ink">{j}</button>
+            ))}
+          </span>
+        )}
         {!isRoot && (
           <div className="ml-auto flex items-center">
             <button type="button" className={icon} disabled={first} onClick={() => ctx.change(moveItem(ctx.root, g.id, -1))} aria-label="Move group up"><ArrowUp size={15} /></button>
@@ -46,21 +47,46 @@ function GroupView({ g, isRoot, ctx, first, last }: { g: Group; isRoot?: boolean
       <ol className="grid gap-2">
         {g.children.map((c, i) => (
           <li key={c.id} className="grid gap-2">
-            {c.kind === 'group'
-              ? <GroupView g={c} ctx={ctx} first={i === 0} last={i === g.children.length - 1} />
-              : <LeafView l={c} ctx={ctx} first={i === 0} last={i === g.children.length - 1} />}
-            {i < g.children.length - 1 && <span className="eyebrow pl-1">{g.op === 'AND' ? 'and' : 'or'}</span>}
+            <div className="flex items-start gap-2">
+              <span className="num mt-2.5 w-5 shrink-0 text-right text-[12.5px] font-semibold text-muted">{i + 1}</span>
+              <div className="min-w-0 flex-1">
+                {c.kind === 'group'
+                  ? <GroupView g={c} ctx={ctx} first={i === 0} last={i === g.children.length - 1} />
+                  : <LeafView l={c} ctx={ctx} first={i === 0} last={i === g.children.length - 1} />}
+              </div>
+            </div>
+            {i < g.children.length - 1 && <JoinSelect value={g.joins[i] ?? 'AND'} onChange={(j) => ctx.change(setJoin(ctx.root, g.id, i, j))} />}
           </li>
         ))}
       </ol>
+      {reading(g) && (
+        <p className="pl-7 text-[12.5px] text-ink-2">
+          Reads as: <span className="font-mono font-semibold text-ink">{reading(g)}</span>
+          <span className="text-muted"> (AND is applied before OR; use Add group for other brackets)</span>
+        </p>
+      )}
       {!g.children.length && <p className="text-[13px] text-muted">{isRoot ? 'No conditions yet. Add one from the list, or type your own.' : 'Empty group: add conditions to it.'}</p>}
       <div className="flex flex-wrap items-center gap-2">
         <AddCondition meta={ctx.meta} onAdd={(f) => ctx.change(addTo(ctx.root, g.id, leaf(f)))} />
-        <button type="button" onClick={() => ctx.change(addTo(ctx.root, g.id, { ...group(g.op === 'AND' ? 'OR' : 'AND'), children: [leaf('')] }))}
+        <button type="button" onClick={() => ctx.change(addTo(ctx.root, g.id, group([leaf('')])))}
           className="inline-flex h-10 items-center gap-1.5 rounded-[12px] px-3 text-[14px] font-semibold text-ink-2 hover:bg-raised hover:text-ink">
           <FolderPlus size={16} /> Add group
         </button>
       </div>
+    </div>
+  );
+}
+
+/** The AND / OR between two rows. */
+function JoinSelect({ value, onChange }: { value: Join; onChange: (j: Join) => void }) {
+  return (
+    <div className="flex items-center gap-2 pl-7">
+      <select value={value} onChange={(e) => onChange(e.target.value as Join)} aria-label="Join with the next condition"
+        className={`h-7 rounded-[8px] border px-2 pr-6 text-[12px] font-bold tracking-wide focus:outline-none ${value === 'AND' ? 'border-line-strong bg-panel text-ink-2' : 'border-accent bg-accent-soft text-accent-deep'}`}>
+        <option value="AND">AND</option>
+        <option value="OR">OR</option>
+      </select>
+      <span className="h-px flex-1 bg-line" />
     </div>
   );
 }

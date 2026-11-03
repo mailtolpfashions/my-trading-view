@@ -21,6 +21,8 @@ type State = { bar: Candle; baseVol: number; lastCum: number; keep: boolean };
 export class MinuteBuilder {
   private state = new Map<string, State>();
   private today = new Map<string, Candle[]>();
+  /** Bars built from live ticks today (kept apart, so they can be checked against Kite's official minutes). */
+  private liveBuilt = new Map<string, Candle[]>();
   private day = -1;
 
   /** `onBars`: finished bars to store. */
@@ -30,6 +32,7 @@ export class MinuteBuilder {
     if (dayOf(t) === this.day) return;
     this.day = dayOf(t);
     this.today.clear();
+    this.liveBuilt.clear();
     // Running volume restarts each day, so a stock seen yesterday starts today's first bar from zero.
     for (const s of this.state.values()) { s.baseVol = 0; s.lastCum = 0; s.keep = true; }
   }
@@ -70,6 +73,7 @@ export class MinuteBuilder {
     const list = this.today.get(symbol) ?? [];
     if (!list.length || list[list.length - 1].time < done.time) list.push(done);
     this.today.set(symbol, list);
+    this.liveBuilt.set(symbol, [...(this.liveBuilt.get(symbol) ?? []), done]);
     this.onBars(symbol, [done]);
     s.keep = false; // never emitted twice
   }
@@ -106,4 +110,7 @@ export class MinuteBuilder {
   }
 
   symbols() { return [...this.today.keys()]; }
+
+  /** Today's bars that came from live ticks. */
+  liveBars(symbol: string): Candle[] { return this.liveBuilt.get(symbol) ?? []; }
 }

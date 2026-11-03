@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 // The browser talks to the feed through this server, so the feed token never leaves it and the feed needs no extra
 // CORS origin. Only the routes the platform uses are passed on.
 const FEED = process.env.FEED_URL ?? 'http://127.0.0.1:4001';
-const ALLOWED = /^(screener\/(meta|count|run)|candles|search|quotes|eod\/status|user\/(screens|screens\/delete|screens\/favourite|recent|watchlists|watchlists\/add|watchlists\/delete|strategies|strategies\/delete)|strategy\/backtest|kite\/(status|login|logout)|intraday\/candles)$/;
+const ALLOWED = /^(today|dashboard|screener\/(meta|count|run)|candles|search|quotes|eod\/status|user\/(settings|screens|screens\/delete|screens\/favourite|recent|watchlists|watchlists\/add|watchlists\/delete|strategies|strategies\/delete|alerts|alerts\/delete|alerts\/enabled|alert-events|alert-events\/read)|strategy\/backtest|alerts\/(channels|test)|kite\/(status|login|logout)|intraday\/candles)$/;
 
 async function forward(req: NextRequest, path: string[]) {
   const route = path.join('/');
@@ -26,7 +26,7 @@ async function forward(req: NextRequest, path: string[]) {
     if (location && res.status >= 300 && res.status < 400) return NextResponse.redirect(location, res.status);
     return new NextResponse(await res.text(), { status: res.status, headers: { 'content-type': res.headers.get('content-type') ?? 'application/json', 'cache-control': 'no-store' } });
   } catch {
-    return NextResponse.json({ error: 'feed_down', message: 'The data service is not running. Start it with npm run app.' }, { status: 502 });
+    return NextResponse.json({ error: 'feed_down', message: 'The data service is not running. Start it with npm run platform.' }, { status: 502 });
   }
 }
 

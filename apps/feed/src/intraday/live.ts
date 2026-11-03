@@ -9,12 +9,12 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { resample, type Tf } from '@mtv/rules';
 import type { Candle } from '@mtv/shared';
-import { dailyHistory, rawCloses } from '../eod/store';
+import { dailyHistory, rawCloses, rawDays } from '../eod/store';
 import { fnoUnderlyings } from '../fno/analytics';
 import { KiteProvider } from '../providers/kite/provider';
 import { activeSession } from '../providers/kite/session';
 import { indexMemberRows } from '../research/overview';
-import { adjustToEod, type DayCloses } from './adjust';
+import { adjustToEod, type DayInfo } from './adjust';
 import { MinuteBuilder } from './builder';
 import { MinuteStore, dateOfIst } from './store';
 import { OptionRecorder, OptionStore, pickContracts } from './options';
@@ -41,6 +41,16 @@ export type LiveStatus = {
   history: { running: boolean; done: number; total: number; failed: number; days: number; finishedAt: number | null };
   correctedOn: string | null;
   options: { contracts: number; minutesToday: number };
+  /** The last after-close check of live-built minutes against Kite's official ones. */
+  liveCheck: LiveCheck | null;
+};
+
+export type LiveCheck = {
+  date: string; stocks: number; minutes: number;
+  /** Share of live minutes whose close / high and low / volume (within 1%) equal the official minute's. */
+  closeSamePct: number; highLowSamePct: number; volumeWithin1Pct: number;
+  /** Official minutes the live feed never built (stocks with no tick that minute, or the service was off). */
+  missedMinutes: number;
 };
 
 export class LiveService {
@@ -57,6 +67,7 @@ export class LiveService {
     state: 'off', message: null, userName: null, expiresAt: null, stocks: 0, lastTickAt: null,
     today: { running: false, done: 0, total: 0 }, history: { running: false, done: 0, total: 0, failed: 0, days: 0, finishedAt: null }, correctedOn: null,
     options: { contracts: 0, minutesToday: 0 },
+    liveCheck: null,
   };
   readonly optionStore = new OptionStore();
   readonly options = new OptionRecorder((u, rows) => { void this.optionStore.append(u, rows).catch((e) => this.log(`Could not store ${u} option minutes: ${e.message}`)); });
@@ -189,9 +200,23 @@ export class LiveService {
     if (now < start) return;
     const today = dateOfIst(now);
     this.status.today = { running: true, done: 0, total: list.length };
+    const check = { stocks: 0, minutes: 0, close: 0, highLow: 0, volume: 0, missed: 0 };
     for (const s of list) {
       try {
         const bars = (await p.minutes(s, start, now)).filter((b) => dateOfIst(b.time) === today && (afterClose || b.time + 60 <= now));
+        if (bars.length && afterClose) {
+          // Before the official minutes replace them, compare what the live feed built.
+          const live = new Map(this.builder.liveBars(s).map((b) => [b.time, b]));
+          if (live.size) check.stocks++;
+          for (const o of bars) {
+            const l = live.get(o.time);
+            if (!l) { if (live.size) check.missed++; continue; }
+            check.minutes++;
+            if (Math.abs(l.close - o.close) < 0.005) check.close++;
+            if (Math.abs(l.high - o.high) < 0.005 && Math.abs(l.low - o.low) < 0.005) check.highLow++;
+            if (o.volume ? Math.abs(l.volume / o.volume - 1) <= 0.01 : l.volume === 0) check.volume++;
+          }
+        }
         if (bars.length) {
           await this.store.replaceDays(s, [today], bars);
           if (this.builder.setToday(s, bars)) seams.push(s);
@@ -203,6 +228,13 @@ export class LiveService {
       this.status.today.done++;
     }
     this.status.today.running = false;
+    if (afterClose && check.minutes) {
+      const pctOf = (n: number) => Math.round((n / check.minutes) * 1000) / 10;
+      this.status.liveCheck = { date: today, stocks: check.stocks, minutes: check.minutes, closeSamePct: pctOf(check.close), highLowSamePct: pctOf(check.highLow), volumeWithin1Pct: pctOf(check.volume), missedMinutes: check.missed };
+      this.log(`Live vs official minutes ${today}: ${JSON.stringify(this.status.liveCheck)}`);
+      await mkdir(path.join(this.store.dir, '..', 'reports'), { recursive: true });
+      await writeFile(path.join(this.store.dir, '..', 'reports', `live-check-${today}.json`), JSON.stringify(this.status.liveCheck, null, 1));
+    }
     this.version++;
     this.log(`Live data: today's minutes ${afterClose ? 'corrected' : 'loaded'} for ${this.status.today.done} instruments`);
     // Minutes that fell between the download and the first live bar: one more download for those stocks fills them.
@@ -241,11 +273,11 @@ export class LiveService {
     this.log(`Live data: history back-filled (${this.status.history.days} stock-days, ${this.status.history.failed} failed)`);
   }
 
-  /** Published and adjusted daily closes, for putting minutes on the daily history's adjusted basis. */
-  private dayCloses(symbol: string): DayCloses {
-    const raw = rawCloses(symbol), adj = dailyHistory(symbol)?.candles ?? [];
-    const out: DayCloses = new Map();
-    for (const c of adj) { const d = dateOfIst(c.time), r = raw.get(d); if (r) out.set(d, { raw: r, adj: c.close }); }
+  /** NSE's published open and the daily history's adjustment for each day, for re-basing minutes (adjust.ts). */
+  private dayInfo(symbol: string): DayInfo {
+    const raw = rawDays(symbol), adj = dailyHistory(symbol)?.candles ?? [];
+    const out: DayInfo = new Map();
+    for (const c of adj) { const d = dateOfIst(c.time), r = raw.get(d); if (r?.close) out.set(d, { rawOpen: r.open, adj: c.close / r.close }); }
     return out;
   }
 
@@ -263,7 +295,7 @@ export class LiveService {
       const days = DAYS_FOR[tf] ?? 40;
       const from = istMidnight(now) - Math.ceil(days * 1.5 + 4) * DAY;
       const stored = (await this.store.read(symbol, from)).filter((b) => dateOfIst(b.time) < today);
-      const adjusted = adjustToEod(stored, this.dayCloses(symbol));
+      const adjusted = adjustToEod(stored, this.dayInfo(symbol));
       past = tf === '1m' ? adjusted : resample(adjusted, tf);
       this.cache.set(ck, past);
     }

@@ -4,7 +4,7 @@ import type { NextConfig } from 'next';
 // 127.0.0.1 only: there are no accounts, so it must not be reachable from the network until it has a sign-in.
 const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || '.next',
-  transpilePackages: ['@mtv/shared', '@mtv/indicators', '@mtv/rules'],
+  transpilePackages: ['@mtv/shared', '@mtv/indicators', '@mtv/rules', '@mtv/backtest', '@mtv/options', '@mtv/paper'],
   async headers() {
     return [
       {

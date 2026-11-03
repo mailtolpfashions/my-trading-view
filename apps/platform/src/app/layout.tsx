@@ -1,10 +1,12 @@
 import type { Metadata, Viewport } from 'next';
-import { Outfit } from 'next/font/google';
+import localFont from 'next/font/local';
 import { THEME_BOOT } from '@/lib/theme-boot';
 import { AppShell } from '@/components/app-shell';
 import './globals.css';
 
-const outfit = Outfit({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'], variable: '--font-outfit', display: 'swap' });
+// Outfit ships with the app (SIL Open Font License, fonts/OFL.txt) instead of loading from Google Fonts at build time:
+// a change in Google's font URLs broke the Turbopack dev server, and a local file can't.
+const outfit = localFont({ src: './fonts/Outfit-Variable.ttf', weight: '100 900', variable: '--font-outfit', display: 'swap' });
 
 export const metadata: Metadata = {
   title: { default: 'Nandibull', template: '%s | Nandibull' },

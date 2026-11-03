@@ -47,6 +47,7 @@ function Connect() {
               <dd>{s.history.running ? `Downloading: ${s.history.done} of ${s.history.total} stocks (${s.history.days.toLocaleString('en-IN')} stock-days so far)` : s.history.finishedAt ? `Up to date (${time(s.history.finishedAt)})${s.history.failed ? `, ${s.history.failed} failed (see the log)` : ''}` : 'Not started'}</dd>
               <dt className="text-muted">Option recording</dt><dd>{s.options?.contracts ? `${s.options.contracts} NIFTY and BANKNIFTY contracts, ${s.options.minutesToday.toLocaleString('en-IN')} minutes saved today` : s.options ? 'Starting…' : 'Starts after the data service restarts'}</dd>
               <dt className="text-muted">After-close correction</dt><dd>{s.correctedOn ? `Done for ${s.correctedOn}` : 'At 15:50 IST'}</dd>
+              {s.liveCheck && <><dt className="text-muted">Live vs official ({s.liveCheck.date})</dt><dd>{s.liveCheck.minutes.toLocaleString('en-IN')} live minutes across {s.liveCheck.stocks} instruments: close identical {s.liveCheck.closeSamePct}%, high and low identical {s.liveCheck.highLowSamePct}%, volume within 1% {s.liveCheck.volumeWithin1Pct}%; {s.liveCheck.missedMinutes.toLocaleString('en-IN')} official minutes not built live</dd></>}
             </dl>
           )}
         </div>

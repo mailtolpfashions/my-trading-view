@@ -87,14 +87,22 @@ describe('minute store', () => {
 });
 
 describe('intraday prices on the daily adjusted basis', () => {
-  const day = (h: number, c: number): Candle => ({ time: Date.UTC(2026, 0, 13, h, 0) / 1000 - 5.5 * 3600, open: c, high: c, low: c, close: c, volume: 100 });
-  it('scales unadjusted minutes before a split, leaves adjusted or unaffected days alone', async () => {
+  // h:m in UTC: 3:45 UTC is 09:15 IST.
+  const at15 = (d: number, h: number, m: number, c: number): Candle => ({ time: Date.UTC(2026, 0, d, h, m) / 1000, open: c, high: c, low: c, close: c, volume: 100 });
+  it('re-bases each day by its open: dividend-adjusted minutes go back to published prices, splits to our adjusted basis', async () => {
     const { adjustToEod } = await import('./adjust');
-    // 13 Jan 2026: published close 2000, adjusted for a later 1:5 split → 400.
-    const closes = new Map([['2026-01-13', { raw: 2000, adj: 400 }]]);
-    expect(adjustToEod([day(10, 1990), day(15, 2000)], closes).map((b) => [b.close, b.volume])).toEqual([[398, 500], [400, 500]]);
-    expect(adjustToEod([day(10, 398), day(15, 400)], closes).map((b) => b.close)).toEqual([398, 400]);
-    expect(adjustToEod([day(15, 2000)], new Map())).toEqual([day(15, 2000)]);
+    // 12 Jan: Kite's minutes are 4% below the published open (a dividend adjustment); no split → published prices.
+    // 13 Jan: published open 2000, our basis adjusts a later 1:5 split (× 0.2); Kite already split-adjusted (400).
+    const days = new Map([['2026-01-12', { rawOpen: 2000, adj: 1 }], ['2026-01-13', { rawOpen: 2000, adj: 0.2 }]]);
+    const got = adjustToEod([at15(12, 3, 45, 1920), at15(12, 9, 0, 1932), at15(13, 3, 45, 400), at15(13, 9, 0, 402)], days);
+    expect(got.map((b) => [b.close, b.volume])).toEqual([[2000, 96], [2012.5, 96], [400, 100], [402, 100]]);
+  });
+  it('a day without its 09:15 minute borrows the nearest day\'s scale; unadjusted days are left alone', async () => {
+    const { adjustToEod } = await import('./adjust');
+    const days = new Map([['2026-01-12', { rawOpen: 2000, adj: 1 }], ['2026-01-13', { rawOpen: 2010, adj: 1 }]]);
+    const got = adjustToEod([at15(12, 3, 45, 1920), at15(13, 5, 0, 1930)], days);
+    expect(got.map((b) => b.close)).toEqual([2000, 2010.42]);
+    expect(adjustToEod([at15(12, 3, 45, 2000)], days)).toEqual([at15(12, 3, 45, 2000)]);
   });
 });
 

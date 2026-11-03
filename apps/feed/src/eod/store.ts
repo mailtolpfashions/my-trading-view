@@ -263,6 +263,11 @@ export function rawCloses(symbol: string): Map<string, number> {
   return new Map(lineage(symbol).map((b) => [b.date, b.closePaise / 100]));
 }
 
+/** Each trading day's open and close as NSE published them (not adjusted), ₹. */
+export function rawDays(symbol: string): Map<string, { open: number; close: number }> {
+  return new Map(lineage(symbol).map((b) => [b.date, { open: b.openPaise / 100, close: b.closePaise / 100 }]));
+}
+
 /** The latest bar as NSE published it (not adjusted). */
 export const lastRawBar = (symbol: string): RawBar | undefined => bySymbol.get(symbol)?.at(-1);
 
