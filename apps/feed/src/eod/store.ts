@@ -258,6 +258,11 @@ export const eodVersion = () => dates.length;
 /** Every stock with stored history, including ones no longer traded (backtests must include them). */
 export const allEodSymbols = () => [...bySymbol.keys()].sort();
 
+/** Each trading day's close as NSE published it (not adjusted), ₹, including earlier symbols of the same company. */
+export function rawCloses(symbol: string): Map<string, number> {
+  return new Map(lineage(symbol).map((b) => [b.date, b.closePaise / 100]));
+}
+
 /** The latest bar as NSE published it (not adjusted). */
 export const lastRawBar = (symbol: string): RawBar | undefined => bySymbol.get(symbol)?.at(-1);
 

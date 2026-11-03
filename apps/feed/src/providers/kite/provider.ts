@@ -16,7 +16,7 @@ import { KiteTicker, type Tick } from './ticker';
 export const LIVE_CHAIN_UNDERLYINGS = ['NIFTY', 'BANKNIFTY'] as const;
 export type LiveChainUnderlying = (typeof LIVE_CHAIN_UNDERLYINGS)[number];
 export type LiveFuture = { expiry: string; ltpPaise: number; prevClosePaise: number; oi: number; volume: number };
-type OptionContract = { token: number; tradingsymbol: string; expiry: string; strike: number; right: 'CE' | 'PE'; lot: number };
+export type OptionContract = { token: number; tradingsymbol: string; expiry: string; strike: number; right: 'CE' | 'PE'; lot: number };
 
 const API = 'https://api.kite.trade';
 const IST = 5.5 * 3600;
@@ -78,11 +78,14 @@ export class KiteProvider implements MarketDataProvider {
   private candleCache = new TtlCache<Candle[]>();
   private nextHistorical = 0;
   ticker: KiteTicker;
+  /** Called with every tick message, instruments of all kinds (options too). */
+  readonly tickListeners: ((ticks: Tick[]) => void)[] = [];
 
   constructor(private log: (m: string) => void, private onTicks: (symbols: string[]) => void) {
     this.ticker = new KiteTicker(
       () => { const s = activeSession(); return s ? `wss://ws.kite.trade?api_key=${kiteApiKey()}&access_token=${s.accessToken}` : null; },
       (ticks) => {
+        for (const fn of this.tickListeners) fn(ticks);
         const changed: string[] = [];
         for (const t of ticks) {
           this.ticks.set(t.token, t);
@@ -146,6 +149,32 @@ export class KiteProvider implements MarketDataProvider {
     const missing = INDICES.map((i) => i.symbol).filter((s) => !this.tokens.has(s));
     const opts = [...this.options].map(([u, l]) => `${u} ${l.length}`).join(', ') + `; futures: ${[...this.futures].map(([u, l]) => `${u} ${l.length}`).join(', ') || 'none'}`;
     this.log(`Kite instruments loaded: ${this.tokens.size} symbols, options: ${opts || 'none'}${missing.length ? `; indices not found: ${missing.join(', ')}` : ''}`);
+  }
+
+  /** NFO option contracts of an underlying with a live chain (NIFTY, BANKNIFTY), every listed expiry. */
+  optionContracts(underlying: string): OptionContract[] { return this.options.get(underlying) ?? []; }
+
+  /** Instrument token of one of our symbols (stocks and the indices we track), if Kite lists it. */
+  tokenFor(symbol: string): number | undefined { return this.tokens.get(symbol); }
+
+  /** The latest tick received for a symbol. */
+  lastTick(symbol: string): Tick | undefined {
+    const t = this.tokens.get(symbol);
+    return t == null ? undefined : this.ticks.get(t);
+  }
+
+  /** One-minute bars between two times (UTC seconds), in requests of at most 60 days (Kite's limit for minutes). */
+  async minutes(symbol: string, from: number, to: number): Promise<Candle[]> {
+    const token = this.token(symbol);
+    const out: Candle[] = [];
+    for (let start = from; start < to; start += 60 * DAY) {
+      const end = Math.min(to, start + 60 * DAY - 1);
+      const path = `/instruments/historical/${token}/minute?from=${encodeURIComponent(kiteDate(start))}&to=${encodeURIComponent(kiteDate(end))}`;
+      const json = await this.paced(() => this.get<{ data: { candles: [string, number, number, number, number, number][] } }>(path));
+      out.push(...parseKiteCandles(json.data.candles, false));
+    }
+    const seen = new Set<number>();
+    return out.filter((c) => (seen.has(c.time) ? false : (seen.add(c.time), true))).sort((a, b) => a.time - b.time);
   }
 
   private token(symbol: string): number {

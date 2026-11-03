@@ -135,6 +135,32 @@ function fib(c: Candle[], level: number, n: number, extension: boolean): Series 
   });
 }
 
+/**
+ * Volume against the same time of day in earlier sessions. `cumulative`: the day's volume up to this bar against the
+ * volume earlier days had traded by the same time. Only earlier sessions count, never the current one.
+ */
+function timeOfDayRatio(c: Candle[], sessions: number, cumulative: boolean): Series {
+  const past = new Map<number, number[]>(); // time of day → that slot's values on earlier sessions, oldest first
+  const pending: [number, number][] = []; // today's slots, added to `past` when the day ends
+  let day = -1, cum = 0;
+  return c.map((b) => {
+    const d = Math.floor((b.time + IST) / 86400), key = (b.time + IST) % 86400;
+    if (d !== day) {
+      for (const [k, v] of pending) { const l = past.get(k) ?? []; l.push(v); if (l.length > sessions) l.shift(); past.set(k, l); }
+      pending.length = 0;
+      day = d;
+      cum = 0;
+    }
+    cum += b.volume;
+    const v = cumulative ? cum : b.volume;
+    pending.push([key, v]);
+    const prev = past.get(key);
+    if (!prev || prev.length < sessions) return null;
+    const avg = prev.reduce((a, x) => a + x, 0) / prev.length;
+    return avg > 0 ? v / avg : null;
+  });
+}
+
 const PIVOT_METHODS: readonly PivotMethod[] = ['CLASSIC', 'TRADITIONAL', 'FIBONACCI', 'WOODIE', 'CAMARILLA', 'DM'];
 const IST = 5.5 * 3600;
 
@@ -239,6 +265,8 @@ export const FUNCTIONS: FnDef[] = [
   fn('RVOL', 'Volume', 'num', [len(20)], 'Relative volume: this bar\'s volume ÷ the average of the N bars BEFORE it. On intraday bars this compares with whole bars, not the same time of day.', (c, [n]) => zip(c.map((b) => b.volume), shift(sma(c.map((b) => b.volume), N(n)), 1), (v, a) => (a ? v / a : null))),
   fn('AVG_TURNOVER', 'Volume', 'num', [len(20)], 'Average traded value in ₹ (Close × Volume) over N bars', (c, [n]) => sma(c.map((b) => b.close * b.volume), N(n))),
   fn('OBV', 'Volume', 'num', [], 'On-balance volume', (c) => obv(c)),
+  fn('RVOL_TOD', 'Volume', 'num', [len(20, 'sessions')], 'Relative volume at the same time of day: this bar\'s volume ÷ the average volume of the bars that started at the same time in the previous N sessions. The fair comparison on intraday bars (10:00 against earlier 10:00 bars, not against whole days).', (c, [n]) => timeOfDayRatio(c, N(n), false)),
+  fn('RVOL_CUM', 'Volume', 'num', [len(20, 'sessions')], 'Volume so far today ÷ the average volume traded by the same time of day in the previous N sessions. Above 1 = busier than usual for this point of the day.', (c, [n]) => timeOfDayRatio(c, N(n), true)),
 
   // ---- Price action ----
   fn('INSIDE_BAR', 'Price action', 'bool', [], 'High below the previous high and low above the previous low', (c) => c.map((b, i) => (i ? bool(b.high < c[i - 1].high && b.low > c[i - 1].low) : null))),

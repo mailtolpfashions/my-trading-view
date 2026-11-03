@@ -34,7 +34,23 @@ export type SavedScreen = {
 export type Watchlist = { id: string; owner: string; name: string; symbols: string[]; createdAt: string; updatedAt: string };
 export type RecentRun = RunRecord & { screenId: string | null; name: string; formula: string; tf: Tf };
 
-type Data = { version: 1; screens: SavedScreen[]; watchlists: Watchlist[]; recent: RecentRun[] };
+export type BacktestRecord = { at: string; from: string; to: string; trades: number; returnPct: number; cagrPct: number; maxDrawdownPct: number; winRatePct: number | null };
+export type SavedStrategy = {
+  id: string;
+  owner: string;
+  visibility: 'private';
+  name: string;
+  description: string;
+  /** The engine's settings (packages/backtest EquityStrategy), stored as given. */
+  strategy: Record<string, unknown>;
+  universe: UniverseSpec;
+  createdAt: string;
+  updatedAt: string;
+  /** Newest first, at most 50. */
+  backtests: BacktestRecord[];
+};
+
+type Data = { version: 1; screens: SavedScreen[]; watchlists: Watchlist[]; recent: RecentRun[]; strategies?: SavedStrategy[] };
 
 export class UserStoreError extends Error {}
 
@@ -126,6 +142,39 @@ export class UserStore {
 
   async recent(): Promise<RecentRun[]> {
     return (await this.load()).recent;
+  }
+
+  async strategies(): Promise<SavedStrategy[]> {
+    return [...((await this.load()).strategies ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  /** Creates a strategy, or updates the one with this id (its backtest history is kept). */
+  async saveStrategy(input: { id?: string; name: string; description?: string; strategy: Record<string, unknown>; universe: UniverseSpec }): Promise<SavedStrategy> {
+    const name = input.name?.trim();
+    if (!name) throw new UserStoreError('Give the strategy a name');
+    if (!input.strategy || typeof input.strategy !== 'object') throw new UserStoreError('The strategy settings are missing');
+    return this.change((d) => {
+      d.strategies ??= [];
+      const now = new Date().toISOString();
+      const fields = { name: name.slice(0, 120), description: (input.description ?? '').slice(0, 2000), strategy: input.strategy, universe: input.universe };
+      const existing = input.id ? d.strategies.find((x) => x.id === input.id) : undefined;
+      if (input.id && !existing) throw new UserStoreError('That strategy no longer exists');
+      if (existing) { Object.assign(existing, fields, { updatedAt: now }); return existing; }
+      const st: SavedStrategy = { id: randomUUID(), owner: OWNER, visibility: 'private', ...fields, createdAt: now, updatedAt: now, backtests: [] };
+      d.strategies.push(st);
+      return st;
+    });
+  }
+
+  deleteStrategy(id: string): Promise<void> {
+    return this.change((d) => { d.strategies = (d.strategies ?? []).filter((x) => x.id !== id); });
+  }
+
+  recordBacktest(id: string, r: BacktestRecord): Promise<void> {
+    return this.change((d) => {
+      const st = d.strategies?.find((x) => x.id === id);
+      if (st) st.backtests = [r, ...st.backtests].slice(0, MAX_RUNS);
+    });
   }
 
   async watchlists(): Promise<Watchlist[]> {

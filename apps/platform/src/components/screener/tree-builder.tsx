@@ -5,18 +5,18 @@ import { createPortal } from 'react-dom';
 import { ArrowDown, ArrowUp, Copy, FolderPlus, Plus, Search, Type, X } from 'lucide-react';
 import { parseFormula, type Tf } from '@mtv/rules';
 import { OPS, addTo, duplicateItem, fromComparison, group, leaf, mapItem, moveItem, toComparison, type Comparison, type Group, type Item, type Leaf, type Op } from '@/lib/builder';
-import type { Meta, Param } from '@/lib/screener';
+import { TF_LABEL, type Meta, type Param } from '@/lib/screener';
+import { TimeframeOptions } from '../timeframe-select';
 import { inputCls } from '../ui';
 import { ErrorText } from './formula-editor';
 
-const TF_LABEL: Record<string, string> = { D: 'Daily', W: 'Weekly', M: 'Monthly' };
 const icon = 'grid h-8 w-8 shrink-0 place-items-center rounded-[8px] text-muted hover:bg-raised hover:text-ink disabled:opacity-30';
 
-type Ctx = { meta: Meta | null; screenTf: Tf; change: (root: Group, key?: string) => void; root: Group };
+type Ctx = { meta: Meta | null; screenTf: Tf; change: (root: Group, key?: string) => void; root: Group; rootLabel: string };
 
 /** Groups of conditions, nested as deep as needed. `change(next, key)`: edits with the same key merge into one undo step. */
-export function TreeBuilder({ root, meta, screenTf, onChange }: { root: Group; meta: Meta | null; screenTf: Tf; onChange: (root: Group, key?: string) => void }) {
-  return <GroupView g={root} isRoot ctx={{ meta, screenTf, change: onChange, root }} />;
+export function TreeBuilder({ root, meta, screenTf, onChange, rootLabel = 'Stocks must match' }: { root: Group; meta: Meta | null; screenTf: Tf; onChange: (root: Group, key?: string) => void; rootLabel?: string }) {
+  return <GroupView g={root} isRoot ctx={{ meta, screenTf, change: onChange, root, rootLabel }} />;
 }
 
 function GroupView({ g, isRoot, ctx, first, last }: { g: Group; isRoot?: boolean; ctx: Ctx; first?: boolean; last?: boolean }) {
@@ -25,7 +25,7 @@ function GroupView({ g, isRoot, ctx, first, last }: { g: Group; isRoot?: boolean
     <div className={isRoot ? 'grid gap-3' : 'grid gap-3 rounded-[14px] border border-line-strong bg-raised/60 p-3'}>
       <div className="flex flex-wrap items-center gap-2">
         <NotToggle on={g.not} onChange={(not) => edit((x) => ({ ...x, not }))} />
-        <span className="text-[13px] text-ink-2">{isRoot ? 'Stocks must match' : 'This group matches'}</span>
+        <span className="text-[13px] text-ink-2">{isRoot ? ctx.rootLabel : 'This group matches'}</span>
         <div role="radiogroup" aria-label="Match" className="inline-flex rounded-[10px] border border-line-strong bg-panel p-0.5">
           {(['AND', 'OR'] as const).map((op) => (
             <button key={op} type="button" role="radio" aria-checked={g.op === op} onClick={() => edit((x) => ({ ...x, op }))}
@@ -93,9 +93,7 @@ function LeafView({ l, ctx, first, last }: { l: Leaf; ctx: Ctx; first: boolean; 
           onChange={(e) => set({ tf: (e.target.value || null) as Tf | null })}
           className={`${inputCls} w-[160px] shrink-0 pr-7 ${l.tf && !mixed ? 'border-accent font-semibold text-accent-deep' : ''}`}>
           <option value="">Screen ({TF_LABEL[ctx.screenTf]})</option>
-          <option value="D">Daily</option>
-          <option value="W">Weekly</option>
-          <option value="M">Monthly</option>
+          <TimeframeOptions />
           {mixed && <option value="mixed">Mixed</option>}
         </select>
         {structured

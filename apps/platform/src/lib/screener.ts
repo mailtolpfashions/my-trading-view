@@ -46,6 +46,9 @@ export type Meta = {
   industries: string[];
 };
 
+export const TF_LABEL: Record<string, string> = { '1m': '1 minute', '3m': '3 minutes', '5m': '5 minutes', '15m': '15 minutes', '30m': '30 minutes', '1h': '1 hour', '2h': '2 hours', '4h': '4 hours', D: 'Daily', W: 'Weekly', M: 'Monthly' };
+export const INTRADAY_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h'] as const;
+
 /** Default result columns (spec 8.2): relative volume, RSI and the 20 / 50 EMAs; the rest are fixed columns. */
 export const DEFAULT_COLUMNS = ['RVOL(20)', 'RSI(CLOSE, 14)', 'EMA(CLOSE, 20)', 'EMA(CLOSE, 50)'];
 

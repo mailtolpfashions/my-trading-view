@@ -13,7 +13,8 @@
     "@mtv/indicators": "*",
     "@mtv/paper": "*",
     "@mtv/shared": "*",
-    "@mtv/options": "*"
+    "@mtv/options": "*",
+    "@mtv/rules": "*"
   },
   "devDependencies": {
     "vitest": "^5.0.5"

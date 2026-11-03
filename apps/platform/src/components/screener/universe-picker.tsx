@@ -18,6 +18,7 @@ export function UniversePicker({ universe, filters, meta, watchlists, onChange }
 }) {
   const [count, setCount] = useState<{ eligible: number; excluded: { reason: string; count: number }[] } | null>(null);
   const [counting, setCounting] = useState(false);
+  const [countError, setCountError] = useState<string | null>(null);
   const [listText, setListText] = useState(universe.kind === 'symbols' ? universe.symbols.join(', ') : '');
 
   useEffect(() => {
@@ -25,7 +26,7 @@ export function UniversePicker({ universe, filters, meta, watchlists, onChange }
     setCounting(true);
     const t = setTimeout(() => {
       feed<{ eligible: number; excluded: { reason: string; count: number }[] }>('screener/count', { universe, filters }, ctl.signal)
-        .then(setCount, () => setCount(null))
+        .then((c) => { setCount(c); setCountError(null); }, (e: Error) => { if (!ctl.signal.aborted) { setCount(null); setCountError(e.message); } })
         .finally(() => { if (!ctl.signal.aborted) setCounting(false); });
     }, 400);
     return () => { clearTimeout(t); ctl.abort(); };
@@ -83,7 +84,7 @@ export function UniversePicker({ universe, filters, meta, watchlists, onChange }
           </label>
         )}
         <p className="flex h-10 items-center gap-1.5 text-[14px] text-ink-2" aria-live="polite">
-          {count ? <><span className="num font-semibold text-ink">{count.eligible.toLocaleString('en-IN')}</span> stocks to search</> : counting ? 'Counting…' : ''}
+          {count ? <><span className="num font-semibold text-ink">{count.eligible.toLocaleString('en-IN')}</span> stocks to search</> : counting ? 'Counting…' : countError ? <span className="text-down">{countError}. Pick another list.</span> : ''}
           {count && count.excluded.length > 0 && (
             <InfoTip label="Stocks left out">
               {count.excluded.map((x) => <p key={x.reason}>{x.reason}: <span className="num">{x.count.toLocaleString('en-IN')}</span></p>)}

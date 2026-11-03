@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Eraser, FilePlus2, Play, Redo2, Save, Undo2 } from 'lucide-react';
-import type { Tf } from '@mtv/rules';
+import { isIntraday, type Tf } from '@mtv/rules';
 import { fromTree, group, toTree, type Group } from '@/lib/builder';
 import { FeedError, feed } from '@/lib/feed';
 import { NEW_SCREEN, type Meta, type Screen, type ScreenResult } from '@/lib/screener';
@@ -15,6 +15,7 @@ import { LibraryPanel } from './library-panel';
 import { ResultsTable } from './results-table';
 import { TreeBuilder } from './tree-builder';
 import { UniversePicker } from './universe-picker';
+import { TimeframeSelect } from '../timeframe-select';
 
 const DRAFT_KEY = 'platform.screener.draft';
 /** What decides "unsaved changes": everything the user edits, not the id. */
@@ -34,6 +35,7 @@ export function ScreenerWorkspace() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [auto, setAuto] = useState(false);
   const [screens, setScreens] = useState<SavedScreen[] | null>(null);
   const [recent, setRecent] = useState<RecentRun[] | null>(null);
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
@@ -147,6 +149,18 @@ export function ScreenerWorkspace() {
     }
   };
 
+  // Intraday screens can re-run on their own, 5 seconds after each minute closes.
+  const intradayScreen = isIntraday(screen.tf) || /[d+[mh]]/.test(screen.formula);
+  const runRef = useRef(run);
+  runRef.current = run;
+  useEffect(() => {
+    if (!auto || !intradayScreen) return;
+    let t: ReturnType<typeof setTimeout>;
+    const next = () => { t = setTimeout(() => { void runRef.current(); next(); }, 60_000 - (Date.now() % 60_000) + 5_000); };
+    next();
+    return () => clearTimeout(t);
+  }, [auto, intradayScreen]);
+
   return (
     <div className="grid gap-5 xl:grid-cols-[320px_1fr]">
       <LibraryPanel meta={meta} screens={screens} recent={recent} activeId={screen.id}
@@ -193,12 +207,11 @@ export function ScreenerWorkspace() {
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
                 <span className="eyebrow">Timeframe</span>
-                <Segmented<Tf> label="Timeframe" value={screen.tf} onChange={(tf) => update({ tf })}
-                  options={[{ value: 'D', label: 'Daily' }, { value: 'W', label: 'Weekly' }, { value: 'M', label: 'Monthly' }]} />
+                <TimeframeSelect value={screen.tf} onChange={(tf) => update({ tf })} />
                 <InfoTip label="About timeframes">
                   <p>This is the screen&apos;s own timeframe. Each condition can use another one: pick Weekly or Monthly next to it.</p>
                   <p>A weekly or monthly value on a given day comes from the week or month that contains that day, built from data up to that day, so a past day never sees later data.</p>
-                  <p>Intraday timeframes (1m to 4h) arrive with the live data connection.</p>
+                  <p>Intraday timeframes (1 minute to 4 hours) use live Kite data for NIFTY 500 and F&amp;O stocks; connect Kite from the top bar.</p>
                 </InfoTip>
               </div>
               <div className="flex items-center gap-2">
@@ -234,6 +247,11 @@ export function ScreenerWorkspace() {
               <Button variant="primary" onClick={run} disabled={!canRun} className="min-w-[150px]">
                 <Play size={16} /> {running ? 'Running…' : 'Run screen'}
               </Button>
+              {intradayScreen && (
+                <label className="flex items-center gap-2 text-[13px] text-ink-2" title="Runs again 5 seconds after every minute closes">
+                  <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} className="accent-[var(--color-accent)]" /> Refresh every minute
+                </label>
+              )}
               {parsed?.ok && parsed.type === 'bool' && <code className="min-w-0 flex-1 truncate text-[12.5px] text-muted" title={parsed.formula}>{parsed.formula}</code>}
               {!parsed && <span className="text-[13px] text-muted">Add a condition to run.</span>}
               {parsed && !parsed.ok && view === 'builder' && <span className="text-[13px] text-down">Finish or fix the condition marked in red.</span>}

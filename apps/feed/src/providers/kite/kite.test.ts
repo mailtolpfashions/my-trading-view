@@ -37,6 +37,14 @@ describe('Kite WebSocket tick parsing', () => {
     expect(parsePacket(Buffer.concat([head, Buffer.alloc(120)]))).toMatchObject({ token: 12345, ltpPaise: 15050, volume: 900000, oi: 4321000 });
   });
 
+  it('reads the best bid and ask from the full-mode depth (bids from byte 64, asks from byte 124)', () => {
+    const head = packet([12345, 15050, 75, 15000, 900000, 1000, 2000, 14000, 16000, 13800, 14500, ist(2026, 11, 3, 11, 0), 4321000, 0, 0, ist(2026, 11, 3, 11, 0)]);
+    const depth = Buffer.alloc(120);
+    depth.writeInt32BE(150, 0); depth.writeInt32BE(15045, 4); // best bid: 150 @ 150.45
+    depth.writeInt32BE(75, 60); depth.writeInt32BE(15055, 64); // best ask: 75 @ 150.55
+    expect(parsePacket(Buffer.concat([head, depth]))).toMatchObject({ bidPaise: 15045, askPaise: 15055, oi: 4321000 });
+  });
+
   it('parses quote-mode packets (index 28 bytes, equity 44 bytes), which carry no exchange time', () => {
     expect(parsePacket(packet([256265, 2275320, 2276045, 2238735, 2261015, 2260000, 15320]))).toEqual({ token: 256265, ltpPaise: 2275320, highPaise: 2276045, lowPaise: 2238735, openPaise: 2261015, closePaise: 2260000, volume: null, time: 0 });
     const eq = parsePacket(packet([738561, 120180, 5, 119950, 14905641, 1000, 2000, 118400, 120190, 116310, 119000]));

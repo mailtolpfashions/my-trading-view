@@ -74,6 +74,35 @@ export function minOffset(n: Node): number {
   }
 }
 
+/** Functions whose value depends on the whole path since the first bar (cumulative or state that may never reset). */
+const PATH_DEPENDENT = new Set(['PSAR', 'OBV', 'SUPERTREND', 'SUPERTREND_DIR', 'BARS_SINCE', 'RESISTANCE', 'SUPPORT']);
+
+/** The longest window along any path through the tree: lengths of nested functions plus offsets. */
+function horizon(n: Node): number {
+  switch (n.t) {
+    case 'num': case 'id': return 0;
+    case 'neg': case 'not': case 'tf': return horizon(n.a);
+    case 'ref': return n.n + horizon(n.a);
+    case 'bin': case 'cmp': return Math.max(horizon(n.a), horizon(n.b));
+    case 'logic': return Math.max(0, ...n.items.map(horizon));
+    case 'call': {
+      if (PATH_DEPENDENT.has(n.fn)) return Infinity;
+      const own = Math.max(0, ...n.args.map((a) => (a.t === 'num' ? Math.abs(a.v) : 0)));
+      return own + Math.max(0, ...n.args.filter((a) => a.t !== 'num').map(horizon));
+    }
+  }
+}
+
+/**
+ * How many earlier bars a rebuilt bar needs for the value to be exact in practice: 25 × the horizon (+100). Windowed
+ * functions need just their window; recursive ones (EMA, RSI, ATR) forget old bars at (1 - 1/length)^bars, which
+ * after 25 lengths is below 1e-10 of the value. Path-dependent functions get the full history.
+ */
+export function settleBars(n: Node): number {
+  const h = horizon(n);
+  return Number.isFinite(h) ? 25 * h + 100 : Infinity;
+}
+
 /** How many earlier bars of the scan's own timeframe the value at a bar can depend on (Infinity = all history). */
 export function lookback(n: Node): number {
   switch (n.t) {
@@ -260,6 +289,7 @@ export class Evaluator {
     if (!from.length) return out;
     const finals = this.series(n.a, X);
     const usesBar0 = minOffset(n.a) === 0;
+    const settle = settleBars(n.a);
     const toEnd = endsOf(to, toTf), fromEnd = endsOf(from, X);
     let j = -1, periodStart = 0;
     for (let i = 0; i < to.length; i++) {
@@ -271,13 +301,13 @@ export class Evaluator {
       const complete = fromEnd[j] <= toEnd[i];
       if (!usesBar0 || complete) { out[i] = finals[j]; continue; }
       if (i < this.from) continue;
-      // Rebuild bar j from our bars of that period up to bar i, and recompute on bars 0..j.
+      // Rebuild bar j from our bars of that period up to bar i, and recompute on the bars before it (see settleBars).
       let hi = -Infinity, lo = Infinity, vol = 0;
       for (let k = periodStart; k <= i; k++) { hi = Math.max(hi, to[k].high); lo = Math.min(lo, to[k].low); vol += to[k].volume; }
       const partial: Candle = { time: from[j].time, open: to[periodStart].open, high: hi, low: lo, close: to[i].close, volume: vol };
-      const bars = [...from.slice(0, j), partial];
+      const bars = [...from.slice(Math.max(0, j - settle), j), partial];
       const sub = new Evaluator((tf) => (tf === X ? bars : null));
-      out[i] = sub.series(n.a, X)[j];
+      out[i] = sub.series(n.a, X)[bars.length - 1];
     }
     return out;
   }

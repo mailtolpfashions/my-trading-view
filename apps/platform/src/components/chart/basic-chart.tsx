@@ -14,7 +14,9 @@ import { Segmented, inputCls } from '../ui';
 
 const IST = 5.5 * 3600;
 const toChart = (t: number) => (t + IST) as UTCTimestamp;
-type Tf = 'D' | 'W' | 'M';
+export type ChartTf = '1m' | '5m' | '15m' | '1h' | 'D' | 'W' | 'M';
+type Tf = ChartTf;
+const INTRADAY = new Set<Tf>(['1m', '5m', '15m', '1h']);
 
 export function BasicChart({ symbol, tf: initialTf }: { symbol: string; tf: Tf }) {
   const host = useRef<HTMLDivElement>(null);
@@ -24,6 +26,7 @@ export function BasicChart({ symbol, tf: initialTf }: { symbol: string; tf: Tf }
   const [data, setData] = useState<{ name: string; candles: Candle[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState('');
+  const fitted = useRef(false);
   const router = useRouter();
   const theme = useTheme();
 
@@ -55,10 +58,16 @@ export function BasicChart({ symbol, tf: initialTf }: { symbol: string; tf: Tf }
   useEffect(() => {
     let live = true;
     setError(null);
-    feed<{ instrument: { name: string }; candles: Candle[] }>(`candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}`)
-      .then((r) => { if (live) setData({ name: r.instrument.name, candles: r.candles }); })
-      .catch((e) => { if (live) { setData(null); setError(e instanceof FeedError ? e.message : 'Could not load the chart'); } });
-    return () => { live = false; };
+    const intraday = INTRADAY.has(tf);
+    const load = () => (intraday
+      ? feed<{ candles: Candle[]; live: boolean }>(`intraday/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}`).then((r) => ({ name: '', candles: r.candles, live: r.live }))
+      : feed<{ instrument: { name: string }; candles: Candle[] }>(`candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}`).then((r) => ({ name: r.instrument.name, candles: r.candles, live: false })))
+      .then((r) => { if (live) { setData((d) => ({ name: r.name || d?.name || '', candles: r.candles })); setError(null); } return r.live; })
+      .catch((e) => { if (live) { setData(null); setError(e instanceof FeedError ? e.message : 'Could not load the chart'); } return false; });
+    // While Kite is live, an intraday chart refreshes every 5 seconds so the forming candle moves.
+    let timer: ReturnType<typeof setInterval> | undefined;
+    void load().then((isLive) => { if (live && intraday && isLive) timer = setInterval(() => void load(), 5000); });
+    return () => { live = false; if (timer) clearInterval(timer); };
   }, [symbol, tf]);
 
   useEffect(() => {
@@ -66,8 +75,10 @@ export function BasicChart({ symbol, tf: initialTf }: { symbol: string; tf: Tf }
     const c = data?.candles ?? [];
     series.current.c.setData(c.map((b) => ({ time: toChart(b.time), open: b.open, high: b.high, low: b.low, close: b.close })));
     series.current.v.setData(c.map((b) => ({ time: toChart(b.time), value: b.volume, color: b.close >= b.open ? 'rgba(10,155,118,0.28)' : 'rgba(229,72,77,0.28)' })));
-    if (c.length) chart.current?.timeScale().setVisibleLogicalRange({ from: c.length - (tf === 'D' ? 180 : tf === 'W' ? 150 : 120), to: c.length + 6 });
+    chart.current?.applyOptions({ timeScale: { timeVisible: INTRADAY.has(tf), secondsVisible: false } });
+    if (c.length && !fitted.current) { chart.current?.timeScale().setVisibleLogicalRange({ from: c.length - (tf === 'D' ? 180 : tf === 'W' ? 150 : tf === 'M' ? 120 : 200), to: c.length + 6 }); fitted.current = true; }
   }, [data, tf]);
+  useEffect(() => { fitted.current = false; }, [tf, symbol]);
 
   const last = data?.candles.at(-1), prev = data?.candles.at(-2);
   const chg = last && prev ? ((last.close - prev.close) / prev.close) * 100 : null;
@@ -85,7 +96,7 @@ export function BasicChart({ symbol, tf: initialTf }: { symbol: string; tf: Tf }
             {chg != null && <span className={`ml-2 text-[14px] ${chg >= 0 ? 'text-up' : 'text-down'}`}>{chg >= 0 ? '+' : ''}{chg.toFixed(2)}%</span>}
           </p>
         )}
-        <Segmented<Tf> label="Timeframe" value={tf} onChange={setTf} options={[{ value: 'D', label: 'D' }, { value: 'W', label: 'W' }, { value: 'M', label: 'M' }]} />
+        <Segmented<Tf> label="Timeframe" value={tf} onChange={setTf} options={(['1m', '5m', '15m', '1h', 'D', 'W', 'M'] as const).map((t) => ({ value: t, label: t, title: INTRADAY.has(t) ? 'Intraday, from live Kite data' : undefined }))} />
         <form className="ml-auto flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (q.trim()) router.push(`/chart/${encodeURIComponent(q.trim().toUpperCase())}?tf=${tf}`); }}>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Symbol, e.g. TCS" aria-label="Open another symbol" className={`${inputCls} w-44 uppercase`} />
         </form>
@@ -93,7 +104,7 @@ export function BasicChart({ symbol, tf: initialTf }: { symbol: string; tf: Tf }
       </div>
       {error && <p role="alert" className="rounded-[12px] bg-down-soft px-3 py-2 text-[13.5px] text-down">{error}</p>}
       <div ref={host} className="h-[62vh] min-h-[360px] w-full" />
-      <p className="text-[12px] text-muted">NSE end-of-day prices, adjusted for splits, bonuses and rights.</p>
+      <p className="text-[12px] text-muted">{INTRADAY.has(tf) ? 'Intraday candles from your Kite connection, adjusted like the daily history.' : 'NSE end-of-day prices, adjusted for splits, bonuses and rights.'}</p>
     </div>
   );
 }

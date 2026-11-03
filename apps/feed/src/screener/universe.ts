@@ -44,11 +44,15 @@ export async function stockInfo(): Promise<Map<string, StockInfo>> {
 
 export const UNIVERSE_INDICES = Object.keys(LISTS) as IndexList[];
 
-async function baseSymbols(spec: UniverseSpec): Promise<string[]> {
+/**
+ * The stocks of a universe. `includeDelisted` (backtests): "all" also takes stocks no longer traded, since leaving out
+ * companies that later failed would make past results look better than they were.
+ */
+export async function baseSymbols(spec: UniverseSpec, includeDelisted = false): Promise<string[]> {
   const shares = new Set(allEquityShareSymbols());
   const traded = eodUniverse().filter((s) => shares.has(s));
   switch (spec.kind) {
-    case 'all': return traded;
+    case 'all': return includeDelisted ? [...shares] : traded;
     case 'index': {
       if (!(spec.name in LISTS)) throw new Error(`Unknown index ${spec.name}`);
       return (await indexMemberRows(spec.name)).map((r) => r.symbol);

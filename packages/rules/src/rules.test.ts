@@ -104,6 +104,19 @@ function dailyBars(n: number, start = Date.UTC(2024, 0, 1), seed = 7): Candle[] 
   }
   return out;
 }
+// Plain reference formulas over the whole series (TradingView's definitions), for checking rebuilt values.
+const rsiLast = (c: number[], n: number) => {
+  let g = 0, l = 0;
+  for (let i = 1; i <= n; i++) { const d = c[i] - c[i - 1]; g += Math.max(d, 0); l += Math.max(-d, 0); }
+  g /= n; l /= n;
+  for (let i = n + 1; i < c.length; i++) { const d = c[i] - c[i - 1]; g = (g * (n - 1) + Math.max(d, 0)) / n; l = (l * (n - 1) + Math.max(-d, 0)) / n; }
+  return 100 - 100 / (1 + g / l);
+};
+const emaLast = (c: number[], n: number) => {
+  let e = c.slice(0, n).reduce((a, b) => a + b, 0) / n;
+  for (let i = n; i < c.length; i++) e = c[i] * (2 / (n + 1)) + e * (1 - 2 / (n + 1));
+  return e;
+};
 const source = (daily: Candle[]) => (tf: Tf) => (tf === 'D' ? daily : tf === 'W' || tf === 'M' ? resample(daily, tf) : null);
 const run = (formula: string, daily: Candle[], tf: Tf = 'D') => new Evaluator(source(daily)).series(ok(formula).node, tf);
 
@@ -171,6 +184,20 @@ describe('timeframes', () => {
     }
   });
 
+  it('a rebuilt weekly value equals one computed from the full history (to 1e-9)', () => {
+    const long = dailyBars(3000, Date.UTC(2012, 0, 2), 11);
+    for (const [f, ref] of [
+      ['[W] RSI(CLOSE, 14)', (w: Candle[]) => rsiLast(w.map((b) => b.close), 14)],
+      ['[W] EMA(CLOSE, 50)', (w: Candle[]) => emaLast(w.map((b) => b.close), 50)],
+    ] as const) {
+      const s = run(f, long);
+      for (const i of [1500, 2222, 2998]) {
+        const exact = ref(resample(long.slice(0, i + 1), 'W'));
+        expect(Math.abs(s[i]! - exact) / Math.abs(exact), `${f} @${i}`).toBeLessThan(1e-9);
+      }
+    }
+  });
+
   it('`from` leaves earlier rebuilt bars unknown, the rest exact', () => {
     const n = ok('[W] (CLOSE > EMA(CLOSE, 10))').node;
     const all = new Evaluator(source(d)).series(n, 'D');
@@ -208,5 +235,36 @@ describe('intraday timeframes on real NIFTY 5-minute bars', () => {
 
   it('prints the parsed tree identically to the formula', () => {
     expect(print(ok('[15m] (CLOSE > VWAP)').node)).toBe('[15m] (CLOSE > VWAP)');
+  });
+});
+
+describe('time-of-day relative volume', () => {
+  // 22 sessions of 15-minute bars; every session trades 1000 at 09:15 and 100 in later bars, except the last session's
+  // 09:15 bar (3000) and its 10:00 bar (50).
+  const IST2 = 5.5 * 3600;
+  const bars: Candle[] = [];
+  for (let d = 0; d < 22; d++) {
+    const day0 = Date.UTC(2026, 8, 1 + d) / 1000 - IST2;
+    for (let k = 0; k < 25; k++) {
+      const t = day0 + 9 * 3600 + 15 * 60 + k * 900;
+      const last = d === 21;
+      const volume = k === 0 ? (last ? 3000 : 1000) : last && k === 3 ? 50 : 100;
+      bars.push({ time: t, open: 100, high: 101, low: 99, close: 100, volume });
+    }
+  }
+  const series = (f: string) => new Evaluator((tf) => (tf === '15m' ? bars : null)).series(ok(f).node, '15m');
+  it('compares each bar with the same time of day in earlier sessions only', () => {
+    const tod = series('RVOL_TOD(20)');
+    const lastDay = bars.length - 25;
+    expect(tod[lastDay]).toBe(3);        // 3000 vs the usual 1000 at 09:15
+    expect(tod[lastDay + 3]).toBe(0.5);  // 50 vs the usual 100 at 10:00
+    expect(tod[lastDay + 4]).toBe(1);
+    expect(tod[20 * 25 - 1]).toBeNull(); // only 19 earlier sessions there
+  });
+  it('cumulative: volume so far today against the same point of earlier days', () => {
+    const cum = series('RVOL_CUM(20)');
+    const lastDay = bars.length - 25;
+    expect(cum[lastDay]).toBe(3);
+    expect(cum[lastDay + 3]).toBeCloseTo((3000 + 100 + 100 + 50) / 1300, 12);
   });
 });

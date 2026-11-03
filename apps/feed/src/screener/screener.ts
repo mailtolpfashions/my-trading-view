@@ -8,6 +8,8 @@ import {
 import type { Candle } from '@mtv/shared';
 import { dailyHistory, eodComplete, eodLatestDate, eodVersion, type DailyHistory } from '../eod/store';
 import { findInstrument } from '../symbols';
+import { live } from '../intraday/instance';
+import { dateOfIst } from '../intraday/store';
 import { resolveUniverse, type UniverseFilters, type UniverseSpec } from './universe';
 
 export class ScreenError extends Error {}
@@ -96,9 +98,19 @@ export async function runScreen(req: ScreenRequest, now = Date.now() / 1000): Pr
   const colNodes = columns.map((c, i) => compile(c, 'num', `Column ${i + 1}`));
   const tfs = new Set<Tf>([tf, ...timeframesOf(node), ...colNodes.flatMap((n) => [...timeframesOf(n)])]);
   const intraday = [...tfs].filter(isIntraday);
-  if (intraday.length) throw new ScreenError(`Intraday timeframes (${intraday.join(', ')}) need the live data connection, which comes in a later step. Use D, W or M for now.`);
+  if (intraday.length && !live.symbols.length) throw new ScreenError(`Intraday timeframes (${intraday.join(', ')}) need the Kite connection. Connect Kite (top right) and try again.`);
 
-  const { symbols, excluded, info } = await resolveUniverse(req.universe ?? { kind: 'all' }, req.filters ?? {}, cachedHistory);
+  const resolved = await resolveUniverse(req.universe ?? { kind: 'all' }, req.filters ?? {}, cachedHistory);
+  const { info } = resolved;
+  let symbols = resolved.symbols;
+  const excluded = [...resolved.excluded];
+  // Intraday bars exist for the live list only (NIFTY 500, F&O stocks, main indices).
+  if (intraday.length) {
+    const keep = symbols.filter((x) => live.has(x));
+    if (keep.length < symbols.length) excluded.push({ reason: 'No intraday data (outside NIFTY 500 and F&O stocks)', count: symbols.length - keep.length });
+    symbols = keep;
+  }
+  const today = dateOfIst(now);
   const back = lookback(node);
   const rows: ScreenRow[] = [];
   let scanned = 0, matches = 0;
@@ -108,8 +120,12 @@ export async function runScreen(req: ScreenRequest, now = Date.now() / 1000): Pr
     const symbol = symbols[n];
     const h = cachedHistory(symbol);
     if (!h || h.candles.length < 2) continue;
-    const daily = h.candles;
+    // During the session, today's daily bar comes from live minutes until NSE's end-of-day file arrives.
+    let daily = h.candles;
+    const partial = dateOfIst(daily[daily.length - 1].time) < today ? live.todayDaily(symbol, candle === 'live') : null;
+    if (partial) daily = [...daily, partial];
     const bars = new Map<Tf, Candle[]>([['D', daily]]);
+    for (const t of intraday) bars.set(t, await live.bars(symbol, t, candle === 'live'));
     const source = (t: Tf) => {
       if (!bars.has(t)) bars.set(t, t === 'W' || t === 'M' ? resample(daily, t) : [] /* same bars as the chart (screener.test.ts) */);
       return bars.get(t)!.length ? bars.get(t)! : null;
@@ -139,7 +155,7 @@ export async function runScreen(req: ScreenRequest, now = Date.now() / 1000): Pr
       avgValueCr,
       lowLiquidity: avgValueCr != null && avgValueCr < LOW_LIQUIDITY_CR,
       dataBreak: brk,
-      barDate: dateOf(own[i]),
+      barDate: isIntraday(tf) ? new Date((own[i].time + IST) * 1000).toISOString().slice(0, 16).replace("T", " ") : dateOf(own[i]),
       columns: colNodes.map((c) => ev.series(c, tf)[i] ?? null),
       conditions: explain(ev, node, tf, i),
     });

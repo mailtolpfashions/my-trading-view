@@ -9,7 +9,9 @@ import { prisma } from '@mtv/db';
 import { positionMargin } from '@mtv/options';
 import { EOD_TIMEFRAMES, type DataStatus, type EodTimeframe, type Quote } from '@mtv/shared';
 import { verifyFeedToken, type FeedClaims } from '@mtv/shared/feed-token';
-import { activeSession, clearSession, createSession, kiteConfigured, loginUrl } from './providers/kite/session';
+import { activeSession, clearSession, createSession, kiteConfigured, loadSession, loginUrl } from './providers/kite/session';
+import { live, setLiveLog } from './intraday/instance';
+import { INTRADAY_TFS, type Tf } from '@mtv/rules';
 import { buildUpCycle, fnoCalendar, gexOn, maxPainHistory, derivedOn, derivedSeries, expiriesBetween, fnoUnderlyings, futuresMovers, isFnoUnderlying, ivGrid, latestFnoDay, lotSizes, strikeHistory } from './fno/analytics';
 import { getChain, latestFnoDate } from './fno/chain';
 import { prismaOptionsData } from './fno/data';
@@ -31,6 +33,7 @@ import { ScreenError, cachedHistory, runScreen, type ScreenRequest } from './scr
 import { UNIVERSE_INDICES, industries, resolveUniverse, type UniverseFilters, type UniverseSpec } from './screener/universe';
 import { CONDITION_LIBRARY, FIELDS, FUNCTIONS, PRESETS } from '@mtv/rules';
 import { UserStoreError, userStore } from './user/store';
+import { StrategyError, runStrategyBacktest, type BacktestRequest } from './strategy/backtest';
 import { StudyError, catalog as studyCatalog, computeStudy, encodeNonFinite } from './studies/library';
 import { findInstrument, loadEquities, searchInstruments } from './symbols';
 import { COUNTED_ROUTES, VisitorQuota } from './visitor-quota';
@@ -82,7 +85,7 @@ const tokenFrom = (req: FastifyRequest) => {
 // needs a valid feed token.
 const PUBLIC = new Set(['/api/kite/login', '/api/kite/callback']);
 /** Routes that read the in-memory NSE history. */
-const NEEDS_HISTORY = new Set(['/api/market/rrg', '/api/market/breadth', '/api/market/breadth-all', '/api/dashboard', '/api/research/study', '/api/research/fii', '/api/candles', '/api/quotes', '/api/backtest', '/api/options-backtest', '/api/studies/compute', '/api/research/nifty-days', '/api/eod/history', '/api/scan', '/api/screener/run', '/api/screener/count']);
+const NEEDS_HISTORY = new Set(['/api/market/rrg', '/api/market/breadth', '/api/market/breadth-all', '/api/dashboard', '/api/research/study', '/api/research/fii', '/api/candles', '/api/quotes', '/api/backtest', '/api/options-backtest', '/api/studies/compute', '/api/research/nifty-days', '/api/eod/history', '/api/scan', '/api/screener/run', '/api/screener/count', '/api/strategy/backtest']);
 // Visitors without an account may use everything (owner routes check `admin` themselves), with a daily allowance
 // of runs (COUNTED_ROUTES). A run is counted only when it succeeds, so a rejected rule doesn't use one up.
 const quota = new VisitorQuota(VISITOR_DAILY_RUNS, VISITOR_DAILY_RUNS_PER_IP);
@@ -555,23 +558,50 @@ app.post('/api/user/watchlists', userRoute((b: { id?: string; name: string; symb
 app.post('/api/user/watchlists/add', userRoute((b: { id: string; symbols: string[] }) => userStore.addToWatchlist(b.id, b.symbols)));
 app.post('/api/user/watchlists/delete', userRoute((b: { id: string }) => userStore.deleteWatchlist(b.id).then(() => ({ ok: true }))));
 
+app.get('/api/user/strategies', userRoute(() => userStore.strategies()));
+app.post('/api/user/strategies', userRoute((b: Parameters<typeof userStore.saveStrategy>[0]) => userStore.saveStrategy(b)));
+app.post('/api/user/strategies/delete', userRoute((b: { id: string }) => userStore.deleteStrategy(b.id).then(() => ({ ok: true }))));
+
+// ---- Equity strategy backtest (packages/backtest portfolio engine) ----
+app.post<{ Body: BacktestRequest }>('/api/strategy/backtest', async (req, reply) => {
+  try {
+    const r = await runStrategyBacktest(req.body);
+    req.log.info({ stocks: r.stocks, trades: r.metrics.trades, ms: r.ms }, 'strategy backtest');
+    if (req.body.strategyId) {
+      const m = r.metrics, s = req.body.strategy;
+      await userStore.recordBacktest(req.body.strategyId, { at: new Date().toISOString(), from: s.from, to: s.to, trades: m.trades, returnPct: m.returnPct, cagrPct: m.cagrPct, maxDrawdownPct: m.maxDrawdownPct, winRatePct: m.winRatePct })
+        .catch((e) => req.log.error(e, 'could not record the backtest'));
+    }
+    return r;
+  } catch (e) {
+    if (e instanceof StrategyError) return reply.code(400).send({ error: 'bad_strategy', message: e.message });
+    req.log.error(e);
+    return reply.code(500).send({ error: 'backtest_failed', message: 'The backtest failed to run' });
+  }
+});
+
 // ---- Kite Connect login: the owner's personal app, for internal research scripts only (never shown to users).
 // Zerodha expires the session at 6 AM IST. ----
+// Live and intraday data come from the owner's own Kite Connect account (personal use). Zerodha ends the session at
+// 6 AM; the platform's Connect page starts the daily login. ?back=platform returns there afterwards.
+const PLATFORM_URL = process.env.PLATFORM_URL ?? 'http://127.0.0.1:3100';
 app.get('/api/kite/status', async (req, reply) => {
   if (!req.user?.admin) return reply.code(403).send({ error: 'forbidden' });
-  const s = activeSession();
-  return { configured: kiteConfigured(), loggedIn: !!s, userName: s?.userName ?? null, expiresAt: s?.expiresAt ?? null };
+  return { configured: kiteConfigured(), ...live.status };
 });
-app.get('/api/kite/login', async (_req, reply) => {
+app.get<{ Querystring: { back?: string } }>('/api/kite/login', async (req, reply) => {
   if (!kiteConfigured()) return reply.code(400).send({ error: 'not_configured', message: 'Add KITE_API_KEY and KITE_API_SECRET to .env' });
-  return reply.redirect(loginUrl());
+  const back = req.query.back === 'platform' ? `&redirect_params=${encodeURIComponent('back=platform')}` : '';
+  return reply.redirect(loginUrl() + back);
 });
-app.get<{ Querystring: { request_token?: string; status?: string } }>('/api/kite/callback', async (req, reply) => {
-  const back = (result: string) => reply.redirect(`${WEB_ORIGIN}/admin?kite=${result}`);
+app.get<{ Querystring: { request_token?: string; status?: string; back?: string } }>('/api/kite/callback', async (req, reply) => {
+  const back = (result: string) => reply.redirect(req.query.back === 'platform' ? `${PLATFORM_URL}/connect?kite=${result}` : `${WEB_ORIGIN}/admin?kite=${result}`);
   if (!req.query.request_token || req.query.status === 'cancelled') return back('cancelled');
   try {
     const s = await createSession(req.query.request_token);
-    app.log.info(`Kite connected for ${s.userId} (research scripts)`);
+    app.log.info(`Kite connected for ${s.userId}`);
+    live.stop();
+    void live.start();
     return back('connected');
   } catch (e) {
     app.log.error(e, 'Kite login failed');
@@ -579,9 +609,19 @@ app.get<{ Querystring: { request_token?: string; status?: string } }>('/api/kite
   }
 });
 app.post('/api/kite/logout', async (req, reply) => {
-  if (!req.user?.admin) return reply.code(403).send({ error: 'forbidden', message: 'Only the site owner can disconnect Kite' });
+  if (!req.user?.admin) return reply.code(403).send({ error: 'forbidden', message: 'Only the owner can disconnect Kite' });
+  live.stop();
   await clearSession();
+  live.status.state = 'login-required';
   return { ok: true };
+});
+/** Intraday bars (adjusted like the daily history), the forming bar included. */
+app.get<{ Querystring: { symbol?: string; tf?: string } }>('/api/intraday/candles', async (req, reply) => {
+  const symbol = String(req.query.symbol ?? '').toUpperCase(), tf = req.query.tf as Tf;
+  if (!INTRADAY_TFS.includes(tf)) return reply.code(400).send({ error: 'bad_timeframe', message: `Intraday timeframes: ${INTRADAY_TFS.join(', ')}` });
+  if (!live.has(symbol)) return reply.code(404).send({ error: 'no_intraday', message: live.status.state === 'live' ? `${symbol} is not in the live list (NIFTY 500, F&O stocks and the main indices)` : 'Connect Kite for intraday data' });
+  const candles = await live.bars(symbol, tf, true);
+  return { symbol, tf, candles, live: live.status.state === 'live' };
 });
 
 await loadEquities((m) => app.log.info(m));
@@ -599,4 +639,7 @@ else {
   startNsdlDaily((m) => app.log.info(m));
 }
 warmMarketViews((m) => app.log.info(m));
+setLiveLog((m) => app.log.info(m));
+if (process.env.FEED_NO_LIVE !== '1' && (await loadSession())) void live.start();
+else live.status.state = 'login-required';
 await app.listen({ port: PORT, host: HOST });

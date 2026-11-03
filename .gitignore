@@ -17,3 +17,6 @@ apps/feed/.cache
 
 # The owner's saved screens and watchlists (apps/feed/src/user/store.ts)
 .userdata
+
+# Downloaded and recorded market data (apps/feed/src/intraday): large, and rebuilt from Kite
+apps/feed/.data

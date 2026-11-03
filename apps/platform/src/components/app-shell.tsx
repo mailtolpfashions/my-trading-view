@@ -3,11 +3,12 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Logo } from './logo';
+import { LiveChip } from './live-status';
 import { ThemeToggle } from './theme-toggle';
 
-const NAV = [
+const NAV: { href: string; label: string; match?: string; soon?: boolean }[] = [
   { href: '/screener', label: 'Screener' },
-  { href: '/strategies', label: 'Strategies', soon: true },
+  { href: '/strategies', label: 'Strategies' },
   { href: '/chart/NIFTY', label: 'Charts', match: '/chart' },
   { href: '/watchlists', label: 'Watchlists' },
 ];
@@ -36,7 +37,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               );
             })}
           </nav>
-          <div className="ml-auto"><ThemeToggle /></div>
+          <div className="ml-auto flex items-center gap-2"><LiveChip /><ThemeToggle /></div>
         </div>
       </header>
       <main className="mx-auto w-full max-w-[1600px] flex-1 px-5 py-6">{children}</main>

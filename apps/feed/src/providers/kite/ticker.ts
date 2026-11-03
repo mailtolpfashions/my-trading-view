@@ -15,6 +15,9 @@ export type Tick = {
   volume: number | null;
   /** Open interest (F&O in full mode only). */
   oi?: number;
+  /** Best bid and ask (full mode only; 0 when that side of the book is empty). */
+  bidPaise?: number;
+  askPaise?: number;
   /** Last trade / exchange time, UTC epoch seconds (0 when the packet has none). */
   time: number;
 };
@@ -45,7 +48,12 @@ export function parsePacket(p: Buffer): Tick | null {
   if (p.length === 44 || p.length === 184) {
     // Equity/F&O: token, ltp, last qty, avg price, volume, buy qty, sell qty, open, high, low, close, [last trade time, OI …]
     const t: Tick = { token: i32(0), ltpPaise: i32(4), volume: i32(16), openPaise: i32(28), highPaise: i32(32), lowPaise: i32(36), closePaise: i32(40), time: p.length === 184 ? i32(44) : 0 };
-    if (p.length === 184) t.oi = i32(48);
+    if (p.length === 184) {
+      t.oi = i32(48);
+      // Depth from byte 64: five bids then five asks, 12 bytes each (quantity, price, orders, padding).
+      t.bidPaise = i32(68);
+      t.askPaise = i32(128);
+    }
     return t;
   }
   return null; // unknown packet size: ignore rather than misread
