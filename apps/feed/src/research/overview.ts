@@ -59,6 +59,16 @@ export function parseConstituents(csv: string): string[] {
   return lines.slice(1).map((l) => l.split(',')[col]?.trim()).filter((s): s is string => !!s);
 }
 
+/** Index members with NSE's company name and industry, from the same daily copy as indexMembers. */
+export async function indexMemberRows(name: IndexList): Promise<{ symbol: string; company: string; industry: string }[]> {
+  await indexMembers(name);
+  const lines = (await readFile(path.join(CACHE, LISTS[name]), 'utf8')).trim().split(/\r?\n/);
+  const head = lines[0].split(',').map((h) => h.trim());
+  const at = (cols: string[], h: string) => cols[head.indexOf(h)]?.trim() ?? '';
+  // Company names can contain commas only inside quotes; NSE's lists don't quote, so a plain split is exact here.
+  return lines.slice(1).map((l) => l.split(',')).map((c) => ({ symbol: at(c, 'Symbol'), company: at(c, 'Company Name'), industry: at(c, 'Industry') })).filter((r) => r.symbol);
+}
+
 /** NSE constituent files (nsearchives content/indices), keyed by the index name in NSE's daily index-close file. */
 export const LISTS = {
   'NIFTY 50': 'ind_nifty50list.csv', 'NIFTY NEXT 50': 'ind_niftynext50list.csv', 'NIFTY 100': 'ind_nifty100list.csv', 'NIFTY 200': 'ind_nifty200list.csv',

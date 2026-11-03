@@ -27,6 +27,10 @@ import { MARKET_EVENTS, niftyDays } from './research/nifty-days';
 import { OVERVIEW_INDICES, breadth, indexCard, indexMembers, moveOn, movers, type IndexList, type StockMove } from './research/overview';
 import { BREADTH_INDICES, RRG_BENCHMARKS, RRG_SECTORS, allBreadth, indexBreadth, rotation, warmMarketViews } from './market/service';
 import { ScanError, runScan } from './signals/scanner';
+import { ScreenError, cachedHistory, runScreen, type ScreenRequest } from './screener/screener';
+import { UNIVERSE_INDICES, industries, resolveUniverse, type UniverseFilters, type UniverseSpec } from './screener/universe';
+import { CONDITION_LIBRARY, FIELDS, FUNCTIONS, PRESETS } from '@mtv/rules';
+import { UserStoreError, userStore } from './user/store';
 import { StudyError, catalog as studyCatalog, computeStudy, encodeNonFinite } from './studies/library';
 import { findInstrument, loadEquities, searchInstruments } from './symbols';
 import { COUNTED_ROUTES, VisitorQuota } from './visitor-quota';
@@ -78,7 +82,7 @@ const tokenFrom = (req: FastifyRequest) => {
 // needs a valid feed token.
 const PUBLIC = new Set(['/api/kite/login', '/api/kite/callback']);
 /** Routes that read the in-memory NSE history. */
-const NEEDS_HISTORY = new Set(['/api/market/rrg', '/api/market/breadth', '/api/market/breadth-all', '/api/dashboard', '/api/research/study', '/api/research/fii', '/api/candles', '/api/quotes', '/api/backtest', '/api/options-backtest', '/api/studies/compute', '/api/research/nifty-days', '/api/eod/history', '/api/scan']);
+const NEEDS_HISTORY = new Set(['/api/market/rrg', '/api/market/breadth', '/api/market/breadth-all', '/api/dashboard', '/api/research/study', '/api/research/fii', '/api/candles', '/api/quotes', '/api/backtest', '/api/options-backtest', '/api/studies/compute', '/api/research/nifty-days', '/api/eod/history', '/api/scan', '/api/screener/run', '/api/screener/count']);
 // Visitors without an account may use everything (owner routes check `admin` themselves), with a daily allowance
 // of runs (COUNTED_ROUTES). A run is counted only when it succeeds, so a rejected rule doesn't use one up.
 const quota = new VisitorQuota(VISITOR_DAILY_RUNS, VISITOR_DAILY_RUNS_PER_IP);
@@ -493,6 +497,63 @@ app.post<{ Body: { rules?: RuleSet } }>('/api/scan', async (req, reply) => {
     return reply.code(500).send({ error: 'scan_failed', message: 'Scan failed' });
   }
 });
+
+// ---- Stock screener (packages/rules on NSE end-of-day history) ----
+// Everything the builder and the formula editor need to describe the language: fields, functions, presets, universes.
+app.get('/api/screener/meta', async () => ({
+  timeframes: ['D', 'W', 'M'],
+  fields: FIELDS.map(({ name, summary }) => ({ name, summary })),
+  functions: FUNCTIONS.map(({ name, group, returns, params, summary }) => ({ name, group, returns, params, summary })),
+  presets: PRESETS,
+  library: CONDITION_LIBRARY,
+  indices: UNIVERSE_INDICES,
+  industries: await industries(),
+}));
+/** How many stocks a universe and its filters leave, before running a screen. */
+app.post<{ Body: { universe?: UniverseSpec; filters?: UniverseFilters } }>('/api/screener/count', async (req, reply) => {
+  try {
+    const u = await resolveUniverse(req.body?.universe ?? { kind: 'all' }, req.body?.filters ?? {}, cachedHistory);
+    return { eligible: u.symbols.length, excluded: u.excluded };
+  } catch (e) {
+    req.log.error(e);
+    return reply.code(400).send({ error: 'bad_universe', message: (e as Error).message });
+  }
+});
+app.post<{ Body: ScreenRequest }>('/api/screener/run', async (req, reply) => {
+  try {
+    const body = req.body ?? ({} as ScreenRequest);
+    const r = await runScreen(body);
+    req.log.info({ tf: r.tf, eligible: r.eligible, matches: r.matches, ms: r.ms }, 'screen');
+    // History is a convenience: a failed write must not fail the screen.
+    await userStore.recordRun({ at: new Date().toISOString(), asOf: r.asOf, matches: r.matches, scanned: r.scanned, ms: r.ms, screenId: body.screenId ?? null, name: body.name?.slice(0, 120) || 'Untitled screen', formula: r.formula, tf: r.tf })
+      .catch((e) => req.log.error(e, 'could not record the run'));
+    return r;
+  } catch (e) {
+    if (e instanceof ScreenError) return reply.code(400).send({ error: 'bad_screen', message: e.message });
+    req.log.error(e);
+    return reply.code(500).send({ error: 'screen_failed', message: 'The screen failed to run' });
+  }
+});
+
+// ---- The owner's saved screens, watchlists and recent runs ----
+const userRoute = <B>(fn: (body: B) => Promise<unknown>) => async (req: FastifyRequest<{ Body: B }>, reply: FastifyReply) => {
+  try {
+    return await fn((req.body ?? {}) as B);
+  } catch (e) {
+    if (e instanceof UserStoreError) return reply.code(400).send({ error: 'bad_request', message: e.message });
+    req.log.error(e);
+    return reply.code(500).send({ error: 'store_failed', message: 'Your change could not be saved' });
+  }
+};
+app.get('/api/user/screens', userRoute(() => userStore.screens()));
+app.post('/api/user/screens', userRoute((b: Parameters<typeof userStore.saveScreen>[0]) => userStore.saveScreen(b)));
+app.post('/api/user/screens/delete', userRoute((b: { id: string }) => userStore.deleteScreen(b.id).then(() => ({ ok: true }))));
+app.post('/api/user/screens/favourite', userRoute((b: { id: string; favourite: boolean }) => userStore.setFavourite(b.id, !!b.favourite)));
+app.get('/api/user/recent', userRoute(() => userStore.recent()));
+app.get('/api/user/watchlists', userRoute(() => userStore.watchlists()));
+app.post('/api/user/watchlists', userRoute((b: { id?: string; name: string; symbols: string[] }) => userStore.saveWatchlist(b)));
+app.post('/api/user/watchlists/add', userRoute((b: { id: string; symbols: string[] }) => userStore.addToWatchlist(b.id, b.symbols)));
+app.post('/api/user/watchlists/delete', userRoute((b: { id: string }) => userStore.deleteWatchlist(b.id).then(() => ({ ok: true }))));
 
 // ---- Kite Connect login: the owner's personal app, for internal research scripts only (never shown to users).
 // Zerodha expires the session at 6 AM IST. ----

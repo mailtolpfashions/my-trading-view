@@ -252,6 +252,8 @@ export function eodUniverse(): string[] {
 }
 
 export const eodLatestDate = () => dates[dates.length - 1] ?? null;
+/** Changes whenever a trading day is added (new or back-filled): a cache key for anything built from the history. */
+export const eodVersion = () => dates.length;
 
 /** Every stock with stored history, including ones no longer traded (backtests must include them). */
 export const allEodSymbols = () => [...bySymbol.keys()].sort();

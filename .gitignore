@@ -14,3 +14,6 @@ next-env.d.ts
 
 # Feed service download cache
 apps/feed/.cache
+
+# The owner's saved screens and watchlists (apps/feed/src/user/store.ts)
+.userdata

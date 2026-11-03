@@ -16,6 +16,7 @@
     "@mtv/db": "^0.1.0",
     "@mtv/options": "^0.1.0",
     "@mtv/paper": "^0.1.0",
+    "@mtv/rules": "*",
     "@mtv/shared": "*",
     "fastify": "^5.12.7",
     "fflate": "^0.8.2",
