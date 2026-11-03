@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "dotenv -e ../../.env -- tsx watch src/server.ts",
-    "start": "dotenv -e ../../.env -- tsx src/server.ts",
+    "dev": "dotenv -e ../../.env -v NODE_OPTIONS=--max-old-space-size=6144 -- tsx watch src/server.ts",
+    "start": "dotenv -e ../../.env -v NODE_OPTIONS=--max-old-space-size=6144 -- tsx src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
