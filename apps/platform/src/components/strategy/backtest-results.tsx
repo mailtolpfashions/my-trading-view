@@ -15,7 +15,7 @@ const pct = (v: number | null | undefined, d = 2, sign = true) => (v == null ? '
 const num = (v: number | null | undefined, d = 2) => (v == null ? '–' : v.toFixed(d));
 const date = (t: number | null) => (t == null ? '–' : new Date((t + IST) * 1000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }));
 const tone = (v: number | null | undefined) => (v == null ? '' : v > 0 ? 'text-up' : v < 0 ? 'text-down' : '');
-const REASON: Record<string, string> = { signal: 'Exit signal', stop: 'Stop loss', trail: 'Trailing stop', target: 'Target', time: 'Time exit', 'end-of-test': 'Open at end', 'data-ended': 'Stock stopped trading' };
+const REASON: Record<string, string> = { signal: 'Exit signal', stop: 'Stop loss', trail: 'Trailing stop', target: 'Target', time: 'Time exit', 'square-off': 'Square-off', 'end-of-test': 'Open at end', 'data-ended': 'Stock stopped trading' };
 
 export function BacktestResults({ r }: { r: BacktestResult }) {
   const m = r.metrics;
@@ -32,6 +32,8 @@ export function BacktestResults({ r }: { r: BacktestResult }) {
         <InfoTip label="Signals that did not become trades">
           <p>No free position slot: {m.skippedSlots.toLocaleString('en-IN')}</p>
           <p>Below the traded-value minimum: {m.illiquid.toLocaleString('en-IN')}</p>
+          {(m.earlyEntry ?? 0) > 0 && <p>Intraday: before the start time for trades: {m.earlyEntry!.toLocaleString('en-IN')}</p>}
+          {m.lateEntry > 0 && <p>Intraday: after the last-entry time, or too late in the day to fill: {m.lateEntry.toLocaleString('en-IN')}</p>}
           <p>Not enough cash, or size rounded to zero shares: {m.skippedCash.toLocaleString('en-IN')}</p>
           <p>Limit or stop order not reached: {m.unfilled.toLocaleString('en-IN')}</p>
           <p>Signals while already holding the stock are not counted as missed.</p>
@@ -194,6 +196,10 @@ type Key = 'symbol' | 'entryTime' | 'exitTime' | 'netPaise' | 'returnPct' | 'bar
 function TradeTable({ trades }: { trades: Trade[] }) {
   const [sort, setSort] = useState<{ k: Key; d: 1 | -1 }>({ k: 'entryTime', d: 1 });
   const [limit, setLimit] = useState(300);
+  // Daily, weekly and monthly bars are stamped 09:15; any other time means minute bars, so times are shown too.
+  const intraday = useMemo(() => trades.some((t) => (t.entryTime + IST) % 86400 !== 9 * 3600 + 15 * 60), [trades]);
+  const hhmm = (t: number) => new Date((t + IST) * 1000).toISOString().slice(11, 16);
+  const when = (t: number) => (intraday ? `${date(t)} ${hhmm(t)}` : date(t));
   const rows = useMemo(() => [...trades].sort((a, b) => (sort.k === 'symbol' ? a.symbol.localeCompare(b.symbol) : a[sort.k] - b[sort.k]) * sort.d), [trades, sort]);
   const th = (k: Key, label: string, right = true) => (
     <th scope="col" className={`whitespace-nowrap px-3 py-2.5 text-[12px] font-semibold text-muted ${right ? 'text-right' : 'text-left'}`}>
@@ -202,7 +208,7 @@ function TradeTable({ trades }: { trades: Trade[] }) {
   );
   const csv = () => {
     const head = 'Symbol,Qty,Entry date,Entry price,Exit date,Exit price,Exit reason,Gross,Charges,Net,Return %,Bars,MAE %,MFE %,Data break';
-    const d = (t: number) => new Date((t + IST) * 1000).toISOString().slice(0, 10);
+    const d = (t: number) => new Date((t + IST) * 1000).toISOString().slice(0, intraday ? 16 : 10).replace('T', ' ');
     const lines = trades.map((t) => [t.symbol, t.qty, d(t.entryTime), t.entryPricePaise / 100, d(t.exitTime), t.exitPricePaise / 100, REASON[t.exitReason], t.grossPaise / 100, t.chargesPaise / 100, t.netPaise / 100, t.returnPct.toFixed(2), t.bars, t.maePct.toFixed(2), t.mfePct.toFixed(2), t.dataBreak ? 'yes' : ''].join(','));
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([[head, ...lines].join('\n')], { type: 'text/csv;charset=utf-8' }));
@@ -220,9 +226,9 @@ function TradeTable({ trades }: { trades: Trade[] }) {
             {rows.slice(0, limit).map((t, i) => (
               <tr key={i} className="border-t border-line hover:bg-raised">
                 <td className="px-3 py-1.5 font-semibold"><Link href={`/chart/${encodeURIComponent(t.symbol)}`} className="hover:text-accent-deep">{t.symbol}</Link>{t.dataBreak && <span title="A corporate action that could not be adjusted falls inside this trade" className="ml-1 text-accent-deep">⚠</span>}</td>
-                <td className="num whitespace-nowrap px-3 text-right">{date(t.entryTime)}</td>
+                <td className="num whitespace-nowrap px-3 text-right">{when(t.entryTime)}</td>
                 <td className="num px-3 text-right">{(t.entryPricePaise / 100).toFixed(2)}</td>
-                <td className="num whitespace-nowrap px-3 text-right">{date(t.exitTime)}</td>
+                <td className="num whitespace-nowrap px-3 text-right">{when(t.exitTime)}</td>
                 <td className="num px-3 text-right">{(t.exitPricePaise / 100).toFixed(2)}</td>
                 <td className="px-3 text-ink-2">{REASON[t.exitReason]}</td>
                 <td className="num px-3 text-right">{t.qty.toLocaleString('en-IN')}</td>

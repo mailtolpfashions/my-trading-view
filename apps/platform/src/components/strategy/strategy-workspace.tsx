@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, ArrowRight, Bell, FilePlus2, Play, Save, Trash2 } from 'lucide-react';
-import { parseFormula } from '@mtv/rules';
+import { parseFormula, type Tf } from '@mtv/rules';
 import { FeedError, feed, showKept } from '@/lib/feed';
 import type { Meta, UniverseSpec } from '@/lib/screener';
-import { DEFAULT_STRATEGY, NEW_DOC, TEMPLATES, fromSaved, strategyApi, type BacktestResult, type EquityStrategy, type SavedStrategy, type StrategyDoc } from '@/lib/strategy';
+import { DEFAULT_INTRADAY, DEFAULT_STRATEGY, NEW_DOC, isIntradayTf, type IntradayRules, TEMPLATES, fromSaved, strategyApi, type BacktestResult, type EquityStrategy, type SavedStrategy, type StrategyDoc } from '@/lib/strategy';
 import { ago, userApi, type SavedScreen, type Watchlist } from '@/lib/user';
 import { confirmDialog } from '../dialog';
 import { InfoTip } from '../info-tip';
@@ -14,6 +14,8 @@ import { ConditionEditor } from '../screener/condition-editor';
 import { Button, Card, Segmented, inputCls } from '../ui';
 import { BacktestResults } from './backtest-results';
 import { SymbolPicker, TEST_INDICES } from './symbol-picker';
+import { parseRows, rowsFormula, rowsText } from '@/lib/simple-rules';
+import { SimpleRules } from './simple-rules';
 
 const STEPS = ['Basics', 'Stocks', 'Entry', 'Exit', 'Risk', 'Backtest'] as const;
 type Step = (typeof STEPS)[number];
@@ -134,14 +136,19 @@ export function StrategyWorkspace() {
             })}
           </nav>
 
+          <StrategySentence doc={doc} />
           {step === 'Basics' && <Basics doc={doc} setDoc={setDoc} />}
           {step === 'Stocks' && <Stocks universe={doc.universe} meta={meta} watchlists={watchlists} onChange={(universe) => setDoc({ ...doc, universe })} />}
           {step === 'Entry' && (
             <div className="grid gap-4">
               <div className="flex flex-wrap items-center gap-3">
                 <span className="eyebrow">Signal timeframe</span>
-                <Segmented label="Timeframe" value={s.tf} onChange={(tf) => set({ tf })} options={[{ value: 'D', label: 'Daily' }, { value: 'W', label: 'Weekly' }, { value: 'M', label: 'Monthly' }]} />
-                <InfoTip label="Timeframes">Signals are read at the close of these bars and traded at the next bar&apos;s open. Any condition can be put on another timeframe (for example a weekly trend filter on a daily strategy) from the picker beside it.</InfoTip>
+                <Segmented label="Timeframe" value={s.tf} onChange={(tf) => set({ tf })}
+                  options={[{ value: '1m', label: '1m' }, { value: '5m', label: '5m' }, { value: '15m', label: '15m' }, { value: '1h', label: '1h' }, { value: 'D', label: 'Daily' }, { value: 'W', label: 'Weekly' }, { value: 'M', label: 'Monthly' }]} />
+                <InfoTip label="Timeframes">
+                  <p>Signals are read at the close of these bars and traded at the next bar&apos;s open. Any condition can be put on another timeframe (for example a daily trend filter on a 5-minute strategy) from the picker beside it.</p>
+                  <p>Minute timeframes use the stored Kite minutes (about a year, for NIFTY 500, F&amp;O stocks and the main indices). Orders never carry to the next day, and every position is squared off the same day.</p>
+                </InfoTip>
                 {screens.length > 0 && (
                   <select value="" onChange={(e) => { const sc = screens.find((x) => x.id === e.target.value); if (sc) set({ entry: sc.formula, tf: sc.tf as EquityStrategy['tf'] }); }} aria-label="Use a saved screen" className={`${inputCls} ml-auto pr-8`}>
                     <option value="">Use a saved screen as the entry…</option>
@@ -149,7 +156,8 @@ export function StrategyWorkspace() {
                   </select>
                 )}
               </div>
-              <ConditionEditor value={s.entry} onChange={(entry) => set({ entry })} meta={meta} screenTf={s.tf} rootLabel="Buy when" emptyText="Add the conditions that open a trade." />
+              {isIntradayTf(s.tf) && <SessionTimes rules={s.intraday ?? DEFAULT_INTRADAY} onChange={(intraday) => set({ intraday })} />}
+              <RuleEditor value={s.entry} onChange={(entry) => set({ entry })} meta={meta} tf={s.tf} lead="Buy when" emptyText="Add the conditions that open a trade." />
             </div>
           )}
           {step === 'Exit' && <Exit s={s} set={set} meta={meta} />}
@@ -223,8 +231,8 @@ function Library({ list, activeId, onTemplate, onOpen, onDelete }: { list: Saved
         <ul className="grid gap-1">
           {TEMPLATES.map((t) => (
             <li key={t.id}>
-              <button type="button" disabled={t.needsIntraday} onClick={() => onTemplate(t)} className="w-full rounded-[10px] px-2.5 py-2 text-left hover:bg-raised disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent">
-                <span className="flex items-center gap-2 text-[14px] font-medium">{t.name}{t.needsIntraday && <span className="rounded-full bg-raised px-1.5 text-[10.5px] font-semibold text-muted">needs intraday data</span>}</span>
+              <button type="button" onClick={() => onTemplate(t)} className="w-full rounded-[10px] px-2.5 py-2 text-left hover:bg-raised">
+                <span className="flex items-center gap-2 text-[14px] font-medium">{t.name}{t.style === 'intraday' && <span className="rounded-full bg-raised px-1.5 text-[10.5px] font-semibold text-muted">intraday</span>}</span>
                 <span className="line-clamp-2 block text-[12px] text-muted">{t.about}</span>
               </button>
             </li>
@@ -246,6 +254,79 @@ function NumIn({ v, on, step = 'any', w = 'w-[120px]' }: { v: number | undefined
   return <input type="number" step={step} min={0} value={v ?? ''} onChange={(e) => on(e.target.value === '' ? undefined : Number(e.target.value))} className={`${inputCls} num ${w}`} />;
 }
 
+const STOP_PICKS: { label: string; formula: string; text: string; intraday?: boolean }[] = [
+  { label: 'Supertrend (10, 3) line', formula: 'SUPERTREND(10, 3)', text: 'the Supertrend (10, 3) line' },
+  { label: 'Lowest low of the last 5 candles', formula: 'LOWEST(LOW, 5)[1]', text: 'the lowest low of the previous 5 candles' },
+  { label: 'EMA 20', formula: 'EMA(CLOSE, 20)', text: 'EMA 20' },
+  { label: 'VWAP', formula: 'VWAP', text: 'VWAP', intraday: true },
+  { label: 'Opening range low (15 min)', formula: 'OR_LOW(15)', text: 'the low of the first 15 minutes', intraday: true },
+];
+
+const TF_WORDS: Record<string, string> = { '1m': '1-minute', '3m': '3-minute', '5m': '5-minute', '15m': '15-minute', '30m': '30-minute', '1h': '1-hour', D: 'daily', W: 'weekly', M: 'monthly' };
+
+/** The strategy read back in plain words, so the owner can check it says what they meant. */
+function StrategySentence({ doc }: { doc: StrategyDoc }) {
+  const s = doc.strategy, u = doc.universe;
+  const on = u.kind === 'symbols' ? (u.symbols.map((x) => TEST_INDICES.find((i) => i.symbol === x)?.name ?? x).slice(0, 4).join(', ') + (u.symbols.length > 4 ? ` and ${u.symbols.length - 4} more` : '')) || 'no stocks picked yet'
+    : u.kind === 'index' ? `the ${u.name} stocks` : u.kind === 'fno' ? 'F&O stocks' : u.kind === 'watchlist' ? 'a watchlist' : 'all NSE stocks';
+  const rule = (f: string | undefined) => { const r = parseRows(f ?? ''); return r ? rowsText(r) : (f ?? '').trim(); };
+  const entry = rule(s.entry), exit = rule(s.exit);
+  const stop = s.stop.kind === 'pct' ? `${s.stop.value}% below the entry` : s.stop.kind === 'points' ? `₹${s.stop.value} below the entry` : s.stop.kind === 'atr' ? `${s.stop.mult} × ATR (${s.stop.length}) below the entry`
+    : s.stop.kind === 'formula' ? (STOP_PICKS.find((x) => x.formula === (s.stop as { formula: string }).formula)?.text ?? (s.stop as { formula: string }).formula) + ', moving with it' : null;
+  const target = s.target.kind === 'pct' ? `${s.target.value}% above the entry` : s.target.kind === 'points' ? `₹${s.target.value} above the entry` : s.target.kind === 'rr' ? `${s.target.value} × the risk` : null;
+  const day = isIntradayTf(s.tf) ? s.intraday ?? DEFAULT_INTRADAY : null;
+  return (
+    <p className="mb-2 rounded-[12px] bg-accent-soft px-4 py-2.5 text-[13.5px] leading-relaxed text-ink-2">
+      <b className="text-ink">Reads as: </b>
+      On {on}, {TF_WORDS[s.tf]} candles: {entry ? <>buy when {entry}</> : 'no entry rule yet'}.
+      {stop && <> Stop at {stop}.</>}
+      {target && <> Target {target}.</>}
+      {exit && <> Sell when {exit}.</>}
+      {day && <> Trades from {day.firstEntry ?? '09:15'}, none after {day.lastEntry}, everything closed at {day.squareOff}.</>}
+    </p>
+  );
+}
+
+/** Entry and exit rules: simple lists for common setups, or the full builder and formula editor. */
+function RuleEditor({ value, onChange, meta, tf, lead, emptyText }: { value: string; onChange: (f: string) => void; meta: Meta | null; tf: EquityStrategy['tf']; lead: string; emptyText: string }) {
+  const rows = parseRows(value);
+  const [mode, setMode] = useState<'simple' | 'advanced'>(rows ? 'simple' : 'advanced');
+  return (
+    <div className="grid gap-3">
+      <Segmented label="Editor" value={mode} onChange={setMode} options={[{ value: 'simple', label: 'Simple' }, { value: 'advanced', label: 'Advanced (builder or formula)' }]} />
+      {mode === 'simple' && rows && (
+        <>
+          {rows.length === 0 && <p className="text-[13px] text-muted">{emptyText}</p>}
+          <SimpleRules rows={rows} onChange={(r) => onChange(rowsFormula(r))} intraday={isIntradayTf(tf)} lead={lead} />
+          {rows.length > 0 && <p className="text-[12px] text-muted">Formula: <code className="font-mono">{value}</code></p>}
+        </>
+      )}
+      {mode === 'simple' && !rows && (
+        <div className="grid gap-2 rounded-[12px] bg-raised px-4 py-3 text-[13.5px] text-ink-2">
+          <p>This rule uses something the simple lists don&apos;t have, so it can only be changed in the advanced editor.</p>
+          <div className="flex gap-2">
+            <Button variant="quiet" className="h-9" onClick={() => setMode('advanced')}>Open the advanced editor</Button>
+            <Button variant="ghost" className="h-9" onClick={() => onChange('')}>Start this rule again in simple mode</Button>
+          </div>
+        </div>
+      )}
+      {mode === 'advanced' && <ConditionEditor value={value} onChange={onChange} meta={meta} screenTf={tf as Tf} rootLabel={lead} emptyText={emptyText} />}
+    </div>
+  );
+}
+
+/** Intraday: the last time a new trade may start and the time everything is squared off. */
+function SessionTimes({ rules, onChange }: { rules: IntradayRules; onChange: (r: IntradayRules) => void }) {
+  return (
+    <div className="flex flex-wrap items-end gap-4 rounded-[12px] bg-raised px-4 py-3">
+      <Field label="Start trades from"><input type="time" min="09:15" max="15:30" value={rules.firstEntry ?? '09:15'} onChange={(e) => onChange({ ...rules, firstEntry: e.target.value })} className={`${inputCls} num w-[130px]`} /></Field>
+      <Field label="No new trades from"><input type="time" min="09:15" max="15:30" value={rules.lastEntry} onChange={(e) => onChange({ ...rules, lastEntry: e.target.value })} className={`${inputCls} num w-[130px]`} /></Field>
+      <Field label="Square off at"><input type="time" min="09:15" max="15:30" value={rules.squareOff} onChange={(e) => onChange({ ...rules, squareOff: e.target.value })} className={`${inputCls} num w-[130px]`} /></Field>
+      <p className="max-w-[420px] pb-2 text-[12.5px] text-muted">A trade starts when the signal candle closes, so with 15-minute candles the first possible entry is 09:30. Open positions are closed at the square-off bar&apos;s open, or at the day&apos;s last bar if the data ends earlier. Check your broker&apos;s own auto square-off time and keep this before it.</p>
+    </div>
+  );
+}
+
 function Basics({ doc, setDoc }: { doc: StrategyDoc; setDoc: (d: StrategyDoc) => void }) {
   return (
     <div className="grid gap-4">
@@ -254,11 +335,11 @@ function Basics({ doc, setDoc }: { doc: StrategyDoc; setDoc: (d: StrategyDoc) =>
         <Field label="Market"><span className="flex h-10 items-center text-[14px]">NSE</span></Field>
         <Field label="Instrument"><span className="flex h-10 items-center text-[14px]">Equity (cash)</span></Field>
         <Field label="Style">
-          <Segmented label="Style" value={doc.style} onChange={(style) => setDoc({ ...doc, style })} options={[{ value: 'swing', label: 'Swing' }, { value: 'positional', label: 'Positional' }]} />
+          <Segmented label="Style" value={doc.style} onChange={(style) => setDoc({ ...doc, style })} options={[{ value: 'intraday', label: 'Intraday' }, { value: 'swing', label: 'Swing' }, { value: 'positional', label: 'Positional' }]} />
         </Field>
         <Field label="Direction"><span className="flex h-10 items-center text-[14px]">Long (buy)</span></Field>
       </div>
-      <p className="text-[12.5px] text-muted">Intraday strategies need live and intraday data (a later step). Short selling overnight isn&apos;t allowed in the cash market, so short strategies come with futures backtests.</p>
+      <p className="text-[12.5px] text-muted">Intraday strategies run on the stored Kite minutes (about a year) and are squared off the same day. Short selling isn&apos;t in the backtest yet, so every strategy buys first.</p>
     </div>
   );
 }
@@ -278,18 +359,18 @@ function Stocks({ universe, meta, watchlists, onChange }: { universe: UniverseSp
     <div className="grid gap-4">
       <Field label="Test on">
         <select value={key} onChange={(e) => pick(e.target.value)} className={`${inputCls} w-[320px] pr-8`}>
+          <option value="symbols">Pick stocks or an index (NIFTY 50, BANK NIFTY…)</option>
           <option value="all">All NSE stocks (delisted ones included)</option>
           <option value="fno">F&amp;O stocks</option>
           <optgroup label="Stocks in an index">{MAIN_INDICES.map((i) => <option key={i} value={`index:${i}`}>{i} stocks</option>)}</optgroup>
           {meta && <optgroup label="Stocks in a sector or theme index">{meta.indices.filter((i) => !MAIN_INDICES.includes(i)).map((i) => <option key={i} value={`index:${i}`}>{i} stocks</option>)}</optgroup>}
           {watchlists.length > 0 && <optgroup label="My watchlists">{watchlists.map((w) => <option key={w.id} value={`watchlist:${w.id}`}>{w.name} ({w.symbols.length})</option>)}</optgroup>}
-          <option value="symbols">Pick stocks, or an index itself…</option>
         </select>
       </Field>
       {universe.kind === 'symbols' && <SymbolPicker symbols={universe.symbols} onChange={choose} />}
       <div className="grid gap-1.5 text-[12.5px] text-muted">
         <p>Each stock is traded only on days it traded: newly listed stocks join when their history starts, and delisted ones leave on their last day.</p>
-        {universe.kind === 'index' && <p>This tests each stock in {universe.name}, one by one. To trade the index itself, choose &quot;Pick stocks, or an index itself…&quot; and add it.</p>}
+        {universe.kind === 'index' && <p>This tests each stock in {universe.name}, one by one. To trade the index itself, choose &quot;Pick stocks or an index&quot; and add it.</p>}
         {(universe.kind === 'index' || universe.kind === 'fno') && <p className="text-accent-deep">An index list is today&apos;s members. Stocks that left it in the past are missing, which makes results look better than they were (survivorship bias). &quot;All NSE stocks&quot; avoids this.</p>}
         <p>Liquidity is checked on each signal day (Risk step), not from today&apos;s values, so the past is never filtered with information from the future.</p>
         {universe.kind === 'symbols' && universe.symbols.some((x) => TEST_INDICES.some((i) => i.symbol === x)) && (
@@ -324,6 +405,16 @@ function Exit({ s, set, meta }: { s: EquityStrategy; set: (p: Partial<EquityStra
             </Field>
           )}
         </div>
+        {s.stop.kind === 'formula' && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-[12.5px] text-muted">Quick picks:</span>
+            {STOP_PICKS.filter((x) => isIntradayTf(s.tf) || !x.intraday).map((x) => {
+              const on = s.stop.kind === 'formula' && s.stop.formula === x.formula;
+              return <button key={x.formula} type="button" aria-pressed={on} onClick={() => set({ stop: { kind: 'formula', formula: x.formula } })}
+                className={`h-7 rounded-full px-3 text-[12.5px] font-semibold ${on ? 'bg-inverse text-on-inverse' : 'border border-line-strong text-ink-2 hover:text-ink'}`}>{x.label}</button>;
+            })}
+          </div>
+        )}
       </div>
 
       <div className="grid gap-3">
@@ -358,7 +449,7 @@ function Exit({ s, set, meta }: { s: EquityStrategy; set: (p: Partial<EquityStra
 
       <div className="grid gap-3">
         <h3 className="text-[15px] font-semibold">Exit signal <span className="text-[13px] font-normal text-muted">(optional)</span></h3>
-        <ConditionEditor value={s.exit ?? ''} onChange={(exit) => set({ exit })} meta={meta} screenTf={s.tf} rootLabel="Sell when" emptyText="Without an exit signal, trades end at the stop, target, trailing stop or time exit." />
+        <RuleEditor value={s.exit ?? ''} onChange={(exit) => set({ exit })} meta={meta} tf={s.tf} lead="Sell when" emptyText="Without an exit signal, trades end at the stop, target, trailing stop or time exit." />
       </div>
     </div>
   );

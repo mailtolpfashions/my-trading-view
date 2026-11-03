@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeCharges, istToday } from '@mtv/paper';
 import type { Candle } from '@mtv/shared';
+import { resample } from '@mtv/rules';
 import { runPortfolio, type EquityStrategy, type Instrument } from './portfolio';
 
 const IST = 5.5 * 3600;
@@ -167,5 +168,78 @@ describe('index as the instrument', () => {
     expect(fut.chargesPaise).toBeGreaterThan(0);
     expect(fut.chargesPaise).toBeLessThan(eq.chargesPaise); // delivery STT (0.1% each side) is far above futures STT
     expect(fut.grossPaise).toBe(eq.grossPaise);
+  });
+});
+
+describe('intraday', () => {
+  // 5-minute bars from 09:15 IST; `px(day, k)` gives [open, high, low, close] for bar k (0 = 09:15, 74 = 15:25).
+  function day5m(dayIndex: number, px: (k: number) => [number, number, number, number], bars = 75): Candle[] {
+    const day0 = Date.UTC(2024, 0, 1 + dayIndex) / 1000 - IST;
+    return Array.from({ length: bars }, (_, k) => {
+      const [open, high, low, close] = px(k);
+      return { time: day0 + 9 * 3600 + 15 * 60 + k * 300, open, high, low, close, volume: 1000 };
+    });
+  }
+  const daily = (b: Candle[]) => resample(b, 'D');
+  const ins = (b: Candle[]): Instrument[] => [{ symbol: 'AAA', daily: daily(b), intraday: new Map([['5m', b]]) }];
+  const flatPx = (v: number) => (): [number, number, number, number] => [v, v, v, v];
+  const intra: Partial<EquityStrategy> = { tf: '5m', exit: '', from: '2024-01-01', to: '2024-01-31' };
+
+  it('squares off at the open of the 15:15 bar and never holds overnight', () => {
+    // A signal at the 09:25 close (bar 2) fills at the 09:30 open (bar 3); nothing else signals.
+    const d1 = day5m(0, (k) => (k === 2 ? [99, 101, 99, 101] : k === 3 ? [100, 100, 100, 100] : k === 72 ? [104, 104, 104, 104] : [99, 99, 99, 99]));
+    const d2 = day5m(1, flatPx(99));
+    const r = run(ins([...d1, ...d2]), intra);
+    expect(r.trades).toHaveLength(1);
+    const t = r.trades[0];
+    expect(t.exitReason).toBe('square-off');
+    expect(t.entryPricePaise).toBe(10000);
+    expect(t.exitPricePaise).toBe(10400); // 15:15 is bar 72
+    expect(new Date((t.exitTime + IST) * 1000).toISOString().slice(11, 16)).toBe('15:15');
+  });
+
+  it('does not carry a signal on the day\'s last bar to the next morning', () => {
+    const d1 = day5m(0, (k) => (k === 74 ? [99, 101, 99, 101] : [99, 99, 99, 99]));
+    const d2 = day5m(1, flatPx(99));
+    const r = run(ins([...d1, ...d2]), intra);
+    expect(r.trades).toHaveLength(0);
+    expect(r.metrics.lateEntry).toBe(1);
+  });
+
+  it('takes no entry whose fill would come at or after the last-entry time', () => {
+    // bar 68 = 14:55; its close is 15:00, so the fill would be at 15:00 itself
+    const d1 = day5m(0, (k) => (k === 68 ? [99, 101, 99, 101] : [99, 99, 99, 99]));
+    expect(run(ins(d1), intra).trades).toHaveLength(0);
+    expect(run(ins(d1), { ...intra, intraday: { lastEntry: '15:05', squareOff: '15:20' } }).trades).toHaveLength(1);
+  });
+
+  it('squares off at the last bar of a short day, at its close', () => {
+    const d1 = day5m(0, (k) => (k === 2 ? [99, 101, 99, 101] : k === 20 ? [99, 99, 99, 103] : [99, 99, 99, 99]), 21); // data ends 10:55
+    const d2 = day5m(1, flatPx(99));
+    const t = run(ins([...d1, ...d2]), intra).trades[0];
+    expect(t.exitReason).toBe('square-off');
+    expect(t.exitPricePaise).toBe(10300);
+  });
+
+  it('charges stocks as intraday (MIS)', () => {
+    const d1 = day5m(0, (k) => (k === 2 ? [99, 101, 99, 101] : k === 3 ? [100, 100, 100, 100] : k === 72 ? [104, 104, 104, 104] : [99, 99, 99, 99]));
+    const t = run(ins(d1), { ...intra, charges: true }).trades[0];
+    const day = istToday(t.entryTime * 1000);
+    const mis = computeCharges({ side: 'BUY', product: 'MIS', qty: 10, pricePaise: 10000, date: day }).total
+      + computeCharges({ side: 'SELL', product: 'MIS', qty: 10, pricePaise: 10400, date: day }).total;
+    expect(t.chargesPaise).toBe(mis);
+  });
+
+  it('takes no entry that would fill before the start time', () => {
+    // bar 0 (09:15) signals; its order would fill at 09:20
+    const d1 = day5m(0, (k) => (k === 0 ? [99, 101, 99, 101] : [99, 99, 99, 99]));
+    expect(run(ins(d1), intra).trades).toHaveLength(1);
+    const late = run(ins(d1), { ...intra, intraday: { firstEntry: '09:25', lastEntry: '15:00', squareOff: '15:15' } });
+    expect(late.trades).toHaveLength(0);
+    expect(late.metrics.earlyEntry).toBe(1);
+  });
+
+  it('refuses bad session times', () => {
+    expect(() => run(ins(day5m(0, flatPx(99))), { ...intra, intraday: { lastEntry: '15:20', squareOff: '15:15' } })).toThrow(/before the square-off/);
   });
 });

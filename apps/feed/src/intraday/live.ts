@@ -27,6 +27,11 @@ const LIVE_INDICES = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
 /** Trading days of one-minute history each timeframe needs for its indicators. */
 const DAYS_FOR: Partial<Record<Tf, number>> = { '1m': 5, '3m': 10, '5m': 15, '15m': 40, '30m': 60, '1h': 120, '2h': 250, '4h': 250 };
 const nowSec = () => Math.floor(Date.now() / 1000);
+/** A stock's trading days from its NSE bars; an index's from NSE's index closes (indices have no stock bars). */
+const tradingDays = (symbol: string): string[] => {
+  const own = [...rawCloses(symbol).keys()];
+  return own.length ? own : (dailyHistory(symbol)?.candles ?? []).map((c) => dateOfIst(c.time));
+};
 const istClock = (t: number) => ((t + IST) % DAY) / 3600; // hours since IST midnight
 const istMidnight = (t: number) => t - ((t + IST) % DAY);
 
@@ -250,7 +255,7 @@ export class LiveService {
     this.status.history = { running: true, done: 0, total: this.universe.length, failed: 0, days: 0, finishedAt: null };
     for (const s of this.universe) {
       try {
-        const traded = [...rawCloses(s).keys()].filter((d) => d >= cutoff && d < today).sort();
+        const traded = tradingDays(s).filter((d) => d >= cutoff && d < today).sort();
         const have = await this.store.days(s, Date.parse(`${cutoff}T00:00:00+05:30`) / 1000);
         const missing = traded.filter((d) => !have.has(d));
         // Consecutive missing trading days are fetched together (the provider splits long spans into 60-day requests).
@@ -274,6 +279,18 @@ export class LiveService {
   }
 
   /** NSE's published open and the daily history's adjustment for each day, for re-basing minutes (adjust.ts). */
+  /**
+   * Stored minutes from `fromTime` up to yesterday, on the daily history's adjusted basis, as bars of each of `tfs`
+   * (for backtests; reads the disk store, so it works without a Kite session). Today's minutes are left out until
+   * the day is complete.
+   */
+  async history(symbol: string, tfs: Tf[], fromTime: number): Promise<Map<Tf, Candle[]>> {
+    const today = dateOfIst(nowSec());
+    const stored = (await this.store.read(symbol, fromTime)).filter((b) => dateOfIst(b.time) < today);
+    const adjusted = adjustToEod(stored, this.dayInfo(symbol));
+    return new Map(tfs.map((tf) => [tf, tf === '1m' ? adjusted : resample(adjusted, tf)]));
+  }
+
   private dayInfo(symbol: string): DayInfo {
     const raw = rawDays(symbol), adj = dailyHistory(symbol)?.candles ?? [];
     const out: DayInfo = new Map();

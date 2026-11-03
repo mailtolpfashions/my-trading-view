@@ -269,6 +269,12 @@ export const FUNCTIONS: FnDef[] = [
   fn('ICHIMOKU_SPAN_B', 'Trend', 'num', [len(52, 'span b'), len(26, 'displacement')], 'Cloud edge B at this bar (leading span B as plotted)', (c, [sb, d]) => ichimoku(c, 9, 26, N(sb), N(d)).spanB),
   fn('CHOP', 'Trend', 'num', [len(14)], 'Choppiness Index: above ~61.8 choppy, below ~38.2 trending', (c, [n]) => choppiness(c, N(n))),
   fn('VWAP', 'Trend', 'num', [], 'Volume-weighted average price, reset each session (intraday timeframes)', (c) => vwap(c)),
+  fn('TIME', 'Logic', 'num', [], 'The time a bar closes, IST, as HHMM: 930 for the 09:15–09:30 bar on 15 minutes, so TIME >= 920 means "from 09:20". Daily and longer bars count as 1530.', (c, _a, tf) => c.map((b) => {
+    const span = TF_MINUTES[tf];
+    if (!span) return 1530;
+    const end = Math.min(Math.floor(((b.time + IST) % 86400) / 60) + span, 15 * 60 + 30); // the session ends at 15:30
+    return Math.floor(end / 60) * 100 + (end % 60);
+  })),
   fn('OR_HIGH', 'Price action', 'num', [len(15, 'minutes')], 'Opening range high: the highest price of the session\'s first N minutes from 09:15 (intraday timeframes; N a whole number of bars). Empty until the window has closed.', (c, [n], tf) => openingRange(c, N(n), tf, true)),
   fn('OR_LOW', 'Price action', 'num', [len(15, 'minutes')], 'Opening range low: the lowest price of the session\'s first N minutes from 09:15. Empty until the window has closed.', (c, [n], tf) => openingRange(c, N(n), tf, false)),
 

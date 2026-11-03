@@ -9,9 +9,12 @@
 // - When more stocks signal than there are free slots, the ones with the highest `rank` value are taken.
 // - Itemised NSE charges at the rates in force on each date; a stop-out on the entry day is charged as intraday.
 // - Money is integer paise. Prices are split / bonus adjusted, so quantities before an action are in today's shares.
+// - Intraday timeframes (1m to 1h, from minute data): an order never carries to another day, no entry after
+//   between `intraday.firstEntry` and `intraday.lastEntry` (by the time it would fill), and every position is squared off at `intraday.squareOff` (at that bar's open) or at the
+//   day's last bar, whichever comes first. Stocks are charged as intraday (MIS), indices as futures.
 // Short selling overnight is not possible in the cash market: short strategies need intraday data or futures.
 
-import { Evaluator, checkTimeframes, lookback, parseFormula, resample, type Node, type Tf } from '@mtv/rules';
+import { Evaluator, TF_MINUTES, checkTimeframes, isIntraday, lookback, parseFormula, resample, type Node, type Tf } from '@mtv/rules';
 import { brokerById, computeCharges, computeFuturesCharges, istToday, type BrokerProfile } from '@mtv/paper';
 import { atr, type Series } from '@mtv/indicators';
 import type { Candle } from '@mtv/shared';
@@ -28,8 +31,16 @@ export type TrailSpec = { kind: 'none' } | { kind: 'pct'; value: number } | { ki
 export type Sizing = { mode: 'qty'; qty: number } | { mode: 'amount'; rupees: number } | { mode: 'percent'; pct: number } | { mode: 'risk'; pct: number };
 export type OrderSpec = { type: 'market' } | { type: 'limit'; offsetPct: number } | { type: 'stop'; offsetPct: number };
 
+export type StrategyTf = 'D' | 'W' | 'M' | '1m' | '3m' | '5m' | '15m' | '30m' | '1h';
+/** Intraday session rules, as HH:MM in IST: entries fill from firstEntry and before lastEntry; all out at squareOff. */
+export type IntradayRules = { firstEntry?: string; lastEntry: string; squareOff: string };
+export const STRATEGY_TFS: StrategyTf[] = ['1m', '3m', '5m', '15m', '30m', '1h', 'D', 'W', 'M'];
+export const DEFAULT_INTRADAY: IntradayRules = { firstEntry: '09:15', lastEntry: '15:00', squareOff: '15:15' };
+
 export type EquityStrategy = {
-  tf: 'D' | 'W' | 'M';
+  tf: StrategyTf;
+  /** Intraday timeframes only; defaults to DEFAULT_INTRADAY. */
+  intraday?: IntradayRules;
   side: 'LONG';
   entry: string;
   exit?: string;
@@ -69,9 +80,13 @@ export type EquityStrategy = {
  * One thing to trade. An index can't be bought itself: kind 'index' tests it as a stand-in for index futures or an
  * index ETF, with quantity in index units, futures charges, and no traded-value check (index files carry no volume).
  */
-export type Instrument = { symbol: string; daily: Candle[]; breaks?: string[]; kind?: 'equity' | 'index' };
+export type Instrument = {
+  symbol: string; daily: Candle[]; breaks?: string[]; kind?: 'equity' | 'index';
+  /** Intraday bars by timeframe (from minute data), for intraday strategies and rules. */
+  intraday?: Map<Tf, Candle[]>;
+};
 
-export type PortfolioExitReason = 'signal' | 'stop' | 'trail' | 'target' | 'time' | 'end-of-test' | 'data-ended';
+export type PortfolioExitReason = 'signal' | 'stop' | 'trail' | 'target' | 'time' | 'square-off' | 'end-of-test' | 'data-ended';
 export type PortfolioTrade = {
   symbol: string;
   qty: number;
@@ -101,6 +116,9 @@ const IST = 5.5 * 3600;
 const toPaise = (r: number) => Math.round(r * 100);
 const dateOf = (t: number) => new Date((t + IST) * 1000).toISOString().slice(0, 10);
 const dayNo = (t: number) => Math.floor((t + IST) / 86400);
+/** Minutes since midnight IST. */
+const minuteOfDay = (t: number) => Math.floor(((t + IST) % 86400) / 60);
+const hhmm = (v: string) => { const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(v); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 
 function compile(formula: string, want: 'bool' | 'num', label: string): Node {
   const p = parseFormula(formula);
@@ -112,6 +130,14 @@ function compile(formula: string, want: 'bool' | 'num', label: string): Node {
 
 export function validateEquityStrategy(s: EquityStrategy): string | null {
   if (!s.entry?.trim()) return 'Add at least one entry condition';
+  if (!STRATEGY_TFS.includes(s.tf)) return 'Pick a timeframe: 1, 3, 5, 15 or 30 minutes, 1 hour, daily, weekly or monthly';
+  if (isIntraday(s.tf as Tf)) {
+    const r = s.intraday ?? DEFAULT_INTRADAY, first = hhmm(r.firstEntry ?? '09:15'), last = hhmm(r.lastEntry), off = hhmm(r.squareOff);
+    if (first == null || last == null || off == null) return 'Intraday times must be HH:MM, e.g. 15:00';
+    if (first < 9 * 60 + 15 || off > 15 * 60 + 30) return 'Intraday times must fall inside the session, 09:15 to 15:30';
+    if (first >= last) return 'The start time for trades must be before the last entry time';
+    if (last >= off) return 'The last entry time must be before the square-off time';
+  }
   if (s.side !== 'LONG') return 'Short selling overnight is not possible in the cash market. Short strategies need intraday data or futures (a later step).';
   if (!(s.capitalRupees >= 1000)) return 'Starting capital must be at least ₹1,000';
   if (!(Number.isInteger(s.maxOpen) && s.maxOpen >= 1 && s.maxOpen <= 500)) return 'Open positions must be 1 to 500';
@@ -141,13 +167,13 @@ type Prepared = {
 };
 
 function prepare(ins: Instrument, s: EquityStrategy, nodes: { entry: Node; exit: Node | null; rank: Node; stop: Node | null }, fromT: number): Prepared | null {
-  if (ins.daily.length < 2) return null;
-  const bySrc = new Map<Tf, Candle[]>([['D', ins.daily]]);
+  if (ins.daily.length < 2 && !ins.intraday?.size) return null;
+  const bySrc = new Map<Tf, Candle[]>([['D', ins.daily], ...(ins.intraday ?? [])]);
   const source = (tf: Tf) => {
     if (!bySrc.has(tf)) bySrc.set(tf, tf === 'W' || tf === 'M' ? resample(ins.daily, tf) : []);
     return bySrc.get(tf)!.length ? bySrc.get(tf)! : null;
   };
-  const bars = source(s.tf);
+  const bars = source(s.tf as Tf);
   if (!bars || bars.length < 2) return null;
   // Exact values are needed from the start of the test, less what the conditions look back on.
   const first = bars.findIndex((b) => b.time >= fromT);
@@ -156,13 +182,13 @@ function prepare(ins: Instrument, s: EquityStrategy, nodes: { entry: Node; exit:
   const ev = new Evaluator(source, Number.isFinite(back) ? Math.max(0, first - back - 1) : 0);
   return {
     symbol: ins.symbol, bars, index: new Map(bars.map((b, i) => [b.time, i])),
-    entry: ev.series(nodes.entry, s.tf),
-    exit: nodes.exit ? ev.series(nodes.exit, s.tf) : null,
-    rank: ev.series(nodes.rank, s.tf),
-    stopLevel: nodes.stop ? ev.series(nodes.stop, s.tf) : null,
+    entry: ev.series(nodes.entry, s.tf as Tf),
+    exit: nodes.exit ? ev.series(nodes.exit, s.tf as Tf) : null,
+    rank: ev.series(nodes.rank, s.tf as Tf),
+    stopLevel: nodes.stop ? ev.series(nodes.stop, s.tf as Tf) : null,
     atrStop: s.stop.kind === 'atr' ? atr(bars, s.stop.length) : null,
     atrTrail: s.trail.kind === 'atr' ? atr(bars, s.trail.length) : null,
-    avgValue: ev.series(compile('AVG_TURNOVER(20)', 'num', 'Liquidity'), s.tf).map((v) => (v == null ? null : v / 1e7)),
+    avgValue: ev.series(compile(isIntraday(s.tf as Tf) ? '[D] AVG_TURNOVER(20)[1]' : 'AVG_TURNOVER(20)', 'num', 'Liquidity'), s.tf as Tf).map((v) => (v == null ? null : v / 1e7)),
     breaks: ins.breaks ?? [],
     isIndex: ins.kind === 'index',
   };
@@ -187,6 +213,11 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
   };
   const fromT = Date.parse(`${s.from}T00:00:00+05:30`) / 1000, toT = Date.parse(`${s.to}T23:59:59+05:30`) / 1000;
   const broker: BrokerProfile = brokerById(s.broker);
+  const intra = isIntraday(s.tf as Tf);
+  const session = s.intraday ?? DEFAULT_INTRADAY;
+  const firstEntryMin = hhmm(session.firstEntry ?? '09:15') ?? 9 * 60 + 15, lastEntryMin = hhmm(session.lastEntry) ?? 15 * 60, squareOffMin = hhmm(session.squareOff) ?? 15 * 60 + 15;
+  /** The stock's last bar of its day (the next bar is another day, or there is none). */
+  const lastOfDay = (p: Prepared, i: number) => i >= p.bars.length - 1 || dayNo(p.bars[i + 1].time) !== dayNo(p.bars[i].time);
   const prepared = instruments.map((i) => prepare(i, s, nodes, fromT)).filter((p): p is Prepared => !!p);
   if (!prepared.length) throw new StrategyError('None of these stocks has history in the test period');
 
@@ -203,14 +234,14 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
   const lastClose = new Map<string, number>();
   const trades: PortfolioTrade[] = [];
   const equity: { time: number; equityPaise: number; open: number }[] = [];
-  const counts: Counts = { signals: 0, skippedSlots: 0, skippedCash: 0, unfilled: 0, illiquid: 0 };
+  const counts: Counts = { signals: 0, skippedSlots: 0, skippedCash: 0, unfilled: 0, illiquid: 0, lateEntry: 0, earlyEntry: 0 };
 
   const slip = (price: number, buy: boolean) => (buy ? Math.ceil(price * (1 + s.slippagePct / 100)) : Math.floor(price * (1 - s.slippagePct / 100)));
   const charge = (side: 'BUY' | 'SELL', qty: number, price: number, time: number, product: 'CNC' | 'MIS' | 'FUT' = 'CNC') =>
     !s.charges ? 0 : product === 'FUT'
       ? computeFuturesCharges({ side, qty, pricePaise: price, date: istToday(time * 1000), broker }).total
       : computeCharges({ side, product, qty, pricePaise: price, firstDeliverySellToday: product === 'CNC' && side === 'SELL', date: istToday(time * 1000), broker }).total;
-  const productOf = (p: Prepared) => (p.isIndex ? 'FUT' : 'CNC');
+  const productOf = (p: Prepared) => (p.isIndex ? 'FUT' : intra ? 'MIS' : 'CNC');
   const markedEquity = () => cash + lots.reduce((a, l) => a + l.qty * (lastClose.get(l.p.symbol) ?? l.entryPrice), 0);
 
   const close = (l: Lot, i: number, price: number, reason: PortfolioExitReason) => {
@@ -218,7 +249,7 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
     const fill = reason === 'end-of-test' || reason === 'data-ended' ? price : slip(price, false);
     let ch = charge('SELL', l.qty, fill, t, productOf(l.p));
     // Bought and sold the same day: the exchange treats a stock trade as intraday (futures charges don't change).
-    if (!l.p.isIndex && dayNo(t) === dayNo(l.entryTime) && reason !== 'end-of-test') ch = charge('SELL', l.qty, fill, t, 'MIS') + charge('BUY', l.qty, l.entryPrice, l.entryTime, 'MIS') - l.entryCharges;
+    if (!intra && !l.p.isIndex && dayNo(t) === dayNo(l.entryTime) && reason !== 'end-of-test') ch = charge('SELL', l.qty, fill, t, 'MIS') + charge('BUY', l.qty, l.entryPrice, l.entryTime, 'MIS') - l.entryCharges;
     cash += l.qty * fill - ch;
     const gross = (fill - l.entryPrice) * l.qty, chargesPaise = l.entryCharges + ch;
     const entryDate = dateOf(l.entryTime), exitDate = dateOf(t);
@@ -269,6 +300,7 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
       const i = o.p.index.get(t);
       if (i == null) { nextOrders.push(o); continue; } // that stock has no bar now: the order waits for its next bar
       const b = o.p.bars[i], open = toPaise(b.open), high = toPaise(b.high), low = toPaise(b.low);
+      if (intra && (dayNo(b.time) !== dayNo(o.p.bars[o.signalIndex].time) || minuteOfDay(b.time) >= squareOffMin)) { counts.lateEntry++; continue; }
       let price: number | null = open;
       if (o.limit != null) price = low <= o.limit ? Math.min(open, o.limit) : null;
       if (o.trigger != null) price = high >= o.trigger ? Math.max(open, o.trigger) : null;
@@ -284,6 +316,12 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
       lots.push({ p: o.p, qty, entryIndex: i, entryTime: b.time, entryPrice: fill, entryCharges: ch, stop, target, trail: null, best: fill, worst: fill });
     }
     orders = nextOrders;
+
+    // ---- intraday: square off at the open of the first bar at or after the square-off time ----
+    if (intra) for (const l of [...lots]) {
+      const i = l.p.index.get(t);
+      if (i != null && minuteOfDay(t) >= squareOffMin) close(l, i, toPaise(l.p.bars[i].open), 'square-off');
+    }
 
     // ---- inside the bar: stops and targets ----
     for (const l of [...lots]) {
@@ -309,6 +347,7 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
     for (const l of [...lots]) {
       const i = l.p.index.get(t);
       if (i == null) continue;
+      if (intra && lastOfDay(l.p, i)) { close(l, i, toPaise(l.p.bars[i].close), 'square-off'); continue; }
       const lastBarOfStock = i === l.p.bars.length - 1;
       if (lastBarOfStock && t < toT && k < times.length - 1) { close(l, i, toPaise(l.p.bars[i].close), 'data-ended'); continue; }
       const d = trailDistance(l, i);
@@ -323,6 +362,12 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
         const i = p.index.get(t)!;
         if (p.entry[i] !== 1 || i >= p.bars.length - 1) return false;
         counts.signals++;
+        if (intra) {
+          // The order would fill at the next bar's open, i.e. when this bar closes.
+          const fillMin = minuteOfDay(p.bars[i].time) + (TF_MINUTES[s.tf as Tf] ?? 0);
+          if (lastOfDay(p, i) || fillMin >= lastEntryMin) { counts.lateEntry++; return false; }
+          if (fillMin < firstEntryMin) { counts.earlyEntry++; return false; }
+        }
         if (lots.filter((l) => l.p === p).length + orders.filter((o) => o.p === p).length >= s.pyramid) return false;
         const le = lastExit.get(p.symbol);
         if (le != null && i - le <= s.cooldownBars) return false;
@@ -379,9 +424,12 @@ function maxIndexAtOrBefore(p: Prepared, t: number): number {
 // ---- metrics ----
 
 /** Signals seen, and why some did not become trades. */
-type Counts = { signals: number; skippedSlots: number; skippedCash: number; unfilled: number; illiquid: number };
+/** earlyEntry: intraday signals that would fill before the start time. lateEntry: intraday signals after the last-entry time, on a day's last bar, or whose order would land on another day. */
+type Counts = { signals: number; skippedSlots: number; skippedCash: number; unfilled: number; illiquid: number; lateEntry: number; earlyEntry: number };
 
-const PERIODS_PER_YEAR = { D: 252, W: 52, M: 12 } as const;
+const PERIODS_PER_YEAR: Record<string, number> = { D: 252, W: 52, M: 12 };
+/** Bars a year: 252 sessions of 375 minutes on intraday timeframes. */
+const periodsPerYear = (tf: StrategyTf) => PERIODS_PER_YEAR[tf] ?? 252 * Math.round(375 / (TF_MINUTES[tf as Tf] ?? 375));
 
 function drawdown(values: number[]) {
   let peak = values[0] ?? 0, maxDd = 0, maxDdPct = 0, peakAt = 0, ddFrom = 0, ddTo = 0;
@@ -410,7 +458,7 @@ function summarise(trades: PortfolioTrade[], equity: { time: number; equityPaise
   const cagr = final > 0 ? (Math.pow(final / initial, 1 / years) - 1) * 100 : -100;
 
   // Sharpe and Sortino from bar-to-bar equity returns, annualised; risk-free rate per bar from the annual rate.
-  const ppy = PERIODS_PER_YEAR[s.tf];
+  const ppy = periodsPerYear(s.tf);
   const rets = values.map((v, i) => (i ? v / values[i - 1] - 1 : initial ? v / initial - 1 : 0));
   const rf = Math.pow(1 + s.riskFreePct / 100, 1 / ppy) - 1;
   const ex = rets.map((r) => r - rf);
@@ -449,12 +497,19 @@ function summarise(trades: PortfolioTrade[], equity: { time: number; equityPaise
   // Benchmark: buy and hold over the same bars, scaled to the starting capital.
   let bench: { returnPct: number; cagrPct: number; maxDrawdownPct: number; curve: { time: number; equityPaise: number }[] } | null = null;
   if (benchmark?.length && equity.length) {
-    const b = s.tf === 'D' ? benchmark : resample(benchmark, s.tf);
+    const intraBench = isIntraday(s.tf as Tf);
+    const b = s.tf === 'D' || intraBench ? benchmark : resample(benchmark, s.tf as Tf);
     const byTime = new Map(b.map((x) => [x.time, x.close]));
+    const byDay = new Map(b.map((x) => [dayNo(x.time), x.close]));
     let lastPx: number | null = null, basePx: number | null = null;
     const curve: { time: number; equityPaise: number }[] = [];
-    for (const e of equity) {
-      lastPx = byTime.get(e.time) ?? lastPx;
+    for (let n = 0; n < equity.length; n++) {
+      const e = equity[n];
+      if (intraBench) {
+        // One point a day, at the day's last bar, with that day's close (the benchmark is daily data).
+        if (n < equity.length - 1 && dayNo(equity[n + 1].time) === dayNo(e.time)) continue;
+        lastPx = byDay.get(dayNo(e.time)) ?? lastPx;
+      } else lastPx = byTime.get(e.time) ?? lastPx;
       if (lastPx == null) continue;
       basePx ??= lastPx;
       curve.push({ time: e.time, equityPaise: Math.round((initial * lastPx) / basePx) });

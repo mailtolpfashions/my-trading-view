@@ -294,3 +294,17 @@ describe('opening range', () => {
     expect(series('OR_HIGH(12)').every((v) => v == null)).toBe(true);
   });
 });
+
+describe('TIME', () => {
+  const IST2 = 5.5 * 3600, day0 = Date.UTC(2026, 8, 1) / 1000 - IST2;
+  const bars: Candle[] = Array.from({ length: 25 }, (_, k) => ({ time: day0 + 9 * 3600 + 15 * 60 + k * 900, open: 1, high: 1, low: 1, close: 1, volume: 1 }));
+  const series = (f: string) => new Evaluator((t) => (t === '15m' ? bars : null)).series(ok(f).node, '15m');
+  it('is the bar\'s close time as HHMM, capped at the 15:30 close', () => {
+    const t = series('TIME');
+    expect(t[0]).toBe(930);
+    expect(t[1]).toBe(945);
+    expect(t[24]).toBe(1530); // the 15:15 bar
+    expect(series('TIME >= 920')[0]).toBe(1);
+    expect(series('TIME < 1000').slice(0, 4)).toEqual([1, 1, 0, 0]); // the 09:45 bar closes at 10:00
+  });
+});
