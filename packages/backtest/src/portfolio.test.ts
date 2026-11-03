@@ -153,3 +153,19 @@ describe('honesty over a real-looking portfolio', () => {
     expect(Math.max(...r.equity.map((e) => e.open))).toBeLessThanOrEqual(3);
   });
 });
+
+describe('index as the instrument', () => {
+  const rows: [number, number, number, number][] = [[95, 96, 94, 99], [99, 102, 98, 101], [102, 104, 101, 103], [103, 103, 98, 99], [98, 99, 96, 97]];
+  const idx: Instrument[] = [{ symbol: 'NIFTY', daily: bars(rows, 0), kind: 'index' }];
+  it('trades although index files carry no volume (no traded-value check)', () => {
+    expect(run(idx, { minAvgValueCr: 5 }).trades).toHaveLength(1);
+    expect(run([{ ...idx[0], kind: 'equity' }], { minAvgValueCr: 5 }).trades).toHaveLength(0);
+  });
+  it('is charged at index futures rates, not stock delivery rates', () => {
+    const fut = run(idx, { charges: true }).trades[0];
+    const eq = run([{ ...idx[0], kind: 'equity' }], { charges: true }).trades[0];
+    expect(fut.chargesPaise).toBeGreaterThan(0);
+    expect(fut.chargesPaise).toBeLessThan(eq.chargesPaise); // delivery STT (0.1% each side) is far above futures STT
+    expect(fut.grossPaise).toBe(eq.grossPaise);
+  });
+});

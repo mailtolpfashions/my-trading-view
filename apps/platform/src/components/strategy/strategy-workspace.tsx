@@ -2,20 +2,23 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Bell, FilePlus2, Play, Save, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Bell, FilePlus2, Play, Save, Trash2 } from 'lucide-react';
 import { parseFormula } from '@mtv/rules';
-import { FeedError, feed } from '@/lib/feed';
+import { FeedError, feed, showKept } from '@/lib/feed';
 import type { Meta, UniverseSpec } from '@/lib/screener';
 import { DEFAULT_STRATEGY, NEW_DOC, TEMPLATES, fromSaved, strategyApi, type BacktestResult, type EquityStrategy, type SavedStrategy, type StrategyDoc } from '@/lib/strategy';
 import { ago, userApi, type SavedScreen, type Watchlist } from '@/lib/user';
+import { confirmDialog } from '../dialog';
 import { InfoTip } from '../info-tip';
 import { ConditionEditor } from '../screener/condition-editor';
 import { Button, Card, Segmented, inputCls } from '../ui';
 import { BacktestResults } from './backtest-results';
+import { SymbolPicker, TEST_INDICES } from './symbol-picker';
 
 const STEPS = ['Basics', 'Stocks', 'Entry', 'Exit', 'Risk', 'Backtest'] as const;
 type Step = (typeof STEPS)[number];
 const DRAFT_KEY = 'platform.strategy.draft';
+const BASE_KEY = 'platform.strategy.draftBase';
 const MAIN_INDICES = ['NIFTY 50', 'NIFTY 100', 'NIFTY 200', 'NIFTY 500', 'NIFTY MIDCAP 150', 'NIFTY SMALLCAP 250'];
 const BROKERS = [['zerodha', 'Zerodha'], ['upstox', 'Upstox'], ['fyers', 'FYERS'], ['angelone', 'Angel One'], ['dhan', 'Dhan']] as const;
 
@@ -31,13 +34,16 @@ export function StrategyWorkspace() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** An unsaved strategy as it was opened (a template or an empty one), kept with the draft across reloads. */
+  const [base, setBase] = useState<string | null>(null);
 
   const refresh = useCallback(() => { strategyApi.list().then(setList, (e: Error) => setError(e.message)); }, []);
   useEffect(() => {
     try {
       const d = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null') as StrategyDoc | null;
-      if (d?.strategy) setDoc({ ...NEW_DOC, ...d, strategy: { ...DEFAULT_STRATEGY, ...d.strategy } });
+      if (d?.strategy) { setDoc({ ...NEW_DOC, ...d, strategy: { ...DEFAULT_STRATEGY, ...d.strategy } }); setBase(localStorage.getItem(BASE_KEY)); }
     } catch { /* a broken draft is ignored */ }
+    showKept(['screener/meta', setMeta], ['user/strategies', setList], ['user/screens', setScreens], ['user/watchlists', setWatchlists]);
     feed<Meta>('screener/meta').then(setMeta, (e: Error) => setError(e.message));
     userApi.screens().then(setScreens, () => {});
     userApi.watchlists().then(setWatchlists, () => {});
@@ -50,9 +56,18 @@ export function StrategyWorkspace() {
 
   const s = doc.strategy;
   const set = (p: Partial<EquityStrategy>) => setDoc((d) => ({ ...d, strategy: { ...d.strategy, ...p } }));
-  const dirty = saved == null ? !!doc.id || !!s.entry : JSON.stringify(doc) !== saved;
-  const confirmLeave = () => !dirty || window.confirm('Your changes to this strategy are not saved. Continue anyway?');
-  const open = (d: StrategyDoc, savedVersion: string | null) => { setDoc(d); setSaved(savedVersion); setResult(null); setError(null); setStep('Entry'); };
+  const dirty = saved == null ? !!doc.id || (base == null ? !!s.entry : JSON.stringify(doc) !== base) : JSON.stringify(doc) !== saved;
+  /** Runs `go` straight away, or after the owner agrees to drop unsaved changes. */
+  const leaving = (go: () => void) => {
+    if (!dirty) return go();
+    void confirmDialog({ title: 'Discard unsaved changes?', message: 'Your changes to this strategy are not saved.', confirmLabel: 'Discard changes', cancelLabel: 'Keep editing', danger: true }).then((ok) => ok && go());
+  };
+  const open = (d: StrategyDoc, savedVersion: string | null) => {
+    setDoc(d); setSaved(savedVersion); setResult(null); setError(null); setStep('Entry');
+    const b = JSON.stringify(d);
+    setBase(b);
+    try { localStorage.setItem(BASE_KEY, b); } catch { /* storage blocked */ }
+  };
 
   const entryOk = (() => { const p = s.entry.trim() ? parseFormula(s.entry) : null; return !!p?.ok && p.type === 'bool'; })();
   const exitOk = (() => { if (!s.exit?.trim()) return true; const p = parseFormula(s.exit); return p.ok && p.type === 'bool'; })();
@@ -69,12 +84,16 @@ export function StrategyWorkspace() {
       refresh();
     } catch (e) { setError(e instanceof FeedError ? e.message : 'Could not save'); }
   };
+  const runKey = JSON.stringify({ strategy: doc.strategy, universe: doc.universe });
+  const [resultKey, setResultKey] = useState<string | null>(null);
   const run = async () => {
     setStep('Backtest');
     setRunning(true);
     setError(null);
     try {
+      const key = runKey;
       setResult(await strategyApi.backtest(doc));
+      setResultKey(key);
       if (doc.id) refresh();
     } catch (e) { setError(e instanceof FeedError ? e.message : 'The backtest could not run. Is the data service running?'); }
     finally { setRunning(false); }
@@ -83,14 +102,14 @@ export function StrategyWorkspace() {
   return (
     <div className="grid gap-5 xl:grid-cols-[300px_1fr]">
       <Library list={list} activeId={doc.id}
-        onTemplate={(t) => confirmLeave() && open({ ...NEW_DOC, name: t.name, description: t.about, style: t.style, strategy: { ...DEFAULT_STRATEGY, ...t.patch }, universe: doc.universe }, null)}
-        onOpen={(x) => confirmLeave() && open(fromSaved(x), JSON.stringify(fromSaved(x)))}
-        onDelete={(x) => { if (window.confirm(`Delete "${x.name}"?`)) strategyApi.remove(x.id).then(() => { if (doc.id === x.id) { setDoc((d) => ({ ...d, id: undefined })); setSaved(null); } refresh(); }, (e: Error) => setError(e.message)); }} />
+        onTemplate={(t) => leaving(() => open({ ...NEW_DOC, name: t.name, description: t.about, style: t.style, strategy: { ...DEFAULT_STRATEGY, ...t.patch }, universe: doc.universe }, null))}
+        onOpen={(x) => leaving(() => open(fromSaved(x), JSON.stringify(fromSaved(x))))}
+        onDelete={(x) => { void confirmDialog({ title: `Delete "${x.name}"?`, message: 'Its backtest history goes with it.', confirmLabel: 'Delete', danger: true }).then((ok) => void (ok && strategyApi.remove(x.id).then(() => { if (doc.id === x.id) { setDoc((d) => ({ ...d, id: undefined })); setSaved(null); } refresh(); }, (e: Error) => setError(e.message)))); }} />
 
       <div className="grid min-w-0 gap-5">
         <Card title={
-          <span className="flex min-w-0 items-center gap-3">
-            <input value={doc.name} onChange={(e) => setDoc({ ...doc, name: e.target.value })} aria-label="Strategy name" className="min-w-0 flex-1 bg-transparent text-[18px] font-semibold tracking-[-0.01em] focus:outline-none" />
+          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <input value={doc.name} onChange={(e) => setDoc({ ...doc, name: e.target.value })} aria-label="Strategy name" title={doc.name} className="min-w-[8rem] max-w-full bg-transparent text-[18px] font-semibold tracking-[-0.01em] [field-sizing:content] focus:outline-none" />
             {dirty && <span className="shrink-0 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-semibold text-accent-deep">Unsaved changes</span>}
             {notice && <span className="text-[12.5px] font-semibold text-up" role="status">{notice}</span>}
           </span>
@@ -99,7 +118,7 @@ export function StrategyWorkspace() {
             <Button onClick={() => save(false)} disabled={!dirty && !!doc.id}><Save size={15} /> Save</Button>
             {doc.id && <Button variant="ghost" onClick={() => save(true)}>Save as new</Button>}
             {doc.id && <Link href={`/alerts?strategy=${doc.id}`} className="inline-flex h-10 items-center gap-1.5 rounded-[12px] px-3 text-[14px] font-semibold text-ink-2 hover:bg-raised hover:text-ink"><Bell size={15} /> Alert</Link>}
-            <Button variant="ghost" onClick={() => confirmLeave() && open({ ...NEW_DOC }, null)}><FilePlus2 size={15} /> New</Button>
+            <Button variant="ghost" onClick={() => leaving(() => open({ ...NEW_DOC }, null))}><FilePlus2 size={15} /> New</Button>
           </>
         }>
           <nav aria-label="Steps" className="mb-5 flex flex-wrap gap-1.5">
@@ -166,7 +185,14 @@ export function StrategyWorkspace() {
           {error && <p role="alert" className="mt-3 rounded-[12px] bg-down-soft px-3 py-2 text-[13.5px] text-down">{error}</p>}
         </Card>
         {running && <Card><p className="text-[14px] text-ink-2">Testing on every stock in the list, bar by bar…</p></Card>}
-        {result && !running && <BacktestResults r={result} />}
+        {result && !running && resultKey !== runKey && (
+          <p role="status" className="flex flex-wrap items-center gap-2 rounded-[12px] bg-accent-soft px-4 py-2.5 text-[13.5px] text-ink-2">
+            <AlertTriangle size={15} className="text-accent-deep" aria-hidden="true" />
+            These results are from before your latest changes (stocks, rules or risk).
+            <button type="button" onClick={run} className="font-semibold text-accent-deep hover:underline">Run again</button>
+          </p>
+        )}
+        {result && !running && <div className={resultKey !== runKey ? 'opacity-50' : undefined}><BacktestResults r={result} /></div>}
       </div>
     </div>
   );
@@ -239,12 +265,14 @@ function Basics({ doc, setDoc }: { doc: StrategyDoc; setDoc: (d: StrategyDoc) =>
 
 function Stocks({ universe, meta, watchlists, onChange }: { universe: UniverseSpec; meta: Meta | null; watchlists: Watchlist[]; onChange: (u: UniverseSpec) => void }) {
   const key = universe.kind === 'index' ? `index:${universe.name}` : universe.kind === 'watchlist' ? `watchlist:${universe.id}` : universe.kind;
-  const [text, setText] = useState(universe.kind === 'symbols' ? universe.symbols.join(', ') : '');
+  // Switching to "Pick" and back keeps the picked list for this visit.
+  const [picked, setPicked] = useState<string[]>(universe.kind === 'symbols' ? universe.symbols : []);
+  const choose = (list: string[]) => { setPicked(list); onChange({ kind: 'symbols', symbols: list }); };
   const pick = (k: string) => {
     if (k === 'all' || k === 'fno') onChange({ kind: k });
     else if (k.startsWith('index:')) onChange({ kind: 'index', name: k.slice(6) });
     else if (k.startsWith('watchlist:')) onChange({ kind: 'watchlist', id: k.slice(10) });
-    else onChange({ kind: 'symbols', symbols: text.split(/[\s,]+/).filter(Boolean) });
+    else onChange({ kind: 'symbols', symbols: picked });
   };
   return (
     <div className="grid gap-4">
@@ -252,19 +280,21 @@ function Stocks({ universe, meta, watchlists, onChange }: { universe: UniverseSp
         <select value={key} onChange={(e) => pick(e.target.value)} className={`${inputCls} w-[320px] pr-8`}>
           <option value="all">All NSE stocks (delisted ones included)</option>
           <option value="fno">F&amp;O stocks</option>
-          <optgroup label="Index">{MAIN_INDICES.map((i) => <option key={i} value={`index:${i}`}>{i}</option>)}</optgroup>
-          {meta && <optgroup label="Sector and theme indices">{meta.indices.filter((i) => !MAIN_INDICES.includes(i)).map((i) => <option key={i} value={`index:${i}`}>{i}</option>)}</optgroup>}
+          <optgroup label="Stocks in an index">{MAIN_INDICES.map((i) => <option key={i} value={`index:${i}`}>{i} stocks</option>)}</optgroup>
+          {meta && <optgroup label="Stocks in a sector or theme index">{meta.indices.filter((i) => !MAIN_INDICES.includes(i)).map((i) => <option key={i} value={`index:${i}`}>{i} stocks</option>)}</optgroup>}
           {watchlists.length > 0 && <optgroup label="My watchlists">{watchlists.map((w) => <option key={w.id} value={`watchlist:${w.id}`}>{w.name} ({w.symbols.length})</option>)}</optgroup>}
-          <option value="symbols">Type a list…</option>
+          <option value="symbols">Pick stocks, or an index itself…</option>
         </select>
       </Field>
-      {universe.kind === 'symbols' && (
-        <textarea value={text} onChange={(e) => setText(e.target.value)} onBlur={() => onChange({ kind: 'symbols', symbols: text.split(/[\s,]+/).map((x) => x.toUpperCase()).filter(Boolean) })} rows={2} placeholder="RELIANCE, TCS, INFY" className={`${inputCls} h-auto py-2 font-mono`} />
-      )}
+      {universe.kind === 'symbols' && <SymbolPicker symbols={universe.symbols} onChange={choose} />}
       <div className="grid gap-1.5 text-[12.5px] text-muted">
         <p>Each stock is traded only on days it traded: newly listed stocks join when their history starts, and delisted ones leave on their last day.</p>
+        {universe.kind === 'index' && <p>This tests each stock in {universe.name}, one by one. To trade the index itself, choose &quot;Pick stocks, or an index itself…&quot; and add it.</p>}
         {(universe.kind === 'index' || universe.kind === 'fno') && <p className="text-accent-deep">An index list is today&apos;s members. Stocks that left it in the past are missing, which makes results look better than they were (survivorship bias). &quot;All NSE stocks&quot; avoids this.</p>}
         <p>Liquidity is checked on each signal day (Risk step), not from today&apos;s values, so the past is never filtered with information from the future.</p>
+        {universe.kind === 'symbols' && universe.symbols.some((x) => TEST_INDICES.some((i) => i.symbol === x)) && (
+          <p className="text-accent-deep">An index can&apos;t be bought itself, so it is tested as a stand-in for index futures or an index ETF: quantity in index units (1 unit gains ₹1 per point), futures charges, and no volume (rules using volume never signal on it).</p>
+        )}
       </div>
     </div>
   );

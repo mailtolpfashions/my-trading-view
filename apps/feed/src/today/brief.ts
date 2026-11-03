@@ -124,10 +124,10 @@ async function options() {
  * the previous 20 sessions (RVOL_CUM on 15-minute bars). Otherwise: the last session's volume against its 20-day average.
  */
 let spikeCache: { key: string; at: number; rows: Spike[] } | null = null;
+let spikeRunning = false;
 type Spike = { symbol: string; rvol: number; changePct: number; close: number; basis: 'today so far' | 'last session' };
-async function volumeSpikes(today: string, liveOn: boolean): Promise<Spike[]> {
+async function computeSpikes(today: string, liveOn: boolean): Promise<Spike[]> {
   const key = `${today}|${liveOn}`;
-  if (spikeCache?.key === key && Date.now() - spikeCache.at < (liveOn ? 120_000 : 3600_000)) return spikeCache.rows;
   const members = (await indexMembers('NIFTY 500').catch(() => ({ symbols: [] as string[] }))).symbols;
   const rows: Spike[] = [];
   const liveRvol = parseFormula('RVOL_CUM(20)'), eodRvol = parseFormula('RVOL(20)');
@@ -154,6 +154,20 @@ async function volumeSpikes(today: string, liveOn: boolean): Promise<Spike[]> {
   return spikeCache.rows;
 }
 
+/**
+ * The scan reads hundreds of stocks (and, live, their intraday history), so it never holds up the brief: it runs in the
+ * background and the brief shows the last result, marked as updating until a fresh one is ready.
+ */
+function volumeSpikes(today: string, liveOn: boolean): { rows: Spike[]; updating: boolean } {
+  const key = `${today}|${liveOn}`;
+  const fresh = spikeCache?.key === key && Date.now() - spikeCache.at < (liveOn ? 120_000 : 3600_000);
+  if (!fresh && !spikeRunning) {
+    spikeRunning = true;
+    void computeSpikes(today, liveOn).catch(() => {}).finally(() => { spikeRunning = false; });
+  }
+  return { rows: spikeCache?.key === key ? spikeCache.rows : [], updating: !fresh };
+}
+
 /** Open, closed, or how long until the session starts or ends (weekdays 09:15–15:30 IST; exchange holidays not known). */
 function marketStatus(now: number) {
   const local = (now + IST) % 86400, dow = new Date((now + IST) * 1000).getUTCDay();
@@ -177,11 +191,13 @@ export async function todayBrief(now = Math.floor(Date.now() / 1000)) {
     const lv = levelsOf(s);
     if (lv) indices.push({ ...lv, live: await session(s, lv, today).catch(() => null) });
   }
-  const liveOn = live.status.state === 'live';
+  const market = marketStatus(now);
+  // "Today so far" only means something while the session runs; before and after it, the day's official volume.
+  const liveOn = live.status.state === 'live' && market.state === 'open';
   const hour = ((now + IST) % 86400) / 3600;
   return {
     today, live: liveOn, greeting: hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening', name: live.status.userName,
-    market: marketStatus(now), indices, vix: vix(), sectors: sectors(), expiries: await expiries(today),
-    options: await options().catch(() => null), volumeSpikes: await volumeSpikes(today, liveOn).catch(() => []), needsYou: await needsYou(today),
+    market, indices, vix: vix(), sectors: sectors(), expiries: await expiries(today),
+    options: await options().catch(() => null), ...(() => { const v = volumeSpikes(today, liveOn); return { volumeSpikes: v.rows, volumeUpdating: v.updating }; })(), needsYou: await needsYou(today),
   };
 }

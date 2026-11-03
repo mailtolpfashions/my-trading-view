@@ -134,7 +134,7 @@ export function ChartView(p: Props) {
         horzLine: { ...themed.crosshair.horzLine, style: LineStyle.Dotted },
       },
       rightPriceScale: { ...themed.rightPriceScale, minimumWidth: 72 },
-      timeScale: { ...themed.timeScale, timeVisible: false, rightOffset: 8 }, // end-of-day bars: dates only
+      timeScale: { ...themed.timeScale, timeVisible: false, rightOffset: 8 }, // set per timeframe below
       localization: { priceFormatter: (v: number) => fmt(v) },
     });
     chartRef.current = chart;
@@ -369,6 +369,9 @@ export function ChartView(p: Props) {
     );
     return () => lines.forEach((l) => main.removePriceLine(l));
   }, [posKey, p.chartType]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Intraday bars show the time of day on the axis (bar times are already shifted to IST, see toChart).
+  useEffect(() => { chartRef.current?.timeScale().applyOptions({ timeVisible: !['D', 'W', 'M'].includes(p.tf), secondsVisible: false }); }, [p.tf]);
 
   useEffect(() => {
     wmRef.current?.applyOptions({

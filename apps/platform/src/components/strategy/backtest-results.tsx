@@ -28,7 +28,7 @@ export function BacktestResults({ r }: { r: BacktestResult }) {
         </div>
       )}
       <p className="text-[13.5px] text-ink-2">
-        {r.stocks.toLocaleString('en-IN')} stocks, {date(m.from)} to {date(m.to)}, {(r.ms / 1000).toFixed(1)} s. {m.signals.toLocaleString('en-IN')} entry signals became {m.trades.toLocaleString('en-IN')} trades
+        {r.stocks.toLocaleString('en-IN')} {r.stocks === 1 ? 'instrument' : 'stocks'}, {date(m.from)} to {date(m.to)}, {(r.ms / 1000).toFixed(1)} s. {m.signals.toLocaleString('en-IN')} entry signals became {m.trades.toLocaleString('en-IN')} trades
         <InfoTip label="Signals that did not become trades">
           <p>No free position slot: {m.skippedSlots.toLocaleString('en-IN')}</p>
           <p>Below the traded-value minimum: {m.illiquid.toLocaleString('en-IN')}</p>
@@ -37,6 +37,14 @@ export function BacktestResults({ r }: { r: BacktestResult }) {
           <p>Signals while already holding the stock are not counted as missed.</p>
         </InfoTip>
       </p>
+      {!!r.excluded?.length && (
+        <p className="-mt-3 text-[13px] text-muted">
+          Left out: {r.excluded.map((e, i) => (
+            <span key={e.reason}>{i > 0 && ' · '}<span title={e.symbols.join(', ') + (e.count > e.symbols.length ? ` and ${e.count - e.symbols.length} more` : '')} className="cursor-help underline decoration-dotted underline-offset-2">{e.count.toLocaleString('en-IN')} {e.reason}</span>
+              {e.count <= 3 && <span> ({e.symbols.join(', ')})</span>}</span>
+          ))}
+        </p>
+      )}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
         <Kpi label="Net P&L" value={rupees(m.netPaise)} cls={tone(m.netPaise)} sub={pct(m.returnPct)} />

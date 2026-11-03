@@ -40,7 +40,7 @@ export type Meta = {
   timeframes: Tf[];
   fields: { name: string; summary: string }[];
   functions: { name: string; group: string; returns: 'num' | 'bool'; params: Param[]; summary: string }[];
-  presets: { id: string; name: string; category: string; tf: Tf; formula: string; about: string }[];
+  presets: { id: string; name: string; category: string; tf: Tf; formula: string; about: string; horizon?: 'intraday' | 'swing' | 'positional' }[];
   library: { group: string; items: { label: string; formula: string }[] }[];
   indices: string[];
   industries: string[];

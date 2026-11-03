@@ -48,7 +48,10 @@ export class MinuteStore {
 
   private serial<T>(file: string, fn: () => Promise<T>): Promise<T> {
     const next = (this.queues.get(file) ?? Promise.resolve()).then(fn);
-    this.queues.set(file, next.catch(() => {}));
+    // The queue keeps only "done", never the result: holding each file's decoded bars here leaked gigabytes.
+    const done = next.then(() => {}, () => {});
+    this.queues.set(file, done);
+    void done.then(() => { if (this.queues.get(file) === done) this.queues.delete(file); });
     return next;
   }
 

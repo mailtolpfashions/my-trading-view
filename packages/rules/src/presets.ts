@@ -4,6 +4,8 @@
 import type { Tf } from './ast';
 
 export type Category = 'technical' | 'fundamental' | 'fno' | 'custom';
+/** The kind of trade a screen suits: shown first when the owner picks that mode on the Today page. */
+export type Horizon = 'intraday' | 'swing' | 'positional';
 
 export type Preset = {
   id: string;
@@ -13,35 +15,42 @@ export type Preset = {
   formula: string;
   /** What the screen looks for, in a sentence. */
   about: string;
+  horizon: Horizon;
 };
 
 export const PRESETS: Preset[] = [
-  { id: '52w-high-breakout', name: '52-week high breakout', category: 'technical', tf: 'D', formula: 'CLOSE > HIGHEST(HIGH, 252)[1]', about: 'Closed above the highest high of the previous 252 sessions.' },
-  { id: 'near-52w-high', name: 'Within 2% of the 52-week high', category: 'technical', tf: 'D', formula: 'CLOSE >= HIGHEST(HIGH, 252) * 0.98', about: 'Close no more than 2% below the 52-week high.' },
-  { id: '20d-breakout-volume', name: '20-day breakout on volume', category: 'technical', tf: 'D', formula: 'CLOSE > HIGHEST(HIGH, 20)[1] AND RVOL(20) > 1.5', about: 'Closed above the previous 20-day high on at least 1.5× the average volume.' },
-  { id: 'prev-day-high-breakout', name: 'Previous day high breakout', category: 'technical', tf: 'D', formula: 'CLOSE > HIGH[1] AND CLOSE > OPEN', about: 'Closed above yesterday\'s high with a green candle.' },
-  { id: 'prev-week-high-breakout', name: 'Previous week high breakout', category: 'technical', tf: 'D', formula: 'CLOSE > [W] HIGH[1]', about: 'Closed above last week\'s high.' },
-  { id: 'golden-cross', name: 'Golden cross', category: 'technical', tf: 'D', formula: 'CROSSOVER(SMA(CLOSE, 50), SMA(CLOSE, 200))', about: 'The 50-day SMA crossed above the 200-day SMA today.' },
-  { id: 'death-cross', name: 'Death cross', category: 'technical', tf: 'D', formula: 'CROSSUNDER(SMA(CLOSE, 50), SMA(CLOSE, 200))', about: 'The 50-day SMA crossed below the 200-day SMA today.' },
-  { id: 'ema-9-21-cross', name: 'EMA 9 / 21 bullish crossover', category: 'technical', tf: 'D', formula: 'CROSSOVER(EMA(CLOSE, 9), EMA(CLOSE, 21))', about: 'The 9 EMA crossed above the 21 EMA today.' },
-  { id: 'ema-alignment', name: 'Bullish EMA alignment', category: 'technical', tf: 'D', formula: 'CLOSE > EMA(CLOSE, 20) AND EMA(CLOSE, 20) > EMA(CLOSE, 50) AND EMA(CLOSE, 50) > EMA(CLOSE, 200)', about: 'Price above the 20 EMA, and the 20 > 50 > 200 EMAs stacked in order.' },
-  { id: 'above-all-mas', name: 'Above the 20, 50 and 200 SMA', category: 'technical', tf: 'D', formula: 'CLOSE > SMA(CLOSE, 20) AND CLOSE > SMA(CLOSE, 50) AND CLOSE > SMA(CLOSE, 200)', about: 'Close above all three moving averages.' },
-  { id: 'rsi-oversold-exit', name: 'RSI leaves oversold', category: 'technical', tf: 'D', formula: 'CROSSOVER(RSI(CLOSE, 14), 30)', about: 'RSI(14) crossed back above 30 today.' },
-  { id: 'rsi-momentum', name: 'RSI momentum above 60', category: 'technical', tf: 'D', formula: 'RSI(CLOSE, 14) > 60 AND RISING(RSI(CLOSE, 14), 3)', about: 'RSI(14) above 60 and higher on each of the last 3 sessions.' },
-  { id: 'macd-cross', name: 'MACD bullish crossover', category: 'technical', tf: 'D', formula: 'CROSSOVER(MACD_LINE(CLOSE, 12, 26, 9), MACD_SIGNAL(CLOSE, 12, 26, 9))', about: 'The MACD line crossed above its signal line today.' },
-  { id: 'macd-zero-cross', name: 'MACD crosses above zero', category: 'technical', tf: 'D', formula: 'CROSSOVER(MACD_LINE(CLOSE, 12, 26, 9), 0)', about: 'The MACD line crossed above the zero line today.' },
-  { id: 'supertrend-flip', name: 'Supertrend turns bullish', category: 'technical', tf: 'D', formula: 'SUPERTREND_DIR(10, 3) = 1 AND SUPERTREND_DIR(10, 3)[1] = -1', about: 'Supertrend (10, 3) flipped from bearish to bullish today.' },
-  { id: 'strong-trend', name: 'Established uptrend', category: 'technical', tf: 'D', formula: 'SUPERTREND_DIR(10, 3) = 1 AND ADX(14, 14) > 25 AND CLOSE > EMA(CLOSE, 50)', about: 'Supertrend bullish, ADX above 25 (a strong trend) and price above the 50 EMA.' },
-  { id: 'volume-spike', name: 'Volume spike, green candle', category: 'technical', tf: 'D', formula: 'RVOL(20) > 2 AND CLOSE > OPEN', about: 'Volume at least twice the 20-day average, closing above the open.' },
-  { id: 'bb-squeeze', name: 'Bollinger squeeze', category: 'technical', tf: 'D', formula: 'BB_WIDTH(CLOSE, 20, 2) <= LOWEST(BB_WIDTH(CLOSE, 20, 2), 120)', about: 'Bollinger BandWidth at its narrowest of the last 120 sessions: volatility compressed.' },
-  { id: 'bb-upper-break', name: 'Close above the upper Bollinger Band', category: 'technical', tf: 'D', formula: 'CROSSOVER(CLOSE, BB_UPPER(CLOSE, 20, 2))', about: 'Closed above the upper band (20, 2) today after closing inside it.' },
-  { id: 'nr7-inside', name: 'NR7 inside bar', category: 'technical', tf: 'D', formula: 'NR(7) AND INSIDE_BAR', about: 'The narrowest range of 7 sessions, inside yesterday\'s range: a coiled setup.' },
-  { id: 'gap-up-hold', name: 'Gap up that held', category: 'technical', tf: 'D', formula: 'GAP_PCT > 2 AND CLOSE > OPEN', about: 'Opened at least 2% above yesterday\'s close and closed above the open.' },
-  { id: 'engulfing-downtrend', name: 'Bullish engulfing after a decline', category: 'technical', tf: 'D', formula: 'BULLISH_ENGULFING AND CLOSE[1] < SMA(CLOSE, 50)[1]', about: 'A bullish engulfing candle where the previous close was below its 50-day SMA.' },
-  { id: 'hammer-at-low', name: 'Hammer at a 20-day low', category: 'technical', tf: 'D', formula: 'HAMMER AND LOW <= LOWEST(LOW, 20)', about: 'A hammer that made the lowest low of 20 sessions.' },
-  { id: 'rsi-bull-div', name: 'RSI bullish divergence', category: 'technical', tf: 'D', formula: 'BULL_DIV(RSI(CLOSE, 14), 5, 5, 5, 60)', about: 'Price made a lower low while RSI(14) made a higher low (confirmed 5 sessions after the low).' },
-  { id: 'weekly-trend-daily-dip', name: 'Weekly uptrend, daily pullback', category: 'technical', tf: 'D', formula: '[W] (CLOSE > EMA(CLOSE, 20)) AND RSI(CLOSE, 14) < 40', about: 'Above the 20-week EMA on the weekly chart while daily RSI(14) has dipped below 40.' },
-  { id: 'higher-highs-lows', name: 'Higher highs and higher lows', category: 'technical', tf: 'D', formula: 'RISING(HIGH, 3) AND RISING(LOW, 3)', about: 'Each of the last 3 sessions made a higher high and a higher low.' },
+  { id: 'orb-15-breakout', name: 'Opening range breakout (15 min)', category: 'technical', tf: '5m', formula: 'CLOSE > OR_HIGH(15) AND RVOL_CUM(20) > 1.5', about: 'A 5-minute close above the high of the first 15 minutes, with more volume so far than usual for this time of day.', horizon: 'intraday' },
+  { id: 'orb-15-breakdown', name: 'Opening range breakdown (15 min)', category: 'technical', tf: '5m', formula: 'CLOSE < OR_LOW(15) AND CLOSE < VWAP', about: 'A 5-minute close below the low of the first 15 minutes and below VWAP.', horizon: 'intraday' },
+  { id: 'vwap-reclaim', name: 'Crosses above VWAP', category: 'technical', tf: '5m', formula: 'CROSSOVER(CLOSE, VWAP) AND CLOSE > [D] OPEN', about: 'A 5-minute close back above VWAP, trading above the day\'s open.', horizon: 'intraday' },
+  { id: 'intraday-pdh-break', name: 'Above yesterday\'s high, above VWAP', category: 'technical', tf: '5m', formula: 'CLOSE > [D] HIGH[1] AND CLOSE > VWAP', about: 'Trading above the previous session\'s high and above VWAP.', horizon: 'intraday' },
+  { id: 'unusual-volume-today', name: 'Unusual volume so far today', category: 'technical', tf: '5m', formula: 'RVOL_CUM(20) > 2 AND CLOSE > [D] OPEN', about: 'At least twice the volume usually traded by this time of day, and above the day\'s open.', horizon: 'intraday' },
+  { id: 'intraday-supertrend', name: 'Supertrend turns bullish (15 min)', category: 'technical', tf: '15m', formula: 'SUPERTREND_DIR(10, 3) = 1 AND SUPERTREND_DIR(10, 3)[1] = -1 AND CLOSE > VWAP', about: 'Supertrend (10, 3) flipped bullish on 15-minute bars, above VWAP.', horizon: 'intraday' },
+  { id: '52w-high-breakout', name: '52-week high breakout', category: 'technical', tf: 'D', formula: 'CLOSE > HIGHEST(HIGH, 252)[1]', about: 'Closed above the highest high of the previous 252 sessions.', horizon: 'positional' },
+  { id: 'near-52w-high', name: 'Within 2% of the 52-week high', category: 'technical', tf: 'D', formula: 'CLOSE >= HIGHEST(HIGH, 252) * 0.98', about: 'Close no more than 2% below the 52-week high.', horizon: 'positional' },
+  { id: '20d-breakout-volume', name: '20-day breakout on volume', category: 'technical', tf: 'D', formula: 'CLOSE > HIGHEST(HIGH, 20)[1] AND RVOL(20) > 1.5', about: 'Closed above the previous 20-day high on at least 1.5× the average volume.', horizon: 'swing' },
+  { id: 'prev-day-high-breakout', name: 'Previous day high breakout', category: 'technical', tf: 'D', formula: 'CLOSE > HIGH[1] AND CLOSE > OPEN', about: 'Closed above yesterday\'s high with a green candle.', horizon: 'swing' },
+  { id: 'prev-week-high-breakout', name: 'Previous week high breakout', category: 'technical', tf: 'D', formula: 'CLOSE > [W] HIGH[1]', about: 'Closed above last week\'s high.', horizon: 'swing' },
+  { id: 'golden-cross', name: 'Golden cross', category: 'technical', tf: 'D', formula: 'CROSSOVER(SMA(CLOSE, 50), SMA(CLOSE, 200))', about: 'The 50-day SMA crossed above the 200-day SMA today.', horizon: 'positional' },
+  { id: 'death-cross', name: 'Death cross', category: 'technical', tf: 'D', formula: 'CROSSUNDER(SMA(CLOSE, 50), SMA(CLOSE, 200))', about: 'The 50-day SMA crossed below the 200-day SMA today.', horizon: 'positional' },
+  { id: 'ema-9-21-cross', name: 'EMA 9 / 21 bullish crossover', category: 'technical', tf: 'D', formula: 'CROSSOVER(EMA(CLOSE, 9), EMA(CLOSE, 21))', about: 'The 9 EMA crossed above the 21 EMA today.', horizon: 'swing' },
+  { id: 'ema-alignment', name: 'Bullish EMA alignment', category: 'technical', tf: 'D', formula: 'CLOSE > EMA(CLOSE, 20) AND EMA(CLOSE, 20) > EMA(CLOSE, 50) AND EMA(CLOSE, 50) > EMA(CLOSE, 200)', about: 'Price above the 20 EMA, and the 20 > 50 > 200 EMAs stacked in order.', horizon: 'positional' },
+  { id: 'above-all-mas', name: 'Above the 20, 50 and 200 SMA', category: 'technical', tf: 'D', formula: 'CLOSE > SMA(CLOSE, 20) AND CLOSE > SMA(CLOSE, 50) AND CLOSE > SMA(CLOSE, 200)', about: 'Close above all three moving averages.', horizon: 'positional' },
+  { id: 'rsi-oversold-exit', name: 'RSI leaves oversold', category: 'technical', tf: 'D', formula: 'CROSSOVER(RSI(CLOSE, 14), 30)', about: 'RSI(14) crossed back above 30 today.', horizon: 'swing' },
+  { id: 'rsi-momentum', name: 'RSI momentum above 60', category: 'technical', tf: 'D', formula: 'RSI(CLOSE, 14) > 60 AND RISING(RSI(CLOSE, 14), 3)', about: 'RSI(14) above 60 and higher on each of the last 3 sessions.', horizon: 'swing' },
+  { id: 'macd-cross', name: 'MACD bullish crossover', category: 'technical', tf: 'D', formula: 'CROSSOVER(MACD_LINE(CLOSE, 12, 26, 9), MACD_SIGNAL(CLOSE, 12, 26, 9))', about: 'The MACD line crossed above its signal line today.', horizon: 'swing' },
+  { id: 'macd-zero-cross', name: 'MACD crosses above zero', category: 'technical', tf: 'D', formula: 'CROSSOVER(MACD_LINE(CLOSE, 12, 26, 9), 0)', about: 'The MACD line crossed above the zero line today.', horizon: 'positional' },
+  { id: 'supertrend-flip', name: 'Supertrend turns bullish', category: 'technical', tf: 'D', formula: 'SUPERTREND_DIR(10, 3) = 1 AND SUPERTREND_DIR(10, 3)[1] = -1', about: 'Supertrend (10, 3) flipped from bearish to bullish today.', horizon: 'swing' },
+  { id: 'strong-trend', name: 'Established uptrend', category: 'technical', tf: 'D', formula: 'SUPERTREND_DIR(10, 3) = 1 AND ADX(14, 14) > 25 AND CLOSE > EMA(CLOSE, 50)', about: 'Supertrend bullish, ADX above 25 (a strong trend) and price above the 50 EMA.', horizon: 'positional' },
+  { id: 'volume-spike', name: 'Volume spike, green candle', category: 'technical', tf: 'D', formula: 'RVOL(20) > 2 AND CLOSE > OPEN', about: 'Volume at least twice the 20-day average, closing above the open.', horizon: 'swing' },
+  { id: 'bb-squeeze', name: 'Bollinger squeeze', category: 'technical', tf: 'D', formula: 'BB_WIDTH(CLOSE, 20, 2) <= LOWEST(BB_WIDTH(CLOSE, 20, 2), 120)', about: 'Bollinger BandWidth at its narrowest of the last 120 sessions: volatility compressed.', horizon: 'swing' },
+  { id: 'bb-upper-break', name: 'Close above the upper Bollinger Band', category: 'technical', tf: 'D', formula: 'CROSSOVER(CLOSE, BB_UPPER(CLOSE, 20, 2))', about: 'Closed above the upper band (20, 2) today after closing inside it.', horizon: 'swing' },
+  { id: 'nr7-inside', name: 'NR7 inside bar', category: 'technical', tf: 'D', formula: 'NR(7) AND INSIDE_BAR', about: 'The narrowest range of 7 sessions, inside yesterday\'s range: a coiled setup.', horizon: 'swing' },
+  { id: 'gap-up-hold', name: 'Gap up that held', category: 'technical', tf: 'D', formula: 'GAP_PCT > 2 AND CLOSE > OPEN', about: 'Opened at least 2% above yesterday\'s close and closed above the open.', horizon: 'swing' },
+  { id: 'engulfing-downtrend', name: 'Bullish engulfing after a decline', category: 'technical', tf: 'D', formula: 'BULLISH_ENGULFING AND CLOSE[1] < SMA(CLOSE, 50)[1]', about: 'A bullish engulfing candle where the previous close was below its 50-day SMA.', horizon: 'swing' },
+  { id: 'hammer-at-low', name: 'Hammer at a 20-day low', category: 'technical', tf: 'D', formula: 'HAMMER AND LOW <= LOWEST(LOW, 20)', about: 'A hammer that made the lowest low of 20 sessions.', horizon: 'swing' },
+  { id: 'rsi-bull-div', name: 'RSI bullish divergence', category: 'technical', tf: 'D', formula: 'BULL_DIV(RSI(CLOSE, 14), 5, 5, 5, 60)', about: 'Price made a lower low while RSI(14) made a higher low (confirmed 5 sessions after the low).', horizon: 'swing' },
+  { id: 'weekly-trend-daily-dip', name: 'Weekly uptrend, daily pullback', category: 'technical', tf: 'D', formula: '[W] (CLOSE > EMA(CLOSE, 20)) AND RSI(CLOSE, 14) < 40', about: 'Above the 20-week EMA on the weekly chart while daily RSI(14) has dipped below 40.', horizon: 'swing' },
+  { id: 'higher-highs-lows', name: 'Higher highs and higher lows', category: 'technical', tf: 'D', formula: 'RISING(HIGH, 3) AND RISING(LOW, 3)', about: 'Each of the last 3 sessions made a higher high and a higher low.', horizon: 'swing' },
 ];
 
 export type ConditionTemplate = { label: string; formula: string };

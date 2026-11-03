@@ -9,7 +9,7 @@ import {
   type Series,
 } from '@mtv/indicators';
 import type { Candle } from '@mtv/shared';
-import { isIntraday, type Tf, type ValueType } from './ast';
+import { TF_MINUTES, isIntraday, type Tf, type ValueType } from './ast';
 import { PATTERNS, patternSeries } from './patterns';
 
 export type ArgKind = 'series' | 'bool' | 'int' | 'number' | { oneOf: readonly string[] };
@@ -161,7 +161,28 @@ function timeOfDayRatio(c: Candle[], sessions: number, cumulative: boolean): Ser
   });
 }
 
-const PIVOT_METHODS: readonly PivotMethod[] = ['CLASSIC', 'TRADITIONAL', 'FIBONACCI', 'WOODIE', 'CAMARILLA', 'DM'];
+/**
+ * High or low of the session's first `minutes` (from 09:15 IST), on the bars after that window; null on the window's
+ * own bars, on daily and longer bars, when `minutes` is not a whole number of bars, and on a day missing any window bar.
+ */
+function openingRange(c: Candle[], minutes: number, tf: Tf, high: boolean): Series {
+  const span = TF_MINUTES[tf];
+  if (!span || minutes <= 0 || minutes % span) return c.map(() => null);
+  const open = 9 * 3600 + 15 * 60, end = open + minutes * 60, need = minutes / span;
+  let day = -1, n = 0, v = NaN;
+  return c.map((b) => {
+    const d = Math.floor((b.time + IST) / 86400), key = (b.time + IST) % 86400;
+    if (d !== day) { day = d; n = 0; v = high ? -Infinity : Infinity; }
+    if (key >= open && key < end) {
+      n++;
+      v = high ? Math.max(v, b.high) : Math.min(v, b.low);
+      return null;
+    }
+    return key >= end && n === need ? v : null;
+  });
+}
+
+const PIVOT_METHODS: readonly PivotMethod[] =['CLASSIC', 'TRADITIONAL', 'FIBONACCI', 'WOODIE', 'CAMARILLA', 'DM'];
 const IST = 5.5 * 3600;
 
 /** Which day, week (Monday) or month a bar belongs to, in IST. */
@@ -248,6 +269,8 @@ export const FUNCTIONS: FnDef[] = [
   fn('ICHIMOKU_SPAN_B', 'Trend', 'num', [len(52, 'span b'), len(26, 'displacement')], 'Cloud edge B at this bar (leading span B as plotted)', (c, [sb, d]) => ichimoku(c, 9, 26, N(sb), N(d)).spanB),
   fn('CHOP', 'Trend', 'num', [len(14)], 'Choppiness Index: above ~61.8 choppy, below ~38.2 trending', (c, [n]) => choppiness(c, N(n))),
   fn('VWAP', 'Trend', 'num', [], 'Volume-weighted average price, reset each session (intraday timeframes)', (c) => vwap(c)),
+  fn('OR_HIGH', 'Price action', 'num', [len(15, 'minutes')], 'Opening range high: the highest price of the session\'s first N minutes from 09:15 (intraday timeframes; N a whole number of bars). Empty until the window has closed.', (c, [n], tf) => openingRange(c, N(n), tf, true)),
+  fn('OR_LOW', 'Price action', 'num', [len(15, 'minutes')], 'Opening range low: the lowest price of the session\'s first N minutes from 09:15. Empty until the window has closed.', (c, [n], tf) => openingRange(c, N(n), tf, false)),
 
   // ---- Volatility and bands ----
   fn('ATR', 'Volatility', 'num', [len(14)], 'Average True Range (Wilder)', (c, [n]) => atr(c, N(n))),

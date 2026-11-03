@@ -7,7 +7,7 @@
 //   build their own URLs; FEED_URL is this origin, and /api/<path> is passed through (app/api/[...path]/route.ts).
 // While the service is still loading NSE history it answers 503 "loading"; both retry for a while before failing.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Candle, DataQuality, DataStatus, Instrument, Quote, Timeframe } from '@mtv/shared';
 
 export class FeedError extends Error {
@@ -25,10 +25,88 @@ export async function feed<T>(path: string, body?: unknown, signal?: AbortSignal
       signal,
     });
     const json = await res.json().catch(() => ({}));
-    if (res.ok) return json as T;
+    if (res.ok) {
+      if (body === undefined) keepAnswer(path, json);
+      return json as T;
+    }
     if (res.status === 503 && attempt < 20) { await new Promise((r) => setTimeout(r, 3000)); continue; }
     throw new FeedError(json.message ?? `Request failed (${res.status})`, res.status);
   }
+}
+
+// ---- last answers, kept in the browser so a page shows at once (even while the service starts) ----
+
+const CACHE = 'mtv.cache:';
+const CACHE_MAX = 400_000; // characters; bigger answers (long candle series) are not kept
+type Kept<T> = { at: number; data: T };
+
+export function keepAnswer(path: string, data: unknown) {
+  try {
+    const s = JSON.stringify({ at: Date.now(), data });
+    if (s.length <= CACHE_MAX) localStorage.setItem(CACHE + path, s);
+  } catch { /* storage full or blocked: the page just loads normally */ }
+}
+
+/** The last answer this browser got for a GET path, with when it arrived. */
+export function lastAnswer<T>(path: string): Kept<T> | null {
+  try {
+    const s = localStorage.getItem(CACHE + path);
+    return s ? (JSON.parse(s) as Kept<T>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** On a page's first load: hands the last answer for each path to its setter at once (the fresh fetch follows). */
+export function showKept(...pairs: [path: string, set: (data: never) => void][]) {
+  for (const [path, set] of pairs) {
+    const kept = lastAnswer<never>(path);
+    if (kept) set(kept.data);
+  }
+}
+
+/** Forgets a kept answer (after a change that makes it wrong, e.g. a deleted screen). */
+export const forgetAnswer = (path: string) => { try { localStorage.removeItem(CACHE + path); } catch { /* ignore */ } };
+
+/**
+ * Data for a GET path that is on screen at once: the last answer this browser got is shown immediately, the fresh one
+ * replaces it when it arrives. `at` is when the shown data arrived; `stale` is true until the fresh answer is in.
+ * `every` (ms) refreshes it while the page is open. `path` null waits (e.g. until a choice is made).
+ */
+export function useFeed<T>(path: string | null, every?: number) {
+  const [state, setState] = useState<{ path: string | null; data: T | null; at: number | null; stale: boolean; error: string | null }>(
+    { path: null, data: null, at: null, stale: true, error: null },
+  );
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!path) return;
+    let live = true;
+    const kept = lastAnswer<T>(path);
+    setState((s) => (s.path === path ? { ...s, stale: true } : { path, data: kept?.data ?? null, at: kept?.at ?? null, stale: true, error: null }));
+    feed<T>(path).then(
+      (data) => { if (live) setState({ path, data, at: Date.now(), stale: false, error: null }); },
+      (e: Error) => { if (live) setState((s) => ({ ...s, stale: true, error: e.message })); },
+    );
+    return () => { live = false; };
+  }, [path, tick]);
+  useEffect(() => {
+    if (!path || !every) return;
+    const t = setInterval(() => setTick((n) => n + 1), every);
+    return () => clearInterval(t);
+  }, [path, every]);
+  const reload = useCallback(() => setTick((n) => n + 1), []);
+  const mine = state.path === path;
+  return { data: mine ? state.data : null, at: mine ? state.at : null, stale: mine ? state.stale : true, error: mine ? state.error : null, reload };
+}
+
+/** "just now", "4 min ago", "at 15:42", "on 3 Nov": how old shown data is. */
+export function agoText(at: number, now = Date.now()): string {
+  const min = Math.floor((now - at) / 60_000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const d = new Date(at);
+  if (d.toDateString() === new Date(now).toDateString()) return `at ${d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+  return `on ${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`;
 }
 
 // ---- the first app's tools ----

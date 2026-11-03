@@ -1,42 +1,44 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Bell, ChevronDown, Pencil } from 'lucide-react';
 import { InfoTip } from '@/components/info-tip';
 import { Button, Card, Segmented, inputCls } from '@/components/ui';
-import { FeedError } from '@/lib/feed';
-import { todayApi, type Brief, type Dashboard, type DaySettings, type IndexLevels } from '@/lib/today';
+import { FeedError, agoText, keepAnswer, useFeed } from '@/lib/feed';
+import { MODE_LABEL, MODE_TF, todayApi, type Brief, type Dashboard, type DaySettings, type IndexLevels } from '@/lib/today';
+import { BreadthCard, FiiCard, IndexTile, MoversCard, QuickStart, RecentCharts, WatchlistCard } from '@/components/today/market-tiles';
 
 const fmt = (v: number | null | undefined, d = 2) => (v == null ? '–' : v.toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d }));
 const sign = (v: number | null | undefined, d = 2) => (v == null ? '–' : `${v > 0 ? '+' : ''}${v.toFixed(d)}%`);
 const tone = (v: number | null | undefined) => (v == null || v === 0 ? '' : v > 0 ? 'text-up' : 'text-down');
 const NAMES: Record<string, string> = { NIFTY: 'NIFTY 50', BANKNIFTY: 'BANK NIFTY', FINNIFTY: 'FIN NIFTY', MIDCPNIFTY: 'MIDCAP SELECT' };
-const MODES: Record<DaySettings['mode'], { label: string; tfs: string }> = {
-  intraday: { label: 'Intraday', tfs: '1, 5 and 15 minutes, 1 hour' },
-  swing: { label: 'Swing', tfs: 'daily, hourly for timing' },
-  positional: { label: 'Positional', tfs: 'daily and weekly' },
-};
 
 export default function TodayPage() {
-  const [brief, setBrief] = useState<Brief | null>(null);
-  const [dash, setDash] = useState<Dashboard | null>(null);
-  const [settings, setSettings] = useState<DaySettings | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Each part shows the last picture this browser saw at once, then the fresh one (lib/feed.ts useFeed).
+  const b = useFeed<Brief>('today', 60_000); // the live part moves during the session
+  const d = useFeed<Dashboard>('dashboard', 300_000);
+  const s = useFeed<DaySettings>('user/settings');
+  const [savedSettings, setSavedSettings] = useState<DaySettings | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const brief = b.data, dash = d.data, settings = savedSettings ?? s.data;
+  const reload = b.reload;
 
-  const load = useCallback(() => {
-    todayApi.brief().then((b) => { setBrief(b); setError(null); }, (e: Error) => setError(e.message));
-    todayApi.dashboard().then(setDash, () => {});
-  }, []);
+  // While the volume scan is still running, look again sooner than the regular minute.
   useEffect(() => {
-    load();
-    todayApi.settings().then(setSettings, () => {});
-    const t = setInterval(load, 60_000); // the live part moves during the session
-    return () => clearInterval(t);
-  }, [load]);
+    if (!brief?.volumeUpdating || b.stale) return;
+    const t = setTimeout(reload, 10_000);
+    return () => clearTimeout(t);
+  }, [brief, b.stale, reload]);
   const saveSettings = async (p: Partial<DaySettings>) => {
-    try { setSettings(await todayApi.saveSettings({ ...settings, ...p })); } catch (e) { setError(e instanceof FeedError ? e.message : 'Could not save'); }
+    try {
+      const next = await todayApi.saveSettings({ ...settings, ...p });
+      setSavedSettings(next);
+      keepAnswer('user/settings', next);
+      setSaveError(null);
+    } catch (e) { setSaveError(e instanceof FeedError ? e.message : 'Could not save'); }
   };
+  const error = saveError ?? (brief ? null : b.error);
 
   const nifty = brief?.indices.find((i) => i.symbol === 'NIFTY'), bank = brief?.indices.find((i) => i.symbol === 'BANKNIFTY');
   const opt = brief?.options?.find((o) => o.underlying === 'NIFTY');
@@ -51,30 +53,37 @@ export default function TodayPage() {
             {brief ? `${brief.greeting}${brief.name ? `, ${brief.name.split(' ')[0]}` : ''}.` : 'Today'}
           </h1>
           <p className="mt-1 text-[15px] text-ink-2">{day}{brief ? ` · ${brief.market.text}` : ''}</p>
+          {brief && b.at && <Freshness at={b.at} stale={b.stale} error={b.error} />}
         </div>
         {settings && (
           <div className="flex items-center gap-2">
             <span className="text-[13px] text-ink-2">Today I&apos;m trading</span>
             <Segmented label="Mode" value={settings.mode} onChange={(m) => saveSettings({ mode: m })}
               options={[{ value: 'intraday', label: 'Intraday' }, { value: 'swing', label: 'Swing' }, { value: 'positional', label: 'Positional' }]} />
+            <InfoTip label="What the mode changes">
+              <p>The Screener lists the ready-made screens for {MODE_LABEL[settings.mode].toLowerCase()} trading first, and an unsaved screen moves to {MODE_TF[settings.mode].screenWords} bars.</p>
+              <p>Charts open on {MODE_TF[settings.mode].chartWords} bars.</p>
+              <p>This happens once when you switch; your own choices on those pages stay until you switch again.</p>
+            </InfoTip>
           </div>
         )}
       </div>
       {error && <p role="alert" className="rounded-[12px] bg-down-soft px-3 py-2 text-[13.5px] text-down">{error}</p>}
+      {/* Index tiles: the last close, or live numbers during the session */}
+      <section aria-label="Indices" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {dash?.indices?.map((c) => {
+          const lv = brief?.indices.find((i) => i.symbol === c.symbol)?.live;
+          const live = lv && brief && c.date < brief.today ? lv : null;
+          const note = c.symbol === 'INDIAVIX' && brief?.vix ? (brief.vix.percentile < 30 ? 'Calm for the past year' : brief.vix.percentile > 70 ? 'High for the past year' : 'Normal for the past year') : undefined;
+          return <IndexTile key={c.symbol} c={c} live={live} note={note} />;
+        })}
+        {!dash?.indices && Array.from({ length: 6 }, (_, i) => <div key={i} className="panel h-[168px] animate-pulse" />)}
+      </section>
+
       {!brief && !error && <Card><p className="text-[14px] text-muted">Getting today&apos;s market picture…</p></Card>}
 
       {brief && (
         <>
-          {/* Key numbers */}
-          <section aria-label="Key numbers" className="panel grid grid-cols-2 divide-line sm:grid-cols-3 lg:grid-cols-6 [&>*]:border-line [&>*:not(:last-child)]:border-r">
-            {nifty && <Stat label="NIFTY 50" value={fmt(nifty.live?.ltp ?? nifty.close)} sub={sign(nifty.live?.changePct ?? nifty.changePct)} subTone={tone(nifty.live?.changePct ?? nifty.changePct)} />}
-            {bank && <Stat label="BANK NIFTY" value={fmt(bank.live?.ltp ?? bank.close)} sub={sign(bank.live?.changePct ?? bank.changePct)} subTone={tone(bank.live?.changePct ?? bank.changePct)} />}
-            {brief.vix && <Stat label="India VIX (fear gauge)" value={fmt(brief.vix.close)} sub={brief.vix.percentile < 30 ? 'Calm compared with the past year' : brief.vix.percentile > 70 ? 'High compared with the past year' : 'Normal for the past year'} />}
-            {opt?.pcr != null && <Stat label="NIFTY put-call ratio" value={opt.pcr.toFixed(2)} sub={opt.pcr > 1.2 ? 'More put than call open interest' : opt.pcr < 0.8 ? 'More call than put open interest' : 'Puts and calls about even'} />}
-            {dash?.fii && <Stat label="FIIs in index futures" value={`${((dash.fii.latest.futLong / (dash.fii.latest.futLong + dash.fii.latest.futShort)) * 100).toFixed(0)}% long`} sub={dash.fii.latest.futLong > dash.fii.latest.futShort ? 'More long than short' : 'More short than long'} />}
-            {dash?.nifty500 && <Stat label="NIFTY 500 stocks" value={`${dash.nifty500.breadth.advances} up`} sub={`${dash.nifty500.breadth.declines} down, last session`} />}
-          </section>
-
           {/* Today, and what needs you */}
           <div className="grid gap-5 lg:grid-cols-5">
             <section className="grid content-start gap-3 rounded-[var(--radius-panel)] bg-deep p-5 text-white lg:col-span-3">
@@ -92,10 +101,27 @@ export default function TodayPage() {
                 {brief.needsYou.latest.map((a) => <p key={a.at} className="pl-6 text-[13px] text-ink-2">{a.name}: {a.symbols.join(', ')}</p>)}
                 {settings && <DayRules s={settings} onSave={saveSettings} />}
                 <Link href="/screener" className="inline-flex h-11 items-center justify-center gap-2 rounded-[12px] bg-inverse px-4 text-[14px] font-semibold text-on-inverse hover:bg-inverse-hover">
-                  Find {settings ? MODES[settings.mode].label.toLowerCase() : ''} trades <ArrowRight size={15} />
+                  Find {settings ? MODE_LABEL[settings.mode].toLowerCase() : ''} trades <ArrowRight size={15} />
                 </Link>
               </div>
             </Card>
+          </div>
+
+          {/* The first app's dashboard tiles */}
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)]">
+            <WatchlistCard />
+            <div className="grid content-start gap-5">
+              <BreadthCard title="NIFTY 500 breadth" b={dash?.nifty500?.breadth} />
+              <div className="grid gap-5 sm:grid-cols-2">
+                <MoversCard title="NIFTY 50 gainers" rows={dash?.nifty50?.gainers} />
+                <MoversCard title="NIFTY 50 losers" rows={dash?.nifty50?.losers} />
+              </div>
+            </div>
+            <div className="grid content-start gap-5">
+              <FiiCard fii={dash?.fii ?? null} fpi={dash?.fpi ?? null} />
+              <QuickStart />
+              <RecentCharts />
+            </div>
           </div>
 
           <div className="grid gap-5 lg:grid-cols-2">
@@ -107,7 +133,7 @@ export default function TodayPage() {
                     {o.callWall != null && o.putWall != null && <p>Most call open interest at <b className="num">{fmt(o.callWall, 0)}</b>, most put open interest at <b className="num">{fmt(o.putWall, 0)}</b></p>}
                     {o.maxPain != null && <p className="text-ink-2">Max pain {fmt(o.maxPain, 0)}{o.pcr != null && ` · put-call ratio ${o.pcr.toFixed(2)}`}</p>}
                     {o.impliedMovePct != null && <p className="text-ink-2">The at-the-money straddle (₹{fmt(o.straddle, 0)}) prices a move of about ±{o.impliedMovePct.toFixed(1)}% by expiry</p>}
-                    {o.atmIv != null && <p className="text-ink-2">Implied volatility {o.atmIv.toFixed(1)}%{o.ivPercentile != null && `, lower than ${100 - o.ivPercentile}% of the past year`}</p>}
+                    {o.atmIv != null && <p className="text-ink-2">Implied volatility {(o.atmIv * 100).toFixed(1)}%{o.ivPercentile != null && `, higher than on ${Math.round(o.ivPercentile)}% of days in the past year`}</p>}
                   </div>
                 ))}
                 {!brief.options?.length && <p className="text-[13.5px] text-muted">No F&amp;O data yet.</p>}
@@ -127,20 +153,8 @@ export default function TodayPage() {
                   ))}
                   <li className="px-2 text-[12px] text-muted">{brief.volumeSpikes[0].basis === 'today so far' ? 'Today so far, live' : 'Last session'}</li>
                 </ul>
-              ) : <p className="text-[13.5px] text-muted">No stock is trading far above its usual volume.</p>}
+              ) : <p className="text-[13.5px] text-muted">{brief.volumeUpdating ? 'Checking volumes across NIFTY 500… this takes a minute.' : 'No stock is trading far above its usual volume.'}</p>}
             </Card>
-
-            {dash?.nifty50 && (
-              <Card title="Biggest movers in NIFTY 50" actions={<span className="text-[12px] text-muted">{dash.asOf}</span>}>
-                <div className="grid grid-cols-2 gap-4 text-[13.5px]">
-                  {([['Up most', dash.nifty50.gainers], ['Down most', dash.nifty50.losers]] as const).map(([t, list]) => (
-                    <div key={t}><p className="eyebrow mb-1">{t}</p>
-                      {list.map((m) => <Link key={m.symbol} href={`/chart/${m.symbol}`} className="flex justify-between rounded-[8px] px-1 py-0.5 hover:bg-raised"><span>{m.symbol}</span><span className={`num ${tone(m.changePct)}`}>{sign(m.changePct, 1)}</span></Link>)}
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            )}
 
             <Card title="Sectors">
               <div className="grid grid-cols-2 gap-4 text-[13.5px]">
@@ -151,24 +165,14 @@ export default function TodayPage() {
                 ))}
               </div>
             </Card>
-          </div>
 
-          {/* Levels: one simple line each, details on request */}
-          <Card title="Key levels for today">
-            <div className="grid gap-4 md:grid-cols-2">{brief.indices.filter((i) => i.symbol === 'NIFTY' || i.symbol === 'BANKNIFTY').map((x) => <Levels key={x.symbol} x={x} />)}</div>
-          </Card>
+            {/* Levels: one simple line each, details on request */}
+            <Card title="Key levels for today">
+              <div className="grid gap-4 sm:grid-cols-2">{brief.indices.filter((i) => i.symbol === 'NIFTY' || i.symbol === 'BANKNIFTY').map((x) => <Levels key={x.symbol} x={x} />)}</div>
+            </Card>
+          </div>
         </>
       )}
-    </div>
-  );
-}
-
-function Stat({ label, value, sub, subTone = 'text-muted' }: { label: string; value: string; sub?: string; subTone?: string }) {
-  return (
-    <div className="px-4 py-3.5">
-      <p className="text-[12px] text-muted">{label}</p>
-      <p className="num mt-0.5 text-[22px] font-bold tracking-[-0.01em]">{value}</p>
-      {sub && <p className={`text-[12.5px] ${subTone || 'text-muted'}`}>{sub}</p>}
     </div>
   );
 }
@@ -226,4 +230,11 @@ function DayRules({ s, onSave }: { s: DaySettings; onSave: (p: Partial<DaySettin
       )}
     </div>
   );
+}
+
+/** How fresh the shown picture is: a quiet line, never a blocker. */
+function Freshness({ at, stale, error }: { at: number; stale: boolean; error: string | null }) {
+  const ago = agoText(at);
+  const text = !stale ? `Updated ${ago}` : error ? `Showing the picture from ${ago}. ${error}` : `Showing the picture from ${ago}, updating…`;
+  return <p className={`mt-0.5 text-[12.5px] ${error ? 'text-down' : 'text-muted'}`}>{text}</p>;
 }

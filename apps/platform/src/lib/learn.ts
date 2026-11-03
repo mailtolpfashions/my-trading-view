@@ -122,7 +122,7 @@ export const ARTICLES: Article[] = [
       { h: 'What to look at', p: ['The net position (long minus short) of each group in index futures, and in index calls and puts, and how it changes over days. FIIs’ index-futures positioning is followed closely because their positions are large.'] },
       { h: 'Limits', p: ['The data is published after the close and counts contracts, not money. A net short position may be a hedge against shares held in the cash market, so it does not tell you a group’s overall view.'] },
     ],
-    tools: [{ href: '/research/fii', label: 'FII footprints' }, { href: '/dashboard', label: 'Dashboard' }],
+    tools: [{ href: '/research/fii', label: 'FII footprints' }, { href: '/today', label: 'Today' }],
   },
   {
     slug: 'put-call-ratio', topic: 'Open interest', title: 'The put-call ratio',

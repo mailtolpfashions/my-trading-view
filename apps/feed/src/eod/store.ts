@@ -13,6 +13,7 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { adjustedCandles, dayTime, findAdjustments, findBreaks, type Adjustment, type CorporateAction, type RawBar, type UnhandledAction } from './adjust';
 import { CM_UDIFF_FROM, cmBhavcopyUrl, parseOldCm, parseUdiffCm, type EquityDay } from './bhavcopy';
 import { findBcFile, parseBc, parsePurpose, prBundleUrl, type CorporateActionRow } from './corporate';
+import { readSnapshot, writeSnapshot, type Snapshot } from './snapshot';
 
 const RETRY_MS = 30 * 60_000;
 const toPaise = (rupees: number) => Math.round(rupees * 100);
@@ -63,9 +64,57 @@ let loaded = false;
 /** True once all stored history (and corporate actions) is in memory; before that, answers would be partial. */
 export const eodLoaded = () => loaded;
 
-/** Loads all stored history into memory, a month at a time. */
+/** Takes the disk snapshot's history into memory. False if it holds a day the database no longer has as saved. */
+function useSnapshot(snap: Snapshot, saved: Set<string>): boolean {
+  if (snap.dates.some((d) => !saved.has(d))) return false;
+  for (const [symbol, list] of snap.bySymbol) {
+    bySymbol.set(symbol, list);
+    for (const b of list) {
+      const s = symbolsByIsin.get(b.isin) ?? new Set<string>();
+      s.add(symbol);
+      symbolsByIsin.set(b.isin, s);
+    }
+  }
+  for (const [name, list] of snap.indexByName) indexByName.set(name, list);
+  dates.push(...snap.dates);
+  return true;
+}
+
+/** Drops one day's bars (before reading it again from the database, when it was saved again after the snapshot). */
+function dropDate(d: string) {
+  for (const list of bySymbol.values()) {
+    const i = list.findIndex((b) => b.date === d);
+    if (i >= 0) list.splice(i, 1);
+  }
+  for (const list of indexByName.values()) {
+    const i = list.findIndex((b) => b.date === d);
+    if (i >= 0) list.splice(i, 1);
+  }
+}
+
+let snapshotWriting: Promise<void> | null = null;
+/** Saves the in-memory history to disk for the next start (one write at a time; a failure only costs a slow start). */
+export function saveSnapshot(log: (m: string) => void) {
+  if (snapshotWriting || !loaded) return;
+  const t = Date.now();
+  snapshotWriting = writeSnapshot({ writtenAt: t, dates: [...dates], bySymbol, indexByName })
+    .then(() => log(`NSE history snapshot saved in ${((Date.now() - t) / 1000).toFixed(1)} s`))
+    .catch((e) => log(`NSE history snapshot not saved: ${(e as Error).message}`))
+    .finally(() => { snapshotWriting = null; });
+}
+
+/**
+ * Loads all stored history into memory: from the disk snapshot when there is one, then from the database every
+ * day the snapshot lacks or that was saved again after it, a month at a time.
+ */
 export async function loadEod(log: (m: string) => void): Promise<void> {
-  const all = (await prisma.eodFetch.findMany({ where: { status: 'saved' }, select: { date: true }, orderBy: { date: 'asc' } })).map((f) => f.date);
+  const t0 = Date.now();
+  const fetches = await prisma.eodFetch.findMany({ where: { status: 'saved' }, select: { date: true, updatedAt: true }, orderBy: { date: 'asc' } });
+  const snap = await readSnapshot().catch((e) => { log(`NSE history snapshot unreadable, loading from the database: ${(e as Error).message}`); return null; });
+  const fromSnap = snap ? useSnapshot(snap, new Set(fetches.map((f) => f.date))) : false;
+  const held = new Set(fromSnap ? snap!.dates : []);
+  const all = fetches.filter((f) => !held.has(f.date) || f.updatedAt.getTime() > snap!.writtenAt).map((f) => f.date);
+  for (const d of all) if (held.has(d)) dropDate(d);
   for (let i = 0; i < all.length; i += 21) {
     const chunk = all.slice(i, i + 21);
     const [eq, ix] = await Promise.all([
@@ -78,7 +127,9 @@ export async function loadEod(log: (m: string) => void): Promise<void> {
   }
   for (const a of await prisma.corporateAction.findMany({ select: { symbol: true, exDate: true, purpose: true } })) addAction(a);
   loaded = true;
-  log(`NSE end-of-day history: ${dates.length} days, ${bySymbol.size} stocks in memory`);
+  const how = fromSnap ? `snapshot + ${all.length} days from the database` : 'database';
+  log(`NSE end-of-day history: ${dates.length} days, ${bySymbol.size} stocks in memory (${how}, ${((Date.now() - t0) / 1000).toFixed(1)} s)`);
+  if (!fromSnap || all.length) saveSnapshot(log);
 }
 
 // ---- download and save ----
@@ -177,6 +228,7 @@ export function startEodSync(from: string, log: (m: string) => void) {
   const run = async () => {
     try {
       const saved = await syncEod(from, log);
+      if (saved) saveSnapshot(log);
       const latest = dates[dates.length - 1];
       if (saved === null || !latest || (saved === 0 && notifiedOnce)) return;
       notifiedOnce = true;
@@ -185,7 +237,7 @@ export function startEodSync(from: string, log: (m: string) => void) {
       log(`NSE equity sync failed, will retry: ${(e as Error).message.split('\n').slice(-2).join(' ')}`);
     }
   };
-  setTimeout(() => void loadEod(log).then(run, (e) => log(`Loading NSE history failed: ${(e as Error).message}`)), 5_000);
+  setTimeout(() => void loadEod(log).then(run, (e) => log(`Loading NSE history failed: ${(e as Error).message}`)), 500);
   setInterval(run, RETRY_MS);
 }
 

@@ -16,7 +16,7 @@ export function Card({ title, actions, children, className }: { title?: React.Re
   );
 }
 
-export function Button({ variant = 'quiet', className, ...p }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'quiet' | 'ghost' }) {
+export function Button({ variant = 'quiet', className, ...p }: React.ComponentProps<'button'> & { variant?: 'primary' | 'quiet' | 'ghost' }) {
   return (
     <button type="button" {...p}
       className={clsx('inline-flex h-10 items-center justify-center gap-2 rounded-[12px] px-4 text-[14px] font-semibold disabled:cursor-not-allowed disabled:opacity-50',

@@ -268,3 +268,29 @@ describe('time-of-day relative volume', () => {
     expect(cum[lastDay + 3]).toBeCloseTo((3000 + 100 + 100 + 50) / 1300, 12);
   });
 });
+
+describe('opening range', () => {
+  // Two sessions of 5-minute bars from 09:15; bar k has high 100 + k and low 90 - k, except the second day's 09:20 bar,
+  // which is missing.
+  const IST2 = 5.5 * 3600;
+  const bars: Candle[] = [];
+  for (let d = 0; d < 2; d++) {
+    const day0 = Date.UTC(2026, 8, 1 + d) / 1000 - IST2;
+    for (let k = 0; k < 10; k++) {
+      if (d === 1 && k === 1) continue;
+      bars.push({ time: day0 + 9 * 3600 + 15 * 60 + k * 300, open: 95, high: 100 + k, low: 90 - k, close: 95, volume: 100 });
+    }
+  }
+  const series = (f: string, tf: Tf = '5m') => new Evaluator((t) => (t === tf ? bars : null)).series(ok(f).node, tf);
+  it('is empty inside the window and holds the window\'s high and low after it', () => {
+    const hi = series('OR_HIGH(15)'), lo = series('OR_LOW(15)');
+    expect(hi.slice(0, 3)).toEqual([null, null, null]); // 09:15, 09:20, 09:25
+    expect(hi[3]).toBe(102);
+    expect(lo[3]).toBe(88);
+    expect(hi[9]).toBe(102);
+  });
+  it('flags a day missing a window bar, and a window that is not a whole number of bars', () => {
+    expect(series('OR_HIGH(15)').slice(10).every((v) => v == null)).toBe(true);
+    expect(series('OR_HIGH(12)').every((v) => v == null)).toBe(true);
+  });
+});

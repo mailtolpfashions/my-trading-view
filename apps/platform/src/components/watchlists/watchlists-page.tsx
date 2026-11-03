@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Filter, LineChart, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { FeedError, feed } from '@/lib/feed';
+import { FeedError, feed, showKept } from '@/lib/feed';
 import { userApi, type Watchlist } from '@/lib/user';
+import { confirmDialog, promptDialog } from '../dialog';
 import { Button, Card, inputCls } from '../ui';
 
 type Quote = { symbol: string; ltp: number; prevClose: number; change: number; changePct: number; time: number };
@@ -15,16 +16,19 @@ export function WatchlistsPage() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reload = useCallback(() => userApi.watchlists().then((l) => { setLists(l); setActiveId((id) => (id && l.some((w) => w.id === id) ? id : l[0]?.id ?? null)); }, (e: Error) => setError(e.message)), []);
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => {
+    showKept(['user/watchlists', (l: Watchlist[]) => { setLists(l); setActiveId(l[0]?.id ?? null); }]);
+    reload();
+  }, [reload]);
   const active = lists?.find((w) => w.id === activeId) ?? null;
 
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
     try { await fn(); await reload(); } catch (e) { setError(e instanceof FeedError ? e.message : 'That change could not be saved'); }
   };
-  const create = () => {
-    const name = window.prompt('Name for the new watchlist');
-    if (name?.trim()) act(async () => setActiveId((await userApi.saveWatchlist({ name, symbols: [] })).id));
+  const create = async () => {
+    const name = await promptDialog({ title: 'New watchlist', label: 'Name', placeholder: 'e.g. Breakout candidates', confirmLabel: 'Create' });
+    if (name) act(async () => setActiveId((await userApi.saveWatchlist({ name, symbols: [] })).id));
   };
 
   return (
@@ -75,8 +79,8 @@ function ListView({ w, act }: { w: Watchlist; act: (fn: () => Promise<unknown>) 
     <Card title={w.name} actions={
       <>
         <Link href={`/screener?watchlist=${w.id}`} className="inline-flex h-9 items-center gap-1.5 rounded-[12px] bg-inverse px-3 text-[13.5px] font-semibold text-on-inverse hover:bg-inverse-hover"><Filter size={15} /> Screen this list</Link>
-        <Button variant="ghost" className="h-9 px-2.5" aria-label="Rename" title="Rename" onClick={() => { const name = window.prompt('New name', w.name); if (name?.trim()) act(() => userApi.saveWatchlist({ id: w.id, name, symbols: w.symbols })); }}><Pencil size={15} /></Button>
-        <Button variant="ghost" className="h-9 px-2.5" aria-label="Delete watchlist" title="Delete" onClick={() => { if (window.confirm(`Delete the watchlist "${w.name}"?`)) act(() => userApi.deleteWatchlist(w.id)); }}><Trash2 size={15} /></Button>
+        <Button variant="ghost" className="h-9 px-2.5" aria-label="Rename" title="Rename" onClick={async () => { const name = await promptDialog({ title: 'Rename watchlist', label: 'Name', initial: w.name, confirmLabel: 'Rename' }); if (name) act(() => userApi.saveWatchlist({ id: w.id, name, symbols: w.symbols })); }}><Pencil size={15} /></Button>
+        <Button variant="ghost" className="h-9 px-2.5" aria-label="Delete watchlist" title="Delete" onClick={async () => { if (await confirmDialog({ title: `Delete the watchlist "${w.name}"?`, message: 'The stocks in it are not affected.', confirmLabel: 'Delete', danger: true })) act(() => userApi.deleteWatchlist(w.id)); }}><Trash2 size={15} /></Button>
       </>
     }>
       <form className="mb-4 flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); addSymbols(); }}>

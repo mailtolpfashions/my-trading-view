@@ -6,9 +6,11 @@ import { useSearchParams } from 'next/navigation';
 import { Bell, Eraser, FilePlus2, Play, Redo2, Save, Undo2 } from 'lucide-react';
 import { isIntraday, type Tf } from '@mtv/rules';
 import { fromTree, group, toTree, type Group } from '@/lib/builder';
-import { FeedError, feed } from '@/lib/feed';
+import { FeedError, feed, showKept } from '@/lib/feed';
 import { NEW_SCREEN, type Meta, type Screen, type ScreenResult } from '@/lib/screener';
+import { MODE_LABEL, MODE_TF, modeIsNew, useTradingMode } from '@/lib/today';
 import { CATEGORIES, userApi, type Category, type RecentRun, type SavedScreen, type Watchlist } from '@/lib/user';
+import { confirmDialog } from '../dialog';
 import { InfoTip } from '../info-tip';
 import { Button, Card, Segmented, inputCls } from '../ui';
 import { FormulaEditor, useFormula } from './formula-editor';
@@ -19,6 +21,8 @@ import { UniversePicker } from './universe-picker';
 import { TimeframeSelect } from '../timeframe-select';
 
 const DRAFT_KEY = 'platform.screener.draft';
+/** What an unsaved screen looked like when it was opened (a ready-made screen, a recent run, an empty one). */
+const BASE_KEY = 'platform.screener.draftBase';
 /** What decides "unsaved changes": everything the user edits, not the id. */
 const snapshot = (s: Screen) => JSON.stringify({ ...s, id: undefined });
 
@@ -28,6 +32,7 @@ export function ScreenerWorkspace() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [screen, setScreen] = useState<Screen>(NEW_SCREEN);
   const [saved, setSaved] = useState<string | null>(null); // snapshot of the saved version
+  const [base, setBase] = useState(() => snapshot(NEW_SCREEN)); // snapshot of an unsaved screen as opened
   const [view, setView] = useState<'builder' | 'formula'>('builder');
   const [tree, setTree] = useState<Group>(() => toTree(NEW_SCREEN.formula)!);
   const [hist, setHist] = useState<{ past: Group[]; future: Group[] }>({ past: [], future: [] });
@@ -40,6 +45,8 @@ export function ScreenerWorkspace() {
   const [screens, setScreens] = useState<SavedScreen[] | null>(null);
   const [recent, setRecent] = useState<RecentRun[] | null>(null);
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
+  const mode = useTradingMode();
+  const modeTf = mode ? MODE_TF[mode].screen : NEW_SCREEN.tf;
 
   const refreshLibrary = useCallback(() => {
     userApi.screens().then(setScreens, (e: Error) => setLoadError(e.message));
@@ -48,9 +55,11 @@ export function ScreenerWorkspace() {
   }, []);
 
   // ---- loading a screen into the editor ----
-  const load = useCallback((s: Screen, savedVersion: string | null) => {
+  const load = useCallback((s: Screen, savedVersion: string | null, baseline = snapshot(s)) => {
     setScreen(s);
     setSaved(savedVersion);
+    setBase(baseline);
+    try { localStorage.setItem(BASE_KEY, baseline); } catch { /* storage blocked */ }
     const t = toTree(s.formula);
     setTree(t ?? group());
     setView(t ? 'builder' : 'formula');
@@ -62,9 +71,15 @@ export function ScreenerWorkspace() {
   useEffect(() => {
     let draft: Screen | null = null;
     try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null'); } catch { /* ignore a broken draft */ }
-    const base: Screen = draft?.formula != null ? { ...NEW_SCREEN, ...draft } : NEW_SCREEN;
+    const start: Screen = draft?.formula != null ? { ...NEW_SCREEN, ...draft } : NEW_SCREEN;
     const wl = params.get('watchlist');
-    load(wl ? { ...base, id: undefined, name: 'Untitled screen', universe: { kind: 'watchlist', id: wl } } : base, null);
+    // A restored draft keeps the baseline it was opened with, so edits made before a reload still count as unsaved.
+    let baseline: string | undefined;
+    try { baseline = (draft && localStorage.getItem(BASE_KEY)) || snapshot(NEW_SCREEN); } catch { baseline = snapshot(NEW_SCREEN); }
+    if (wl) load({ ...start, id: undefined, name: 'Untitled screen', universe: { kind: 'watchlist', id: wl } }, null);
+    else load(start, null, baseline);
+    draftReady.current = true;
+    showKept(['screener/meta', setMeta], ['user/screens', setScreens], ['user/recent', setRecent], ['user/watchlists', setWatchlists]);
     feed<Meta>('screener/meta').then(setMeta, (e: Error) => setLoadError(e.message));
     refreshLibrary();
   }, [load, params, refreshLibrary]);
@@ -78,7 +93,16 @@ export function ScreenerWorkspace() {
   }, [screens, screen.id, saved]);
 
   const update = (p: Partial<Screen>) => setScreen((s) => ({ ...s, ...p }));
-  const dirty = saved == null ? !!screen.id || screen.formula !== NEW_SCREEN.formula : snapshot(screen) !== saved;
+  // A new trading mode (Today page) moves an unsaved screen to that mode's timeframe, once.
+  const draftReady = useRef(false);
+  useEffect(() => {
+    if (!mode || !draftReady.current || !modeIsNew('screener', mode)) return;
+    if (screen.id || screen.tf === MODE_TF[mode].screen) return;
+    update({ tf: MODE_TF[mode].screen });
+    setNotice(`Timeframe set to ${MODE_TF[mode].screenWords} bars for ${MODE_LABEL[mode].toLowerCase()} trading`);
+    setTimeout(() => setNotice(null), 4000);
+  }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps -- once per mode, on the screen loaded by then
+  const dirty = saved == null ? !!screen.id || snapshot(screen) !== base : snapshot(screen) !== saved;
 
   // ---- builder edits with undo / redo (typing in one field merges into one step) ----
   const commit = (next: Group, key?: string) => {
@@ -134,7 +158,11 @@ export function ScreenerWorkspace() {
       setError(e instanceof FeedError ? e.message : 'Could not save the screen');
     }
   };
-  const confirmLeave = () => !dirty || window.confirm('Your changes to this screen are not saved. Continue anyway?');
+  /** Runs `go` straight away, or after the owner agrees to drop unsaved changes. */
+  const leaving = (go: () => void) => {
+    if (!dirty) return go();
+    void confirmDialog({ title: 'Discard unsaved changes?', message: 'Your changes to this screen are not saved.', confirmLabel: 'Discard changes', cancelLabel: 'Keep editing', danger: true }).then((ok) => ok && go());
+  };
 
   const run = async () => {
     if (!canRun) return;
@@ -164,30 +192,28 @@ export function ScreenerWorkspace() {
 
   return (
     <div className="grid gap-5 xl:grid-cols-[320px_1fr]">
-      <LibraryPanel meta={meta} screens={screens} recent={recent} activeId={screen.id}
-        onPreset={(p) => confirmLeave() && load({ ...NEW_SCREEN, name: p.name, category: p.category as Category, formula: p.formula, tf: p.tf, universe: screen.universe, filters: screen.filters }, null)}
-        onOpen={(s) => confirmLeave() && load(fromSaved(s), snapshot(fromSaved(s)))}
+      <LibraryPanel mode={mode} meta={meta} screens={screens} recent={recent} activeId={screen.id}
+        onPreset={(p) => leaving(() => load({ ...NEW_SCREEN, name: p.name, category: p.category as Category, formula: p.formula, tf: p.tf, universe: screen.universe, filters: screen.filters }, null))}
+        onOpen={(s) => leaving(() => load(fromSaved(s), snapshot(fromSaved(s))))}
         onFavourite={(s) => userApi.favourite(s.id, !s.favourite).then(refreshLibrary, (e: Error) => setError(e.message))}
         onDuplicate={(s) => userApi.saveScreen({ ...fromSaved(s), id: undefined, name: `${s.name} (copy)` }).then(refreshLibrary, (e: Error) => setError(e.message))}
         onDelete={(s) => {
-          if (!window.confirm(`Delete "${s.name}"? Its run history goes with it.`)) return;
-          userApi.deleteScreen(s.id).then(() => {
+          void confirmDialog({ title: `Delete "${s.name}"?`, message: 'Its run history goes with it.', confirmLabel: 'Delete', danger: true }).then((ok) => void (ok && userApi.deleteScreen(s.id).then(() => {
             if (screen.id === s.id) { update({ id: undefined }); setSaved(null); }
             refreshLibrary();
-          }, (e: Error) => setError(e.message));
+          }, (e: Error) => setError(e.message))));
         }}
-        onRecent={(r) => {
-          if (!confirmLeave()) return;
+        onRecent={(r) => leaving(() => {
           const s = r.screenId ? screens?.find((x) => x.id === r.screenId) : undefined;
           if (s) load(fromSaved(s), snapshot(fromSaved(s)));
           else load({ ...NEW_SCREEN, name: r.name, formula: r.formula, tf: r.tf }, null);
-        }} />
+        })} />
 
       <div className="grid min-w-0 gap-5">
         <Card title={
-          <span className="flex min-w-0 items-center gap-3">
-            <input value={screen.name} onChange={(e) => update({ name: e.target.value })} aria-label="Screen name"
-              className="min-w-0 flex-1 bg-transparent text-[18px] font-semibold tracking-[-0.01em] focus:outline-none" />
+          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <input value={screen.name} onChange={(e) => update({ name: e.target.value })} aria-label="Screen name" title={screen.name}
+              className="min-w-[8rem] max-w-full bg-transparent text-[18px] font-semibold tracking-[-0.01em] [field-sizing:content] focus:outline-none" />
             {dirty && <span className="shrink-0 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-semibold text-accent-deep">Unsaved changes</span>}
             {notice && <span className="shrink-0 text-[12.5px] font-semibold text-up" role="status">{notice}</span>}
           </span>
@@ -199,7 +225,7 @@ export function ScreenerWorkspace() {
             <Button onClick={() => save(false)} disabled={!dirty && !!screen.id} title={screen.id ? 'Save changes to this screen' : 'Save to My screens'}><Save size={15} /> Save</Button>
             {screen.id && <Button variant="ghost" onClick={() => save(true)}>Save as new</Button>}
             {screen.id && <Link href={`/alerts?screen=${screen.id}`} className="inline-flex h-10 items-center gap-1.5 rounded-[12px] px-3 text-[14px] font-semibold text-ink-2 hover:bg-raised hover:text-ink"><Bell size={15} /> Alert</Link>}
-            <Button variant="ghost" onClick={() => confirmLeave() && load({ ...NEW_SCREEN, formula: '' }, null)} title="Start an empty screen"><FilePlus2 size={15} /> New</Button>
+            <Button variant="ghost" onClick={() => leaving(() => load({ ...NEW_SCREEN, formula: '', tf: modeTf }, null))} title="Start an empty screen"><FilePlus2 size={15} /> New</Button>
           </>
         }>
           {loadError && <p className="mb-3 rounded-[12px] bg-down-soft px-3 py-2 text-[13.5px] text-down">{loadError}</p>}

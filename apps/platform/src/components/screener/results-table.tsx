@@ -6,6 +6,7 @@ import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, Download, LineCh
 import { parseFormula } from '@mtv/rules';
 import { columnLabel, toCsv, type ScreenResult, type ScreenRow } from '@/lib/screener';
 import { userApi, type Watchlist } from '@/lib/user';
+import { promptDialog } from '../dialog';
 import { InfoTip } from '../info-tip';
 import { Button, inputCls } from '../ui';
 
@@ -183,8 +184,8 @@ function AddToWatchlist({ symbols, label, watchlists, onChanged, compact }: { sy
     if (!v) return;
     try {
       if (v === '__new') {
-        const name = window.prompt('Name for the new watchlist');
-        if (!name?.trim()) return;
+        const name = await promptDialog({ title: 'New watchlist', message: `With the ${symbols.length} stock${symbols.length === 1 ? '' : 's'} from these results.`, label: 'Name', confirmLabel: 'Create' });
+        if (!name) return;
         const w = await userApi.saveWatchlist({ name, symbols });
         done(`Added to ${w.name}`);
       } else {

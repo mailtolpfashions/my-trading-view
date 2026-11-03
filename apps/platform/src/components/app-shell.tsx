@@ -6,9 +6,11 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { DEFAULT_WATCH, PULSE, ShellContext, chartHref, type Shell } from '@/components/app/shell-context';
 import { SymbolSearch } from '@/components/terminal/symbol-search';
-import { useCloses } from '@/lib/feed';
+import { lastAnswer, useCloses } from '@/lib/feed';
+import { MODE_TF, type DaySettings } from '@/lib/today';
 import { usePersisted, writePersisted } from '@/lib/persisted';
 import { AlertsBell } from './alerts-bell';
+import { DialogHost } from './dialog';
 import { LiveChip } from './live-status';
 import { Logo } from './logo';
 import { ThemeToggle } from './theme-toggle';
@@ -41,7 +43,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
   useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(null), 2600); return () => clearTimeout(t); }, [notice]);
-  const openChart = useCallback((symbol: string) => { writePersisted('mtv.tf', 'D'); router.push(chartHref(symbol)); }, [router]);
+  // A chart opened from search starts on the trading mode's timeframe (Today page), daily when none is set.
+  const openChart = useCallback((symbol: string) => {
+    const mode = lastAnswer<DaySettings>('user/settings')?.data.mode;
+    writePersisted('mtv.tf', mode ? MODE_TF[mode].chart : 'D');
+    router.push(chartHref(symbol));
+  }, [router]);
   const shell: Shell = useMemo(() => ({ quotes, asOf, watch, setWatch, openSearch: setSearch, openChart, notify: setNotice }), [quotes, asOf, watch, setWatch, openChart]);
 
   return (
@@ -75,6 +82,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           else openChart(i.symbol);
           setSearch(null);
         }} />
+      <DialogHost />
       {notice && <div role="status" className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-[12px] bg-deep px-4 py-2.5 text-[13.5px] text-white shadow-[var(--shadow-pop)]">{notice}</div>}
     </ShellContext.Provider>
   );

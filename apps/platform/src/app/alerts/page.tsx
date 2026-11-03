@@ -4,10 +4,11 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Bell, Pause, Play, Send, Trash2 } from 'lucide-react';
+import { confirmDialog } from '@/components/dialog';
 import { InfoTip } from '@/components/info-tip';
 import { Button, Card, Segmented, inputCls } from '@/components/ui';
 import { CHANNEL_LABEL, alertsApi, type Alert, type AlertChannel, type AlertEvent, type ChannelInfo } from '@/lib/alerts';
-import { FeedError } from '@/lib/feed';
+import { FeedError, showKept } from '@/lib/feed';
 import { strategyApi, type SavedStrategy } from '@/lib/strategy';
 import { ago, userApi, type SavedScreen } from '@/lib/user';
 
@@ -28,6 +29,7 @@ function Alerts() {
     alertsApi.events().then(setEvents, () => {});
   }, []);
   useEffect(() => {
+    showKept(['user/alerts', setAlerts], ['user/alert-events', setEvents], ['alerts/channels', setChannels], ['user/screens', setScreens], ['user/strategies', setStrategies]);
     reload();
     alertsApi.channels().then(setChannels, () => {});
     userApi.screens().then(setScreens, () => {});
@@ -81,7 +83,7 @@ function Alerts() {
                   {a.lastError && <p className="text-[12.5px] text-down">{a.lastError}</p>}
                 </div>
                 <Button variant="ghost" className="h-8 px-2.5" onClick={() => act(() => alertsApi.enable(a.id, !a.enabled))} title={a.enabled ? 'Pause' : 'Resume'}>{a.enabled ? <Pause size={15} /> : <Play size={15} />}</Button>
-                <Button variant="ghost" className="h-8 px-2.5" onClick={() => window.confirm(`Delete the alert "${a.name}"?`) && act(() => alertsApi.remove(a.id))} title="Delete"><Trash2 size={15} /></Button>
+                <Button variant="ghost" className="h-8 px-2.5" onClick={async () => { if (await confirmDialog({ title: `Delete the alert "${a.name}"?`, message: 'It stops checking. Messages it already sent stay in the list.', confirmLabel: 'Delete', danger: true })) act(() => alertsApi.remove(a.id)); }} title="Delete"><Trash2 size={15} /></Button>
               </li>
             ))}
           </ul>

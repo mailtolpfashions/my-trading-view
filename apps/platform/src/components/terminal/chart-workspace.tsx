@@ -10,6 +10,7 @@ import { fetchCatalog, newUid, type LibIndicator, type LibStudy } from '@/lib/ch
 import { fetchCandles } from '@/lib/feed';
 import { fmt, tfLabel } from '@/lib/format';
 import { rememberChart, usePersisted, useSymbolPersisted } from '@/lib/persisted';
+import { MODE_TF, modeIsNew, useTradingMode } from '@/lib/today';
 import { ChartView, DEFAULT_CHART_SETTINGS, type ChartSettings, type ChartType, type CompareLine, type ScaleMode } from './chart-view';
 import { SymbolSearch } from './symbol-search';
 import { position, type Fill } from '@/lib/practice';
@@ -18,8 +19,9 @@ import { IndicatorPicker } from './indicator-picker';
 import { LibSettings } from './lib-settings';
 import { Watchlist } from './watchlist';
 
-/** The site shows NSE end-of-day data only: daily bars, and weeks and months built from them. */
-const TFS: Timeframe[] = EOD_TIMEFRAMES;
+/** Minute bars come from the owner's Kite data (NIFTY 500 and F&O stocks, about a year); D/W/M from NSE's end-of-day files. */
+const INTRADAY_TFS: Timeframe[] = ['1', '5', '15', '60'];
+const TFS: Timeframe[] = [...INTRADAY_TFS, ...EOD_TIMEFRAMES];
 const DAY = 86400;
 const RANGES: [label: string, tf: Timeframe, seconds: number | (() => number)][] = [
   ['1M', 'D', 31 * DAY], ['3M', 'D', 92 * DAY], ['6M', 'D', 183 * DAY],
@@ -45,7 +47,11 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
   const router = useRouter();
   const { quotes, watch, setWatch, openSearch, openChart, notify } = useShell();
   const [savedTf, setTf] = usePersisted<Timeframe>('mtv.tf', 'D');
-  const tf: Timeframe = TFS.includes(savedTf) ? savedTf : 'D'; // an old intraday choice falls back to daily
+  const tf: Timeframe = TFS.includes(savedTf) ? savedTf : 'D';
+  const intraday = INTRADAY_TFS.includes(tf);
+  // A new trading mode (Today page) opens the chart on that mode's timeframe, once; the owner's own pick holds after.
+  const mode = useTradingMode();
+  useEffect(() => { if (mode && modeIsNew('chart', mode)) setTf(MODE_TF[mode].chart); }, [mode, setTf]);
   // Chart type, indicators, scale and compare list are saved per symbol (see useSymbolPersisted); the timeframe is shared.
   const [chartType, setChartType] = useSymbolPersisted<ChartType>(symbol, 'mtv.chartType', 'candles');
   const [studies, setStudies] = useSymbolPersisted<string[]>(symbol, 'mtv.studies', ['st', 'rsi']);
@@ -311,7 +317,7 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
             studies={studies}
             visibleSeconds={visibleSeconds}
             onRemoveStudy={(id) => setStudies(studies.filter((s) => s !== id))}
-            libStudies={replay ? [] : libStudies}
+            libStudies={replay || intraday ? [] : libStudies} // library indicators are computed by the feed on D/W/M only
             positions={book && book.qty ? [{ product: 'Practice', qty: book.qty, avgPricePaise: Math.round(book.avg * 100) }] : undefined}
             onRemoveLib={(uid) => setLibStudies(libStudies.filter((s) => s.uid !== uid))}
             onEditLib={setEditLib}

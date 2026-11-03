@@ -61,7 +61,9 @@ export type Trade = {
   grossPaise: number; chargesPaise: number; netPaise: number; returnPct: number; bars: number; maePct: number; mfePct: number; dataBreak: boolean; open: boolean;
 };
 export type BacktestResult = {
-  trades: Trade[]; tradesTruncated: boolean; stocks: number; warnings: string[]; ms: number;
+  trades: Trade[]; tradesTruncated: boolean; stocks: number; warnings: string[];
+  /** Symbols that took no part, by reason (at most 50 named per reason). */
+  excluded?: { reason: string; count: number; symbols: string[] }[]; ms: number;
   equity: { time: number; equityPaise: number; open: number }[];
   benchmark: { returnPct: number; cagrPct: number; maxDrawdownPct: number; curve: { time: number; equityPaise: number }[] } | null;
   metrics: {

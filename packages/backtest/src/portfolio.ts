@@ -12,7 +12,7 @@
 // Short selling overnight is not possible in the cash market: short strategies need intraday data or futures.
 
 import { Evaluator, checkTimeframes, lookback, parseFormula, resample, type Node, type Tf } from '@mtv/rules';
-import { brokerById, computeCharges, istToday, type BrokerProfile } from '@mtv/paper';
+import { brokerById, computeCharges, computeFuturesCharges, istToday, type BrokerProfile } from '@mtv/paper';
 import { atr, type Series } from '@mtv/indicators';
 import type { Candle } from '@mtv/shared';
 
@@ -65,7 +65,11 @@ export type EquityStrategy = {
   riskFreePct: number;
 };
 
-export type Instrument = { symbol: string; daily: Candle[]; breaks?: string[] };
+/**
+ * One thing to trade. An index can't be bought itself: kind 'index' tests it as a stand-in for index futures or an
+ * index ETF, with quantity in index units, futures charges, and no traded-value check (index files carry no volume).
+ */
+export type Instrument = { symbol: string; daily: Candle[]; breaks?: string[]; kind?: 'equity' | 'index' };
 
 export type PortfolioExitReason = 'signal' | 'stop' | 'trail' | 'target' | 'time' | 'end-of-test' | 'data-ended';
 export type PortfolioTrade = {
@@ -133,7 +137,7 @@ export function validateEquityStrategy(s: EquityStrategy): string | null {
 
 type Prepared = {
   symbol: string; bars: Candle[]; index: Map<number, number>; entry: Series; exit: Series | null; rank: Series;
-  stopLevel: Series | null; atrStop: Series | null; atrTrail: Series | null; avgValue: Series; breaks: string[];
+  stopLevel: Series | null; atrStop: Series | null; atrTrail: Series | null; avgValue: Series; breaks: string[]; isIndex: boolean;
 };
 
 function prepare(ins: Instrument, s: EquityStrategy, nodes: { entry: Node; exit: Node | null; rank: Node; stop: Node | null }, fromT: number): Prepared | null {
@@ -160,6 +164,7 @@ function prepare(ins: Instrument, s: EquityStrategy, nodes: { entry: Node; exit:
     atrTrail: s.trail.kind === 'atr' ? atr(bars, s.trail.length) : null,
     avgValue: ev.series(compile('AVG_TURNOVER(20)', 'num', 'Liquidity'), s.tf).map((v) => (v == null ? null : v / 1e7)),
     breaks: ins.breaks ?? [],
+    isIndex: ins.kind === 'index',
   };
 }
 
@@ -201,16 +206,19 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
   const counts: Counts = { signals: 0, skippedSlots: 0, skippedCash: 0, unfilled: 0, illiquid: 0 };
 
   const slip = (price: number, buy: boolean) => (buy ? Math.ceil(price * (1 + s.slippagePct / 100)) : Math.floor(price * (1 - s.slippagePct / 100)));
-  const charge = (side: 'BUY' | 'SELL', qty: number, price: number, time: number, product: 'CNC' | 'MIS' = 'CNC') =>
-    s.charges ? computeCharges({ side, product, qty, pricePaise: price, firstDeliverySellToday: product === 'CNC' && side === 'SELL', date: istToday(time * 1000), broker }).total : 0;
+  const charge = (side: 'BUY' | 'SELL', qty: number, price: number, time: number, product: 'CNC' | 'MIS' | 'FUT' = 'CNC') =>
+    !s.charges ? 0 : product === 'FUT'
+      ? computeFuturesCharges({ side, qty, pricePaise: price, date: istToday(time * 1000), broker }).total
+      : computeCharges({ side, product, qty, pricePaise: price, firstDeliverySellToday: product === 'CNC' && side === 'SELL', date: istToday(time * 1000), broker }).total;
+  const productOf = (p: Prepared) => (p.isIndex ? 'FUT' : 'CNC');
   const markedEquity = () => cash + lots.reduce((a, l) => a + l.qty * (lastClose.get(l.p.symbol) ?? l.entryPrice), 0);
 
   const close = (l: Lot, i: number, price: number, reason: PortfolioExitReason) => {
     const t = l.p.bars[i].time;
     const fill = reason === 'end-of-test' || reason === 'data-ended' ? price : slip(price, false);
-    let ch = charge('SELL', l.qty, fill, t);
-    // Bought and sold the same day: the exchange treats it as an intraday trade.
-    if (dayNo(t) === dayNo(l.entryTime) && reason !== 'end-of-test') ch = charge('SELL', l.qty, fill, t, 'MIS') + charge('BUY', l.qty, l.entryPrice, l.entryTime, 'MIS') - l.entryCharges;
+    let ch = charge('SELL', l.qty, fill, t, productOf(l.p));
+    // Bought and sold the same day: the exchange treats a stock trade as intraday (futures charges don't change).
+    if (!l.p.isIndex && dayNo(t) === dayNo(l.entryTime) && reason !== 'end-of-test') ch = charge('SELL', l.qty, fill, t, 'MIS') + charge('BUY', l.qty, l.entryPrice, l.entryTime, 'MIS') - l.entryCharges;
     cash += l.qty * fill - ch;
     const gross = (fill - l.entryPrice) * l.qty, chargesPaise = l.entryCharges + ch;
     const entryDate = dateOf(l.entryTime), exitDate = dateOf(t);
@@ -267,10 +275,10 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
       if (price == null) { counts.unfilled++; continue; }
       const fill = slip(price, true);
       let qty = o.qty;
-      const ch0 = charge('BUY', qty, fill, b.time);
+      const ch0 = charge('BUY', qty, fill, b.time, productOf(o.p));
       if (qty * fill + ch0 > cash) qty = Math.floor((cash * 0.999) / fill); // only what the cash pays for
       if (qty <= 0) { counts.skippedCash++; continue; }
-      const ch = charge('BUY', qty, fill, b.time);
+      const ch = charge('BUY', qty, fill, b.time, productOf(o.p));
       cash -= qty * fill + ch;
       const { stop, target } = levelsAtEntry(o, fill);
       lots.push({ p: o.p, qty, entryIndex: i, entryTime: b.time, entryPrice: fill, entryCharges: ch, stop, target, trail: null, best: fill, worst: fill });
@@ -318,7 +326,7 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
         if (lots.filter((l) => l.p === p).length + orders.filter((o) => o.p === p).length >= s.pyramid) return false;
         const le = lastExit.get(p.symbol);
         if (le != null && i - le <= s.cooldownBars) return false;
-        if (s.minAvgValueCr > 0 && !((p.avgValue[i] ?? 0) >= s.minAvgValueCr)) { counts.illiquid++; return false; }
+        if (!p.isIndex && s.minAvgValueCr > 0 && !((p.avgValue[i] ?? 0) >= s.minAvgValueCr)) { counts.illiquid++; return false; }
         return true;
       }).sort((a, b) => {
         // Higher rank first; stocks without a rank value last.
