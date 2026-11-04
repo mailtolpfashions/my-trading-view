@@ -28,6 +28,14 @@ export function ivAboveMedian(history: IvPoint[], date: string, window = 250): b
   return history[i].iv > past[Math.floor(past.length / 2)];
 }
 
+/** Share of the previous `window` days with lower IV, from 0 to 1. Only earlier days count. Null with under 60 days behind it. */
+export function ivRank(history: IvPoint[], date: string, window = 250): number | null {
+  const i = history.findIndex((p) => p.date >= date);
+  if (i < 60) return null;
+  const past = history.slice(Math.max(0, i - window), i), iv = history[i].iv;
+  return past.filter((p) => p.iv < iv).length / past.length;
+}
+
 /**
  * Finds closing prices that cannot all be live together. For one expiry and option type, sorted by strike, prices must only
  * rise (puts) or only fall (calls). The longest run that obeys this is kept and the rest are flagged: NSE's close can be the

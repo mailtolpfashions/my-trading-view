@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Segmented } from '@/components/ui';
+import { Segmented, inputCls } from '@/components/ui';
 import { InfoTip } from '@/components/info-tip';
 import { useFeed } from '@/lib/feed';
 import type { Tool } from '@/lib/tools';
@@ -21,7 +21,19 @@ type Ironed = Stats & { ce: number; days: number; manage: string; filter: boolea
 type Shape = Stats & { name: string; paper: boolean; away: number | null; mult: number | null; final: boolean | null; highIv: boolean; noEvents: boolean };
 type Adj = Stats & { sold: number | null; entry: string; exit: string; kind: string; cross: boolean; stop: number | null; late: boolean; highIv: boolean; overlap: boolean };
 type RuleSide = { from: string; to: string; variants: { name: string; trades: number; skipped: number; wonPct: number; avgWinPaise: number; avgLossPaise: number; perYearPaise: number; worstTradePaise: number; worstYearPaise: number; maxDrawdownPaise: number; since2023Paise: number; losingYears: number; yearCount: number }[] };
+type CurveRow = { days: number; months: number; samples: number; straddlePct: number | null; strangle16Pct: number | null; straddlePerMonth: number | null; stranglePerMonth: number | null; medianVolume: number | null };
+type TodayLeg = { strikes: string; credit: number; margin: number | null; pctOfMargin: number | null; perMonth: number | null; volume: number } | null;
+type SlideRow = { year: number; skipped?: string; entry?: string; exit?: string; reason?: string; strike?: number; creditPerUnit?: number; spotIn?: number; spotOut?: number; net?: number; days?: number };
+type SlideSet = { name: string; rows: SlideRow[]; trades: number; won: number | null; perTrade: number | null; total: number; worst: number | null; best: number | null; vixExits: number; avgDays: number | null };
+type LongData = { from: string; to: string; lot: number; curve: CurveRow[]; todayCurve: { expiry: string; days: number; straddle: TodayLeg; strangle: TodayLeg }[]; slide: SlideSet[]; straddleMarginToday: number | null };
+type MRow = { s: string; x: number; y: number; iv: 'all' | 'high'; n: number; sk: number; won: number; win: number; loss: number; avg: number; pm: number; worst: number; held: number; ly: number; yc: number; s23: number; thin: number; m: number | null; pml: number | null };
+type Matrix = { from: string; to: string; entries: number[]; exits: number[]; strategies: { id: string; name: string; group: string }[]; rows: MRow[] };
+type LabRow = { label?: string; entry: number; exit: number; atm: string; filter: string; target: number | null; stop: number | null; protect: string; recentre: number | null; n: number; won: number; win: number; loss: number; avg: number; year: number; worst: number; dd: number; ly: number; yc: number; to22: number; s23: number; n23: number; won23: number; lateYear?: number; dearYear?: number; fiveYear?: number };
+type Lab = { tested: number; factors: LabRow[]; finalists: LabRow[]; baseYears: Record<string, number>; today: { label: string; legs: string[]; credit: number; margin: number | null; gaps: { gapPct: number; pnl: number }[] }[] };
 type Report = {
+  straddleLab: Lab;
+  matrix: Matrix;
+  long: LongData;
   leaders: { from: string; to: string; yearsCovered: number; todayLot: number; rows: Leader[] }; nifty: RuleSide; banknifty: RuleSide;
   overlap: { name: string; months: number; correlation: number; niftyLost: number; bankLost: number; bothLost: number; worstBoth: number }[];
   ironed: Ironed[]; shape: Shape[]; premium: Adj[]; delta: Adj[];
@@ -314,6 +326,175 @@ function Older({ r }: { r: Report }) {
   );
 }
 
+/** A measure against time to expiry, one line per position. Hover to read any point. */
+function Curve({ rows, series, unit }: { rows: CurveRow[]; series: { name: string; get: (r: CurveRow) => number | null }[]; unit: string }) {
+  const CW = 660, CH = 280, L = 48, R2 = 18, T = 14, B = 34;
+  const max = Math.ceil(Math.max(...rows.flatMap((r) => series.map((s) => s.get(r) ?? 0))));
+  const x = (i: number) => L + (i / (rows.length - 1)) * (CW - L - R2), y = (v: number) => T + (1 - v / max) * (CH - T - B);
+  const [hover, setHover] = useState<number | null>(null);
+  return (
+    <div className="relative">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 pt-3 text-[12px] text-ink-2">{series.map((s, i) => <span key={s.name} className="flex items-center gap-1.5"><span className="h-[3px] w-4 rounded-full" style={{ background: `var(--chart-${i + 1})` }} />{s.name}</span>)}</div>
+      <svg viewBox={`0 0 ${CW} ${CH}`} className="w-full touch-none" role="img" aria-label={unit}
+        onPointerMove={(e) => { const b = e.currentTarget.getBoundingClientRect(); setHover(Math.max(0, Math.min(rows.length - 1, Math.round((((e.clientX - b.left) / b.width) * CW - L) / ((CW - L - R2) / (rows.length - 1)))))); }} onPointerLeave={() => setHover(null)}>
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => <g key={t}><line x1={L} x2={CW - R2} y1={y(max * t)} y2={y(max * t)} stroke="var(--color-line)" /><text x={L - 6} y={y(max * t) + 4} textAnchor="end" fontSize="11" fill="var(--color-muted)">{(max * t).toFixed(1)}%</text></g>)}
+        {rows.map((r, i) => <text key={r.days} x={x(i)} y={CH - 12} textAnchor="middle" fontSize="11" fill="var(--color-muted)">{r.months < 3 ? `${r.days}d` : `${Math.round(r.months)}m`}</text>)}
+        {series.map((s, i) => <polyline key={s.name} fill="none" stroke={`var(--chart-${i + 1})`} strokeWidth="2" strokeLinejoin="round" points={rows.map((r, j) => `${x(j)},${y(s.get(r) ?? 0)}`).join(' ')} />)}
+        {hover != null && <line x1={x(hover)} x2={x(hover)} y1={T} y2={CH - B} stroke="var(--color-line-strong)" />}
+        {hover != null && series.map((s, i) => <circle key={s.name} cx={x(hover)} cy={y(s.get(rows[hover]) ?? 0)} r="4" fill={`var(--chart-${i + 1})`} stroke="var(--color-panel)" strokeWidth="2" />)}
+      </svg>
+      {hover != null && <div className="pointer-events-none absolute right-4 top-9 rounded-[10px] border border-line bg-panel px-3 py-2 text-[12px] shadow-[var(--shadow-panel)]"><p className="font-semibold">{rows[hover].days} days</p>{series.map((s) => <p key={s.name} className="tabular-nums text-ink-2">{s.name}: {s.get(rows[hover])?.toFixed(2)}%</p>)}</div>}
+    </div>
+  );
+}
+
+function LongTab({ r }: { r: Report }) {
+  const l = r.long;
+  const [shape, setShape] = useState('n25');
+  const [iv, setIv] = useState<'all' | 'high'>('all');
+  const rows = r.matrix.rows.filter((f) => f.s === shape && f.iv === iv && (f.y === 21 || f.y === 0));
+  return (
+    <div className="flex flex-col gap-3">
+      <Answer>Longer contracts pay more in total but much less per month. The best proven window is still 45 to 21 days. Beyond about 15 months there were too few trades to test.</Answer>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card title="Total premium by time to expiry" right={<span>% of the index, middle value</span>}><Curve unit="Total premium by time to expiry" rows={l.curve} series={[{ name: 'Straddle', get: (x) => x.straddlePct }, { name: '0.16 delta strangle', get: (x) => x.strangle16Pct }]} /></Card>
+        <Card title="Premium per month" right={<span>% of the index a month</span>}><Curve unit="Premium per month by time to expiry" rows={l.curve} series={[{ name: 'Straddle', get: (x) => x.straddlePerMonth }, { name: '0.16 delta strangle', get: (x) => x.stranglePerMonth }]} /></Card>
+      </div>
+      <Card title="Premium by time frame" right={<span>{l.from.slice(0, 4)} to {l.to.slice(0, 4)}, first day of each month</span>}>
+        <Table head={['Time to expiry', 'Months seen', 'Straddle', 'Per month', '0.16 strangle', 'Per month', 'Typical volume']} rows={l.curve.map((c) => [`${c.days} days`, c.samples, `${c.straddlePct?.toFixed(2)}%`, `${c.straddlePerMonth?.toFixed(2)}%`, `${c.strangle16Pct?.toFixed(2)}%`, `${c.stranglePerMonth?.toFixed(2)}%`, (c.medianVolume ?? 0).toLocaleString('en-IN')])} />
+        <Note>Volume is contracts traded that day at the straddle strike. Far expiries trade very little, so real buy and sell prices can be much worse.</Note>
+      </Card>
+      <Card title="On today’s prices" right={<span>One lot of {l.lot}, 3 Nov 2026 close. “–” means those strikes did not trade.</span>}>
+        <Table head={['Expiry', 'Days', 'Straddle collects', 'Margin', '% of margin', 'Per month', '0.16 strangle collects', 'Margin', '% of margin', 'Per month']} rows={l.todayCurve.map((c) => [c.expiry, c.days, inr(c.straddle?.credit), inr(c.straddle?.margin), c.straddle?.pctOfMargin == null ? '–' : `${c.straddle.pctOfMargin.toFixed(1)}%`, c.straddle?.perMonth == null ? '–' : `${c.straddle.perMonth.toFixed(1)}%`, inr(c.strangle?.credit), inr(c.strangle?.margin), c.strangle?.pctOfMargin == null ? '–' : `${c.strangle.pctOfMargin.toFixed(1)}%`, c.strangle?.perMonth == null ? '–' : `${c.strangle.perMonth.toFixed(1)}%`])} />
+        <Note>These are the most you could collect, before charges, only if the options expire worthless.</Note>
+      </Card>
+      <div className="flex flex-wrap items-center gap-2">
+        <Segmented label="Position" value={shape} onChange={setShape} options={[{ value: 'n10', label: '0.10 delta' }, { value: 'n16', label: '0.16 delta' }, { value: 'n25', label: '0.25 delta' }, { value: 'atm', label: 'Straddle' }]} />
+        <Segmented label="IV filter" value={iv} onChange={setIv} options={[{ value: 'all', label: 'Every month' }, { value: 'high', label: 'High IV only' }]} />
+      </div>
+      <Card title="What sellers really kept" right={<span>One trade per monthly expiry, one lot, ₹1 slippage</span>}>
+        <Table head={['Sold', 'Exit', 'Trades', 'Won', 'Avg win', 'Avg loss', 'Per trade', 'Per month held', 'Worst trade', 'Avg days held']} rows={rows.map((f) => [`${f.x} days out`, f.y ? '21 days left' : 'Expiry', f.n < 30 ? `${f.n} (few)` : f.n, `${f.won}%`, inr(f.win), inr(f.loss), <Money key="a" v={f.avg} />, <Money key="b" v={f.pm} />, <Money key="c" v={f.worst} />, f.held])} />
+        <Note>Rows marked “few” have under 30 trades and can be luck: far contracts rarely traded in older years. Rows with no trades are left out. “Worst trade” is at the close, so a real one can be worse. No stops or adjustments.</Note>
+      </Card>
+    </div>
+  );
+}
+
+function SlideTab({ r }: { r: Report }) {
+  const sets = r.long.slide, [a, , , none] = sets;
+  const hold = new Map(none.rows.map((x) => [x.year, x]));
+  const done = a.rows.filter((x) => x.net != null);
+  return (
+    <div className="flex flex-col gap-3">
+      <Answer>The rule made a small profit on 12 trades, with a win rate of {a.won?.toFixed(0)}% and a worst year of {inr(a.worst)}. The VIX exit helped a lot, but a steady rise, like 2023, never triggers it.</Answer>
+      <Card title="The rule tested" right={<span>From the slide</span>}>
+        <Table head={['Step', 'What the test does']} rows={[['Sell', 'NIFTY at-the-money December straddle, 1 lot'], ['When', 'Last trading day of January, about 11 months out'], ['Exit', 'At December expiry, or at the close when India VIX reaches 30'], ['Not used', 'No adjustments, because the slide lists none']]} />
+      </Card>
+      <Card title="Results" right={<span>One lot, today’s size</span>}>
+        <Table head={['Version', 'Trades', 'Won', 'Per trade', 'Total', 'Best', 'Worst', 'VIX exits', 'Avg days']} rows={sets.map((s) => [s.name, s.trades, s.won == null ? '–' : `${s.won.toFixed(0)}%`, <Money key="a" v={s.perTrade} />, <Money key="b" v={s.total} />, <Money key="c" v={s.best} />, <Money key="d" v={s.worst} />, s.vixExits, s.avgDays])} />
+        <Note>Margin for this straddle on the Dec 2027 contract is about {inr(r.long.straddleMarginToday)}, blocked for up to 11 months.</Note>
+      </Card>
+      <Card title="Year by year"><Bars rows={done.map((x) => ({ label: String(x.year), value: x.net! }))} /></Card>
+      <Card title="Every trade" right={<span>With the VIX exit, against no VIX exit</span>}>
+        <Table head={['Year', 'Entered', 'Ended', 'How', 'Strike', 'Collected per unit', 'NIFTY in', 'NIFTY out', 'Result', 'If held to expiry']} rows={a.rows.map((x) => (x.net == null ? [x.year, 'Skipped', '–', <span key="s" className="whitespace-normal">{x.skipped}</span>, '–', '–', '–', '–', '–', '–'] : [x.year, x.entry, x.exit, x.reason === 'vix' ? 'VIX crossed 30' : 'Expiry', x.strike, inr(x.creditPerUnit), x.spotIn, x.spotOut, <Money key="n" v={x.net} />, <Money key="h" v={hold.get(x.year)?.net} />]))} />
+        <Note>Skipped years had no trade in both options at a strike near the index on that day. Those trades may have been possible during the day, but we can’t test them from closing data.</Note>
+      </Card>
+    </div>
+  );
+}
+
+const THIN = 30; // fewer trades than this can be luck
+const METRICS = { pm: 'Profit per month held', avg: 'Profit per trade', pml: 'Per month, per ₹1 lakh margin', won: 'Won %', worst: 'Worst trade' } as const;
+const dayName = (d: number) => (d < 90 ? `${d} days` : `${Math.round(d / 30.4)} months`);
+
+function MatrixTab({ r }: { r: Report }) {
+  const m = r.matrix;
+  const [sid, setSid] = useState('n25');
+  const [iv, setIv] = useState<'high' | 'all'>('high');
+  const [metric, setMetric] = useState<keyof typeof METRICS>('pm');
+  const name = (id: string) => m.strategies.find((x) => x.id === id)?.name ?? id;
+  const here = m.rows.filter((x) => x.s === sid && x.iv === iv);
+  const exits = m.exits.filter((e) => here.some((x) => x.y === e));
+  const proven = m.rows.filter((x) => x.iv === iv && x.n >= THIN);
+  const top = [...proven].sort((a, b) => (b.pml ?? -1e9) - (a.pml ?? -1e9)).slice(0, 25);
+  const best = [...here].filter((x) => x.n >= THIN).sort((a, b) => (b.pml ?? b.pm) - (a.pml ?? a.pm))[0];
+  const show = (x: MRow) => (metric === 'won' ? `${x.won}%` : inr(metric === 'pml' ? x.pml : x[metric]));
+  return (
+    <div className="flex flex-col gap-3">
+      <Answer>Across 1,752 combinations, the best proven entries are still 45 to 90 days out. Contracts beyond 4 months have too few past trades to trust, so those boxes are faded.</Answer>
+      <div className="flex flex-wrap items-center gap-2">
+        <select aria-label="Strategy" value={sid} onChange={(e) => setSid(e.target.value)} className={inputCls}>
+          {[...new Set(m.strategies.map((x) => x.group))].map((g) => <optgroup key={g} label={g}>{m.strategies.filter((x) => x.group === g).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</optgroup>)}
+        </select>
+        <Segmented label="IV filter" value={iv} onChange={setIv} options={[{ value: 'high', label: 'High IV only' }, { value: 'all', label: 'Every month' }]} />
+        <Segmented label="Show" value={metric} onChange={setMetric} options={(Object.keys(METRICS) as (keyof typeof METRICS)[]).map((k) => ({ value: k, label: METRICS[k] }))} />
+      </div>
+      <Card title={name(sid)} right={<span>Sold ↓ and exited → · one lot · each box shows the result and number of trades</span>}>
+        <div className="overflow-x-auto p-3">
+          <table className="w-full border-separate border-spacing-1 text-[12px] tabular-nums">
+            <thead><tr><th className="text-left font-semibold text-muted">Sold</th>{exits.map((e) => <th key={e} className="font-semibold text-muted">{e === 0 ? 'Expiry' : `${e}d left`}</th>)}</tr></thead>
+            <tbody>
+              {m.entries.filter((e) => here.some((x) => x.x === e)).map((e) => (
+                <tr key={e}>
+                  <th className="whitespace-nowrap text-left font-semibold text-muted">{dayName(e)}</th>
+                  {exits.map((y) => {
+                    const c = here.find((x) => x.x === e && x.y === y);
+                    if (!c) return <td key={y} className="px-2 py-1.5 text-center text-muted">–</td>;
+                    // The colour follows the number in the box. Won % is not a gain or a loss, so it stays neutral.
+                    const value = metric === 'pml' ? c.pml ?? c.pm : metric === 'won' ? null : c[metric];
+                    const box = value == null ? 'bg-raised' : value > 0 ? 'bg-up-soft' : 'bg-down-soft', ink = value == null ? 'text-ink' : value > 0 ? 'text-up' : 'text-down';
+                    return (
+                      <td key={y} title={`${dayName(e)} to ${y ? `${y} days left` : 'expiry'}: ${c.n} trades, won ${c.won}%, per trade ${inr(c.avg)}, worst ${inr(c.worst)}, losing years ${c.ly} of ${c.yc}, held ${c.held} days`}
+                        className={`rounded-[8px] px-2 py-1.5 text-center ${box} ${c.n < THIN ? 'opacity-45' : ''} ${best === c ? 'ring-2 ring-accent' : ''}`}>
+                        <p className={`font-semibold ${ink}`}>{show(c)}</p>
+                        <p className="text-[11px] text-ink-2">{c.n} trades</p>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <Note>Faded boxes have under {THIN} trades, so they can be luck. Green means a profit and red means a loss in the number shown. Won % has no colour. The outlined box is the best with enough trades. Hover any box for its full details.</Note>
+      </Card>
+      <Card title="Top 25 combinations with enough trades" right={<span>Ranked by profit per month, per ₹1 lakh of margin</span>}>
+        <Table tall head={['Strategy', 'Sold', 'Exit', 'Trades', 'Won', 'Avg win', 'Avg loss', 'Per trade', 'Per month held', 'Per ₹1 lakh', 'Worst trade', 'Losing years', 'Since 2023', 'Margin']} rows={top.map((x) => [name(x.s), dayName(x.x), x.y ? `${x.y} days left` : 'Expiry', x.n, `${x.won}%`, inr(x.win), inr(x.loss), <Money key="a" v={x.avg} />, <Money key="b" v={x.pm} />, <Money key="c" v={x.pml} />, <Money key="d" v={x.worst} />, `${x.ly} of ${x.yc}`, <Money key="e" v={x.s23} />, inr(x.m)])} />
+        <Note>One trade per monthly expiry, entered and exited at the close, ₹1 slippage, no stops or adjustments. Long holds overlap each other, so compare per trade or per month, not totals. Margin is an estimate on 3 Nov prices. 45-day rows use the 56-day expiry’s margin.</Note>
+      </Card>
+    </div>
+  );
+}
+
+function StraddleTab({ r }: { r: Report }) {
+  const l = r.straddleLab;
+  const rows = l.factors.filter((x) => x.n);
+  const seen = new Set<string>();
+  const finals = l.finalists.filter((x) => { const k = `${x.entry}${x.exit}${x.atm}${x.filter}${x.year}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  const FILTER: Record<string, string> = { all: 'Every month', high: 'High IV', top: 'Top third of IV' };
+  return (
+    <div className="flex flex-col gap-3">
+      <Answer>Sold at 45 days and exited at 21, the plain straddle earned the most: wins 76%, about ₹49,700 a year. Hedges and re-centring removed most of that. It is sensitive to timing and has no loss limit.</Answer>
+      <Card title="Change one thing at a time" right={<span>Baseline against each change, one lot, 2011 to 2026</span>}>
+        <Table head={['Version', 'Trades', 'Won', 'Avg win', 'Avg loss', 'Per trade', 'Profit a year', 'Worst trade', 'Deepest fall', 'Losing years', 'To 2022', 'Since 2023']} rows={rows.map((x) => [x.label, x.n, `${x.won}%`, inr(x.win), inr(x.loss), <Money key="a" v={x.avg} />, <Money key="b" v={x.year} />, <Money key="c" v={x.worst} />, inr(x.dd), `${x.ly} of ${x.yc}`, <Money key="d" v={x.to22} />, <Money key="e" v={x.s23} />])} />
+        <Note>{l.tested.toLocaleString('en-IN')} combinations tested in total. Holds over 28 days are left out here, because they overlap the next month’s entry. Stops and profit targets are checked at the close, so they rarely fired in 24 days.</Note>
+      </Card>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card title="Profit a year"><Bars rows={rows.map((x) => ({ label: x.label!.replace('Baseline: 45 to 21 days, high IV, spot strike', 'Baseline'), value: x.year }))} /></Card>
+        <Card title="Worst single trade"><Bars rows={rows.map((x) => ({ label: x.label!.replace('Baseline: 45 to 21 days, high IV, spot strike', 'Baseline'), value: x.worst }))} /></Card>
+      </div>
+      <Card title="Best rules chosen on years to 2022, checked on 2023 to today" right={<span>2023 onward was not used to choose them</span>}>
+        <Table head={['Entry to exit', 'Strike', 'IV', 'Book profit', 'Trades', 'Won', 'Profit a year', 'Worst trade', 'To 2022', 'Since 2023', 'Trades since 2023', 'Won since 2023', 'A day late', '₹2 slippage', '₹5 slippage']} rows={finals.map((x) => [`${x.entry} to ${x.exit} days`, x.atm === 'forward' ? 'Forward' : 'Spot', FILTER[x.filter], x.target ? `${x.target}%` : 'No', x.n, `${x.won}%`, <Money key="a" v={x.year} />, <Money key="b" v={x.worst} />, <Money key="c" v={x.to22} />, <Money key="d" v={x.s23} />, x.n23, `${x.won23}%`, <Money key="e" v={x.lateYear} />, <Money key="f" v={x.dearYear} />, <Money key="g" v={x.fiveYear} />])} />
+        <Note>The check period is the honest test. These rules stayed profitable after 2022, but they earned less per year than before, and 14 trades is still few.</Note>
+      </Card>
+      <Card title="Year by year: baseline"><Bars rows={Object.entries(l.baseYears).map(([y, v]) => ({ label: y, value: v }))} /></Card>
+      <Card title="Protection on today’s prices" right={<span>29 Dec expiry, one lot, 3 Nov close</span>}>
+        <Table head={['Protection', 'Legs', 'Collected', 'Margin', 'Gap −8%', 'Gap −13%', 'Gap +8%', 'Gap +13%']} rows={l.today.map((t) => [t.label, <span key="l" className="whitespace-normal">{t.legs.join(', ')}</span>, inr(t.credit), inr(t.margin), ...[-8, -13, 8, 13].map((g) => <Money key={g} v={t.gaps.find((x) => x.gapPct === g)?.pnl} />)])} />
+      </Card>
+    </div>
+  );
+}
+
 const WORDS: [string, string][] = [
   ['Call (CE) and put (PE)', 'A call gains when the index rises. A put gains when it falls. Selling either earns the premium, and loses if the index moves through its strike.'],
   ['Strike', 'The index level an option is tied to.'],
@@ -337,7 +518,7 @@ const WORDS: [string, string][] = [
   ['To 2022 and since 2023', 'Rules were found on all years, so the later period is an extra check, not proof.'],
 ];
 
-const TABS = { summary: 'Summary', best: 'Best rules', moves: 'Market moves', bank: 'NIFTY vs Bank Nifty', collar: 'Ironed Collar', shape: 'Your 2× and 3× shape', adjust: 'Adjustments', older: 'Older tests', words: 'Word meanings' } as const;
+const TABS = { summary: 'Summary', best: 'Best rules', straddle: 'Straddle lab', matrix: 'All combinations', long: 'Time frames', slide: 'December straddle', moves: 'Market moves', bank: 'NIFTY vs Bank Nifty', collar: 'Ironed Collar', shape: 'Your 2× and 3× shape', adjust: 'Adjustments', older: 'Older tests', words: 'Word meanings' } as const;
 
 export function SellingReportTool({ tool }: { tool: Tool }) {
   const { data, error } = useFeed<Report>('selling-report');
@@ -355,6 +536,10 @@ export function SellingReportTool({ tool }: { tool: Tool }) {
       </nav>
       {tab === 'summary' && <Summary r={data} />}
       {tab === 'best' && <Best r={data} />}
+      {tab === 'straddle' && <StraddleTab r={data} />}
+      {tab === 'matrix' && <MatrixTab r={data} />}
+      {tab === 'long' && <LongTab r={data} />}
+      {tab === 'slide' && <SlideTab r={data} />}
       {tab === 'moves' && <Moves r={data} />}
       {tab === 'bank' && <Bank r={data} />}
       {tab === 'collar' && <Collar r={data} />}

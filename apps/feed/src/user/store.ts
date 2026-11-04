@@ -53,6 +53,8 @@ export type SavedStrategy = {
 /** One paper trade of the option-selling rule. Money is integer paise at the lot traded. */
 export type SellingPaperTrade = {
   id: string;
+  /** Which paper rule made it. Trades from before there were two rules have none, and belong to the first. */
+  rule?: 'paper-rule' | 'paper-straddle';
   openedOn: string;
   expiry: string;
   exitOn: string;

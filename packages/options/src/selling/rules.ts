@@ -44,6 +44,17 @@ export const PAPER_RULE: { entry: SellEntry; playbook: Playbook } = {
   playbook: { id: 'paper-rule', name: 'High IV, 45 to 21 days', exitDaysLeft: 21 },
 };
 
+/**
+ * The second paper rule, run beside the first to compare them. Chosen on the years up to 2022 and checked on 2023 to today
+ * in scripts/selling-straddle.ts: sell the straddle at the forward about 45 days out, only in the top third of the past
+ * year's IV, book 50% of the credit, otherwise exit at 25 days left. It has no protection.
+ */
+export const PAPER_STRADDLE = {
+  calendarDaysBefore: 45,
+  minIvRank: 0.67,
+  playbook: { id: 'paper-straddle', name: 'Straddle, top third of IV, 45 to 25 days', exitDaysLeft: 25, profitTakePct: 50 } as Playbook,
+};
+
 /** Distance of protection added later to a naked position, % of the index beyond the short. */
 export const ADDED_WING_PCT = 2;
 

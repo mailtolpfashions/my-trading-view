@@ -157,6 +157,14 @@ export function decide(p: SellPosition, m: MarketSnapshot, pb: Playbook, ctx: De
   return tested ? buildAdjust(p, m, pb.adjust.action, tested, ctx) : { type: 'none' };
 }
 
+/** A straddle at the traded strike nearest the forward, with both options traded, within 2% of the index. */
+export function straddleLegs(m: MarketSnapshot, expiry: string, forwardPaise: number, qty: number): { legs: OpenLeg[]; delta: number } | { skip: string } {
+  const puts = new Set(usable(m.chain(expiry, 'PE')).map((r) => r.strikePaise));
+  const c = usable(m.chain(expiry, 'CE')).filter((r) => puts.has(r.strikePaise)).sort((a, b) => Math.abs(a.strikePaise - forwardPaise) - Math.abs(b.strikePaise - forwardPaise))[0];
+  if (!c || Math.abs(c.strikePaise - forwardPaise) > m.spotPaise * 0.02) return { skip: `No traded straddle near the forward for ${expiry}` };
+  return { delta: 0.5, legs: (['CE', 'PE'] as const).map((kind) => ({ expiry, strikePaise: c.strikePaise, kind, side: 'SELL', qty, role: 'short' })) };
+}
+
 /** The legs to open a new position, or why not. Strikes come from today's traded chain only. */
 export function entryLegs(m: MarketSnapshot, expiry: string, e: SellEntry, lotSize: number, stepPaise: number): { legs: OpenLeg[]; delta: number } | { skip: string } {
   const qty = e.lots * lotSize;

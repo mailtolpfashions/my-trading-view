@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeOptionCharges, exerciseStt } from '@mtv/paper';
-import { PAPER_RULE, PLAYBOOKS, decide, isFirstDayWithin, ivAboveMedian, nextWeekday, staleFlags, type DecideContext, type MarketSnapshot, type Playbook, type SellEntry, type SellPosition } from '@mtv/options';
+import { PAPER_RULE, PAPER_STRADDLE, PLAYBOOKS, decide, isFirstDayWithin, ivAboveMedian, ivRank, nextWeekday, staleFlags, straddleLegs, type DecideContext, type MarketSnapshot, type Playbook, type SellEntry, type SellPosition } from '@mtv/options';
 import { makeBook, monthlyExpiries, passCheck, runSelling, runOptionsBacktest, summariseSelling, booksFrom, type BookRow, type DayBook, type OptionsData, type SellingConfig } from './index';
 
 const EXP = '2026-01-29', NEXT = '2026-02-26', LOT = 65;
@@ -290,6 +290,38 @@ describe('the paper rule', () => {
     expect(staleFlags([200_00, 360_00, 104_00, 400_00, 450_00], true)).toEqual([false, false, true, false, false]); // the 12 Mar 2020 pattern
     expect(staleFlags([500_00, 400_00, 300_00, 200_00], false)).toEqual([false, false, false, false]);
     expect(staleFlags([100_00, 100_00, 100_03], true)).toEqual([false, false, false]);
+  });
+});
+
+describe('the second paper rule', () => {
+  const chain: Record<string, { strikePaise: number; pricePaise: number; traded: boolean }[]> = {
+    CE: [{ strikePaise: 24000_00, pricePaise: 500_00, traded: true }, { strikePaise: 24100_00, pricePaise: 440_00, traded: true }, { strikePaise: 24200_00, pricePaise: 400_00, traded: true }],
+    PE: [{ strikePaise: 24000_00, pricePaise: 300_00, traded: true }, { strikePaise: 24100_00, pricePaise: 340_00, traded: false }, { strikePaise: 24200_00, pricePaise: 400_00, traded: true }],
+  };
+  const m = { date: '2026-11-16', spotPaise: 23900_00, expiries: [EXP], isMonthly: () => true, chain: (_e: string, k: 'CE' | 'PE') => chain[k], quote: () => null, delta: () => null } as MarketSnapshot;
+
+  it('sells both options at the traded strike nearest the forward', () => {
+    expect(straddleLegs(m, EXP, 24110_00, LOT)).toMatchObject({ legs: [{ strikePaise: 24200_00, kind: 'CE', side: 'SELL', qty: LOT }, { strikePaise: 24200_00, kind: 'PE', side: 'SELL', qty: LOT }] }); // 24100 PE did not trade
+  });
+
+  it('refuses when no traded strike is within 2% of the index', () => {
+    expect(straddleLegs(m, EXP, 26000_00, LOT)).toHaveProperty('skip');
+  });
+
+  it('books 50% of the credit, and otherwise exits at 25 days left', () => {
+    const position: SellPosition = { creditPaise: 800_00 * LOT, realisedPaise: 0, adjustments: 0, legs: [{ expiry: '2026-12-29', strikePaise: 24000_00, kind: 'CE', side: 'SELL', qty: LOT, entryPaise: 500_00, role: 'short' }, { expiry: '2026-12-29', strikePaise: 24000_00, kind: 'PE', side: 'SELL', qty: LOT, entryPaise: 300_00, role: 'short' }] };
+    const ctx: DecideContext = { fillCost: () => 0, entryDelta: 0.16, wingPct: 2 };
+    const at = (date: string, ce: number, pe: number) => ({ ...m, date, quote: (l: { kind: string }) => ({ strikePaise: 24000_00, pricePaise: (l.kind === 'CE' ? ce : pe) * 100, traded: true }) }) as MarketSnapshot;
+    expect(decide(position, at('2026-11-20', 500, 300), PAPER_STRADDLE.playbook, ctx).type).toBe('none');
+    expect(decide(position, at('2026-11-24', 200, 200), PAPER_STRADDLE.playbook, ctx)).toMatchObject({ type: 'exit', reason: 'target' });
+    expect(decide(position, at('2026-12-04', 500, 300), PAPER_STRADDLE.playbook, ctx)).toMatchObject({ type: 'exit', reason: 'time' });
+  });
+
+  it('ranks IV against earlier days only', () => {
+    const h = Array.from({ length: 100 }, (_, i) => ({ date: new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10), iv: i / 100 }));
+    expect(ivRank(h, h[99].date)).toBe(1);
+    expect(ivRank(h.map((p, i) => (i === 99 ? { ...p, iv: 0 } : p)), h[99].date)).toBe(0);
+    expect(ivRank(h, h[10].date)).toBeNull();
   });
 });
 

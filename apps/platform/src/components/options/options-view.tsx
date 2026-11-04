@@ -24,6 +24,7 @@ export function OptionsView() {
   const [underlying, setUnderlying] = useState('NIFTY');
   // What the chain shows beside the premiums: open interest, its change, or the Greeks.
   const [oiView, setOiView] = useState<'oi' | 'change' | 'greeks'>('oi');
+  const [allStrikes, setAllStrikes] = useState(false);
   const greeksView = oiView === 'greeks';
   const [expiry, setExpiry] = useState<string | undefined>();
   // "As of": a past trading day to build on (the simulator follows it from there); undefined = the latest day.
@@ -215,7 +216,7 @@ export function OptionsView() {
   }, [legs, lot, underlying, chain?.spotPaise, past]); // eslint-disable-line react-hooks/exhaustive-deps
   const m = margin.data;
 
-  const visible = chain?.atmStrikePaise != null
+  const visible = !allStrikes && chain?.atmStrikePaise != null
     ? chain.rows.filter((r) => Math.abs(r.strikePaise - chain.atmStrikePaise!) <= VISIBLE_STEPS * (step || Infinity))
     : chain?.rows ?? [];
   const scroller = useRef<HTMLDivElement>(null);
@@ -223,6 +224,10 @@ export function OptionsView() {
     const el = scroller.current, row = el?.querySelector<HTMLElement>('[data-spot-row]');
     if (el && row) el.scrollTop = row.offsetTop - el.clientHeight / 2;
   }, [chain]);
+  // The list can outgrow its box and scroll with the page, so this one finds whichever scroller holds it.
+  useEffect(() => {
+    if (allStrikes) scroller.current?.querySelector('[data-spot-row]')?.scrollIntoView({ block: 'center' });
+  }, [allStrikes, chain]);
   const oiOf = (q: ChainSide) => (oiView === 'oi' ? q.oi : q.oiChange ?? 0);
   const maxOi = Math.max(1, ...visible.flatMap((r) => [Math.abs(r.CE ? oiOf(r.CE) : 0), Math.abs(r.PE ? oiOf(r.PE) : 0)]));
   const spot = chain?.spotPaise ?? null;
@@ -296,6 +301,12 @@ export function OptionsView() {
                 className={`rounded-full px-2.5 py-1 text-[12px] font-bold ${oiView === k ? 'bg-inverse text-on-inverse' : 'text-ink-2'}`}>{label}</button>
             ))}
           </div>
+          <div className="flex rounded-full bg-raised p-[3px]" role="radiogroup" aria-label="Strikes shown">
+            {([[false, 'Near the index'], [true, 'All strikes']] as const).map(([k, label]) => (
+              <button key={label} type="button" role="radio" aria-checked={allStrikes === k} onClick={() => setAllStrikes(k)}
+                className={`rounded-full px-2.5 py-1 text-[12px] font-bold ${allStrikes === k ? 'bg-inverse text-on-inverse' : 'text-ink-2'}`}>{label}</button>
+            ))}
+          </div>
           {chain && (
             <select className="h-8 rounded-full bg-raised px-3 text-[12.5px] font-semibold" value={chain.expiry} aria-label="Expiry"
               onChange={(e) => { setExpiry(e.target.value); if (legs.length) setNotice('Expiry changed: existing legs keep their own expiry.'); }}>
@@ -311,6 +322,7 @@ export function OptionsView() {
           {past && <button type="button" onClick={() => pickDate(undefined)} className="rounded-full px-2.5 py-1 text-[12px] font-semibold text-ink-2 hover:bg-raised">Latest</button>}
           <InfoTip label="How to use the option chain">
             <p>Hover over a premium and click <b>B</b> to buy or <b>S</b> to sell; the leg goes into the strategy builder.</p>
+            <p><b>Near the index</b> shows 14 strikes each side of the at-the-money strike. <b>All strikes</b> shows every strike NSE lists for this expiry.</p>
             <p>* means the contract had no trades that day: NSE carried the previous close forward. IV and Greeks are Black-76 estimates from traded premiums only.</p>
             <p><b>Greeks</b> are per unit of the underlying (multiply by lot size × lots for a position): delta is the premium change for a 1-point move, gamma the change in delta for a 1-point move, theta the premium change for one calendar day, and vega the premium change for a 1-point change in IV.</p>
             <p>Pick an earlier <b>As of</b> date to build a position on a past day and then simulate it day by day to expiry.</p>

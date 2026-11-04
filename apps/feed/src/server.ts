@@ -559,7 +559,7 @@ const userRoute = <B>(fn: (body: B) => Promise<unknown>) => async (req: FastifyR
   }
 };
 app.get('/api/selling-plan', userRoute(() => planAndPaper()));
-app.post('/api/selling-paper/start', userRoute(() => startPaperTrade()));
+app.post('/api/selling-paper/start', userRoute((b: { rule?: 'paper-rule' | 'paper-straddle' }) => startPaperTrade(b.rule)));
 app.get('/api/user/screens', userRoute(() => userStore.screens()));
 app.post('/api/user/screens', userRoute((b: Parameters<typeof userStore.saveScreen>[0]) => userStore.saveScreen(b)));
 app.post('/api/user/screens/delete', userRoute((b: { id: string }) => userStore.deleteScreen(b.id).then(() => ({ ok: true }))));
