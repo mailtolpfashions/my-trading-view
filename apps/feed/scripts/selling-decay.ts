@@ -14,7 +14,10 @@ const dates = meta.map((m) => m.date), idx = new Map(dates.map((d, i) => [d, i])
 const today = meta.at(-1)!, todayN = today.spotPaise! * 65;
 const exps = (await prisma.fnoEod.findMany({ where: { underlying: U, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true } })).map((r) => r.expiry).filter((e) => idx.has(e)).sort();
 const last = new Map<string, string>(); for (const e of exps) last.set(e.slice(0, 7), e);
-const monthly = [...last.values()];
+// A monthly expiry still ahead counts too, because a trade on it can already have finished. Only what is listed today:
+// an older listing can carry a date that later moved for a holiday.
+for (const r of await prisma.fnoEod.findMany({ where: { underlying: U, date: today.date, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true }, orderBy: { expiry: 'asc' } })) if (r.expiry > today.date) last.set(r.expiry.slice(0, 7), r.expiry);
+const monthly = [...last.values()].sort();
 console.log('history', dates[0], 'to', dates.at(-1), dates.length, 'days;', monthly.length, 'monthly expiries');
 const DAY = 86400_000, dte = (d: string, e: string) => Math.round((Date.parse(e) - Date.parse(d)) / DAY);
 type Q = { kind: string; strikePaise: number; closePaise: number; settlePaise: number; traded: boolean };
@@ -50,7 +53,7 @@ for (const sh of shapes) for (const X of ENTRIES) for (const Y of EXITS) {
   const out: { y: string; net: number; days: number }[] = []; let skip = 0, stale = 0;
   for (const e of monthly) {
     const d = pickDate(e, X), x = Y === 0 ? e : pickDate(e, Y);
-    if (!d || !x || d >= x || dte(d, e) > X + 5) { skip++; continue; }
+    if (!d || !x || d >= x || dte(d, e) > X + 5 || !M.has(x)) { skip++; continue; }
     const m = M.get(d)!, end = M.get(x)!;
     if (!m.spotPaise || !m.lotSize || !end.spotPaise) { skip++; continue; }
     const rows = await load(d, e), T = yearsBetween(d, e);

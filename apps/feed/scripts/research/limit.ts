@@ -1,7 +1,7 @@
 // One-off test behind the option selling report, kept to reproduce it. Heavy: run after market hours.
 import { prisma } from '@mtv/db';
 import { computeOptionCharges, exerciseStt } from '@mtv/paper';
-import { positionMargin } from '@mtv/options';
+import { positionMargin, staleFlags } from '@mtv/options';
 import { spanOn } from '../../src/fno/span';
 import { MARKET_EVENTS } from '../../src/research/nifty-days';
 
@@ -10,14 +10,15 @@ const meta = await prisma.fnoDayMeta.findMany({ where: { underlying: U }, select
 const dates = meta.map((m) => m.date), idx = new Map(dates.map((d, i) => [d, i])), M = new Map(meta.map((m) => [m.date, m]));
 const today = meta.at(-1)!, todayN = today.spotPaise! * 65, T = today.spotPaise! / 100;
 const exps = (await prisma.fnoEod.findMany({ where: { underlying: U, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true } })).map((r) => r.expiry).filter((e) => idx.has(e) && e >= FROM).sort();
-const lastOfMonth = new Map<string, string>(); for (const e of exps) lastOfMonth.set(e.slice(0, 7), e);
-const monthly = [...lastOfMonth.values()];
+const last = new Map<string, string>(); for (const e of exps) last.set(e.slice(0, 7), e);
+for (const r of await prisma.fnoEod.findMany({ where: { underlying: U, date: today.date, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true }, orderBy: { expiry: 'asc' } })) if (r.expiry > today.date) last.set(r.expiry.slice(0, 7), r.expiry);
+const monthly = [...last.values()].sort().filter((e) => idx.has(e)); // these tests hold to expiry, or need it to have passed
 const events = MARKET_EVENTS.filter((e) => e.id.startsWith('budget') || e.id.startsWith('election')).map((e) => e.from).sort(); // only events with a known date
 type Q = { kind: string; strikePaise: number; closePaise: number; settlePaise: number; traded: boolean };
 const cache = new Map<string, Q[]>();
 const load = async (d: string, e: string) => {
   const k = d + e; let r = cache.get(k);
-  if (!r) { r = (await prisma.fnoEod.findMany({ where: { underlying: U, date: d, expiry: e, kind: { in: ['CE', 'PE'] } }, select: { kind: true, strikePaise: true, closePaise: true, settlePaise: true, traded: true } })) as Q[]; cache.set(k, r); }
+  if (!r) { r = (await prisma.fnoEod.findMany({ where: { underlying: U, date: d, expiry: e, kind: { in: ['CE', 'PE'] } }, select: { kind: true, strikePaise: true, closePaise: true, settlePaise: true, traded: true } })) as Q[]; for (const kind of ['CE', 'PE']) { const l = r.filter((x: { kind: string; traded?: boolean; closePaise: number }) => x.kind === kind && x.traded !== false && x.closePaise > 0).sort((a: { strikePaise: number }, b: { strikePaise: number }) => a.strikePaise - b.strikePaise); staleFlags(l.map((x: { closePaise: number }) => x.closePaise), kind === 'PE').forEach((f: boolean, i: number) => { if (f) l[i].traded = false; }); } cache.set(k, r); }
   return r;
 };
 const usable = (r: Q[], k: string) => r.filter((x) => x.kind === k && x.traded && x.closePaise > 0);

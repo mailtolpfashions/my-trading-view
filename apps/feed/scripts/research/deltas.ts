@@ -14,7 +14,9 @@ const dates = meta.map((m) => m.date), idx = new Map(dates.map((d, i) => [d, i])
 const today = meta.at(-1)!, todayN = today.spotPaise! * 65, YEARS = dates.length / 248;
 const exps = (await prisma.fnoEod.findMany({ where: { underlying: U, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true } })).map((r) => r.expiry).filter((e) => idx.has(e)).sort();
 const last = new Map<string, string>(); for (const e of exps) last.set(e.slice(0, 7), e);
-const monthly = [...last.values()];
+// listed today: expiries still ahead whose trade can already have finished
+for (const r of await prisma.fnoEod.findMany({ where: { underlying: U, date: today.date, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true }, orderBy: { expiry: 'asc' } })) if (r.expiry > today.date) last.set(r.expiry.slice(0, 7), r.expiry);
+const monthly = [...last.values()].sort();
 const ivRows = await prisma.fnoDerivedDay.findMany({ where: { underlying: U, atmIv: { not: null }, daysToExpiry: { gte: 25, lte: 60 } }, select: { date: true, atmIv: true }, orderBy: [{ date: 'asc' }, { daysToExpiry: 'asc' }] });
 const seen = new Set<string>(), history: { date: string; iv: number }[] = [];
 for (const r of ivRows) if (!seen.has(r.date)) { seen.add(r.date); history.push({ date: r.date, iv: r.atmIv! }); }
@@ -71,6 +73,7 @@ for (const v of vars) {
     const e = monthly[n], iE = idx.get(e)!;
     const d = v.entry === '45d' ? pickDate(e, 45) : n > 0 ? dates[idx.get(monthly[n - 1])! + 1] : null;
     const x = v.exit === 21 ? pickDate(e, 21) : e;
+    if (x && !idx.has(x)) continue; // not finished yet
     if (!d || !x || d >= x || (v.entry === '45d' && (Date.parse(e) - Date.parse(d)) / DAY > 50)) { skip++; continue; }
     const m = M.get(d)!; if (!m.spotPaise || !m.lotSize) { skip++; continue; }
     if (v.high && ivAboveMedian(history, d) !== true) { off++; continue; }

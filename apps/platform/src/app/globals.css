@@ -59,6 +59,7 @@
   --chart-1: #2a78d6;
   --chart-2: #eb6834;
   --chart-3: #1baf7a;
+  --chart-4: #eda100;
 }
 
 :root[data-theme='dark'] {
@@ -80,6 +81,7 @@
   --chart-1: #3987e5;
   --chart-2: #d95926;
   --chart-3: #199e70;
+  --chart-4: #c98500;
   --color-up: #2bc49a;
   --color-up-soft: #12302a;
   --color-down: #ff6b70;

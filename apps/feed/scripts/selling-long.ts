@@ -19,7 +19,10 @@ const today = meta.at(-1)!, todayN = today.spotPaise! * today.lotSize!, D = toda
 const vix = new Map((await prisma.indexEod.findMany({ where: { name: 'INDIA VIX' }, select: { date: true, closePaise: true } })).map((r) => [r.date, r.closePaise / 100]));
 const allExp = (await prisma.fnoEod.findMany({ where: { underlying: U, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true } })).map((r) => r.expiry).filter((e) => e.length === 10 && idx.has(e)).sort();
 const last = new Map<string, string>(); for (const e of allExp) last.set(e.slice(0, 7), e);
-const monthly = [...last.values()];
+// A monthly expiry still ahead counts too, because a trade on it can already have finished. Only what is listed today:
+// an older listing can carry a date that later moved for a holiday.
+for (const r of await prisma.fnoEod.findMany({ where: { underlying: U, date: D, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true }, orderBy: { expiry: 'asc' } })) if (r.expiry > D) last.set(r.expiry.slice(0, 7), r.expiry);
+const monthly = [...last.values()].sort();
 const daysTo = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / DAY);
 const pick = (t: string) => dates.find((d) => d >= t) ?? null;
 const back = (e: string, x: number) => new Date(Date.parse(e) - x * DAY).toISOString().slice(0, 10);

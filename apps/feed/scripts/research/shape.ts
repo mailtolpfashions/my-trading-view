@@ -14,7 +14,9 @@ const dates = meta.map((m) => m.date), idx = new Map(dates.map((d, i) => [d, i])
 const today = meta.at(-1)!, todayN = today.spotPaise! * 65, YEARS = dates.length / 248;
 const exps = (await prisma.fnoEod.findMany({ where: { underlying: U, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true } })).map((r) => r.expiry).filter((e) => idx.has(e)).sort();
 const last = new Map<string, string>(); for (const e of exps) last.set(e.slice(0, 7), e);
-const monthly = [...last.values()];
+// listed today: expiries still ahead whose trade can already have finished
+for (const r of await prisma.fnoEod.findMany({ where: { underlying: U, date: today.date, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true }, orderBy: { expiry: 'asc' } })) if (r.expiry > today.date) last.set(r.expiry.slice(0, 7), r.expiry);
+const monthly = [...last.values()].sort();
 const eventMonths = new Set(MARKET_EVENTS.filter((e) => e.id.startsWith('budget') || e.id.startsWith('election')).map((e) => e.from.slice(0, 7)));
 const ivRows = await prisma.fnoDerivedDay.findMany({ where: { underlying: U, atmIv: { not: null }, daysToExpiry: { gte: 25, lte: 60 } }, select: { date: true, atmIv: true }, orderBy: [{ date: 'asc' }, { daysToExpiry: 'asc' }] });
 const seen = new Set<string>(), history: { date: string; iv: number }[] = [];

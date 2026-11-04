@@ -30,7 +30,10 @@ type MRow = { s: string; x: number; y: number; iv: 'all' | 'high'; n: number; sk
 type Matrix = { from: string; to: string; entries: number[]; exits: number[]; strategies: { id: string; name: string; group: string }[]; rows: MRow[] };
 type LabRow = { label?: string; entry: number; exit: number; atm: string; filter: string; target: number | null; stop: number | null; protect: string; recentre: number | null; n: number; won: number; win: number; loss: number; avg: number; year: number; worst: number; dd: number; ly: number; yc: number; to22: number; s23: number; n23: number; won23: number; lateYear?: number; dearYear?: number; fiveYear?: number };
 type Lab = { tested: number; factors: LabRow[]; finalists: LabRow[]; baseYears: Record<string, number>; today: { label: string; legs: string[]; credit: number; margin: number | null; gaps: { gapPct: number; pnl: number }[] }[] };
+type CTrade = { worstMtm: number; worstMtmOn: string | null; bigDays: string[]; entry: string; exit: string; expiry: string; spotIn: number; spotOut: number; legs: string[]; credit: number; net: number };
+type CRow = { worstMtm: number; worstMtmOn: string | null; worstMtmTradeNet: number; id: string; position: string; name: string; exit: number; filter: 'high' | 'all'; skipped: number; trades: number; won: number; avgWin: number; avgLoss: number; perTrade: number; perYear: number; total: number; worst: number; best: number; deepest: number; losingYears: number; yearCount: number; since2023: number; to2022: number; years: [string, number][]; curve: [string, number][]; perLakh: number | null; latePerYear: number; dearPerYear: number; today: { legs: string[]; credit: number; margin: number | null; gaps: { gapPct: number; pnl: number }[] } | null; tradeRows: CTrade[] };
 type Report = {
+  compare: { from: string; to: string; lot: number; rows: CRow[] };
   straddleLab: Lab;
   matrix: Matrix;
   long: LongData;
@@ -309,17 +312,17 @@ function Older({ r }: { r: Report }) {
   const e = r.earlier;
   return (
     <div className="flex flex-col gap-3">
-      <Answer>These earlier ideas did not beat the main rule. They used shorter history (2019 to 2026 unless noted), so compare them with care.</Answer>
+      <Answer>These earlier ideas did not beat the main rule. They use 2019 to 2026 unless noted, so compare them with care.</Answer>
       <Card title="Weekly hedge against monthly hedge" right={<span>92 trades each, net total</span>}>
         <Table head={['Setup', 'Monthly: cost a trade', 'Net', 'Worst', 'Weekly: cost a trade', 'Net', 'Worst']} rows={e.weeklyHedge.map((x) => [x[0], inr(x[1] as number), <Money key="a" v={x[2] as number} />, <Money key="b" v={x[3] as number} />, inr(x[4] as number), <Money key="c" v={x[5] as number} />, <Money key="d" v={x[6] as number} />])} />
         <Note>Each weekly hedge is cheaper, but you buy it again and again, so the total costs more.</Note>
       </Card>
       <Card title="Margin with a weekly hedge" right={<span>Strangle on the 23 Nov expiry</span>}><Bars plain rows={e.weeklyMargin.map((x) => ({ label: String(x[0]), value: x[1] as number }))} /></Card>
       <Card title="Staying within a ₹5,000 to ₹7,500 loss" right={<span>Monthly, 10 days, 92 trades</span>}>
-        <Table head={['Version', 'Won', 'Net total', 'Worst trade', 'Trades over ₹7,500']} rows={e.lossLimit.map((x) => [x[0], `${x[1]}%`, <Money key="a" v={x[2] as number} />, x[3] == null ? 'See note' : <Money key="b" v={x[3] as number} />, x[4]])} />
-        <Note>The narrow spreads cap the loss at entry, but they won under half their trades. Their one large loss in the raw test came from a stale NSE price on 12 Mar 2020, so it is not shown.</Note>
+        <Table head={['Version', 'Won', 'Net total', 'Worst trade', 'Trades over ₹7,500']} rows={e.lossLimit.map((x) => [x[0], `${x[1]}%`, <Money key="a" v={x[2] as number} />, <Money key="b" v={x[3] as number} />, x[4]])} />
+        <Note>The narrow spreads cap the loss at entry, but they won under half their trades.</Note>
       </Card>
-      <Card title="Double calendar spreads" right={<span>21 days before near expiry, 2014 to 2026</span>}>
+      <Card title="Double calendar spreads" right={<span>21 days before near expiry, 2011 to 2026</span>}>
         <Table head={['Strikes', 'Trades', 'Won', 'Profit a year', 'Worst trade', 'Losing years']} rows={e.calendars.map((x) => [x[0], x[1], `${x[2]}%`, <Money key="a" v={x[3] as number} />, <Money key="b" v={x[4] as number} />, `${x[5]} of ${x[6]}`])} />
       </Card>
     </div>
@@ -495,6 +498,63 @@ function StraddleTab({ r }: { r: Report }) {
   );
 }
 
+function CompareTab({ r }: { r: Report }) {
+  const all = r.compare.rows;
+  const [exit, setExit] = useState<'21' | '25'>('21');
+  const [iv, setIv] = useState<'high' | 'all'>('high');
+  const [pos, setPos] = useState('fwd');
+  const rows = all.filter((x) => String(x.exit) === exit && x.filter === iv);
+  const sel = rows.find((x) => x.position === pos) ?? rows[0];
+  const years = [...new Set(rows.flatMap((x) => x.years.map((y) => y[0])))].sort();
+  const label = (x: CRow) => x.name;
+  const best = [...all].sort((a, b) => (b.perLakh ?? -1e9) - (a.perLakh ?? -1e9))[0];
+  const [fPos, setFPos] = useState('any');
+  const [fProtect, setFProtect] = useState('any');
+  const [fExit, setFExit] = useState('any');
+  const [fIv, setFIv] = useState('any');
+  const [sortBy, setSortBy] = useState<'none' | 'year' | 'lakh' | 'worst' | 'won'>('none');
+  const key = (x: CRow) => (sortBy === 'year' ? x.perYear : sortBy === 'lakh' ? x.perLakh ?? -1e9 : sortBy === 'worst' ? x.worst : x.won);
+  const picked = all.filter((x) => (fPos === 'any' || (fPos === 'fwd' ? !x.position.startsWith('both') : x.position.startsWith('both'))) && (fProtect === 'any' || (fProtect === 'yes') === x.position.endsWith('p')) && (fExit === 'any' || String(x.exit) === fExit) && (fIv === 'any' || x.filter === fIv));
+  const shown = sortBy === 'none' ? picked : [...picked].sort((a, b) => key(b) - key(a));
+  return (
+    <div className="flex flex-col gap-3">
+      <Answer>Without protection, the 21-day exit is best, and adding a spot straddle simply doubles the trade: profit, margin and risk. Protection at the breakevens cuts losses hard, but every protected version lost money overall.</Answer>
+      <Card title={`${shown.length} of 16 versions`} right={<span>One position, {r.compare.from.slice(0, 4)} to {r.compare.to.slice(0, 4)}, charges and ₹1 slippage. Forward + spot is 2 lots sold.</span>}>
+        <div className="flex flex-wrap items-center gap-2 border-b border-line p-3">
+          <Segmented label="Position filter" value={fPos} onChange={setFPos} options={[{ value: 'any', label: 'All positions' }, { value: 'fwd', label: 'Forward' }, { value: 'both', label: 'Forward + spot' }]} />
+          <Segmented label="Protection filter" value={fProtect} onChange={setFProtect} options={[{ value: 'any', label: 'Any protection' }, { value: 'no', label: 'Unprotected' }, { value: 'yes', label: 'Protected' }]} />
+          <Segmented label="Exit filter" value={fExit} onChange={setFExit} options={[{ value: 'any', label: 'Both exits' }, { value: '21', label: '21 days' }, { value: '25', label: '25 days' }]} />
+          <Segmented label="IV filter for the table" value={fIv} onChange={setFIv} options={[{ value: 'any', label: 'All months' }, { value: 'high', label: 'High IV' }, { value: 'all', label: 'Every month' }]} />
+          <Segmented label="Sort table" value={sortBy} onChange={setSortBy} options={[{ value: 'none', label: 'No sort' }, { value: 'year', label: 'Profit' }, { value: 'lakh', label: 'Per ₹1 lakh' }, { value: 'worst', label: 'Smallest worst' }, { value: 'won', label: 'Won %' }]} />
+        </div>
+        <Table tall head={['Position', 'Exit', 'IV', 'Trades', 'Won', 'Losing trades', 'Total won', 'Total lost', 'Net total', 'Avg win', 'Avg loss', 'Per trade', 'Profit a year', 'Per ₹1 lakh margin', 'Worst trade', 'Worst MTM', 'Worst MTM date', 'That trade finished', 'Best trade', 'Deepest fall', 'Losing years', 'To 2022', 'Since 2023', 'A day late', '₹2 slippage']}
+          rows={shown.map((x) => [x === best ? <b key="n">{x.name}</b> : x.name, `${x.exit} days left`, x.filter === 'high' ? 'High IV' : 'Every month', x.trades, `${x.won.toFixed(0)}%`, x.tradeRows.filter((t) => t.net <= 0).length, <Money key="w" v={x.tradeRows.filter((t) => t.net > 0).reduce((n, t) => n + t.net, 0)} />, <Money key="l" v={x.tradeRows.filter((t) => t.net <= 0).reduce((n, t) => n + t.net, 0)} />, <Money key="t" v={x.total} />, inr(x.avgWin), inr(x.avgLoss), <Money key="a" v={x.perTrade} />, <Money key="b" v={x.perYear} />, <Money key="c" v={x.perLakh} />, <Money key="d" v={x.worst} />, <Money key="m" v={x.worstMtm} />, x.worstMtmOn ?? '–', <Money key="mf" v={x.worstMtmTradeNet} />, <Money key="e" v={x.best} />, inr(x.deepest), `${x.losingYears} of ${x.yearCount}`, <Money key="f" v={x.to2022} />, <Money key="g" v={x.since2023} />, <Money key="h" v={x.latePerYear} />, <Money key="i" v={x.dearPerYear} />])} />
+        <Note>The bold row earned the most per ₹1 lakh of margin. Worst trade is the biggest loss at exit. Worst MTM is the biggest open loss at any day’s close while a trade was running, from real closing prices, so a loss inside the day could be bigger. Protection buys a call and a put away from the strike by the straddle’s combined premium, so if it collects ₹1,000, they sit 1,000 points away. Exits are at the close, with no stops or adjustments.</Note>
+      </Card>
+      <div className="flex flex-wrap items-center gap-2">
+        <Segmented label="Exit" value={exit} onChange={setExit} options={[{ value: '21', label: '45 to 21 days' }, { value: '25', label: '45 to 25 days' }]} />
+        <Segmented label="IV filter" value={iv} onChange={setIv} options={[{ value: 'high', label: 'High IV only' }, { value: 'all', label: 'Every month' }]} />
+      </div>
+      <Card title="Running total of profit"><Lines series={rows.map((x) => ({ name: label(x), pts: x.curve }))} /></Card>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card title="Profit a year"><Bars rows={rows.map((x) => ({ label: label(x), value: x.perYear }))} /></Card>
+        <Card title="Worst single trade"><Bars rows={rows.map((x) => ({ label: label(x), value: x.worst }))} /></Card>
+      </div>
+      <Card title="Year by year" right={<span>Profit or loss in each year</span>}>
+        <Table head={['Year', ...rows.map(label)]} rows={[...years.map((y) => [y, ...rows.map((x) => <Money key={x.id} v={x.years.find((z) => z[0] === y)?.[1] ?? null} />)]), [<b key="t">Total</b>, ...rows.map((x) => <b key={x.id}><Money v={x.total} /></b>)]]} />
+      </Card>
+      <Card title="On today’s prices" right={<span>29 Dec expiry, 3 Nov close, one position</span>}>
+        <Table head={['Position', 'Legs', 'Collected', 'Margin', 'Gap −8%', 'Gap −13%', 'Gap +8%', 'Gap +13%']} rows={rows.map((x) => [x.name, <span key="l" className="whitespace-normal">{x.today?.legs.join(', ')}</span>, inr(x.today?.credit), inr(x.today?.margin), ...[-8, -13, 8, 13].map((g) => <Money key={g} v={x.today?.gaps.find((z) => z.gapPct === g)?.pnl} />)])} />
+      </Card>
+      <div><Segmented label="Position" value={pos} onChange={setPos} options={[{ value: 'fwd', label: 'Forward' }, { value: 'fwdp', label: 'Forward, protected' }, { value: 'both', label: 'Forward + spot' }, { value: 'bothp', label: 'Forward + spot, protected' }]} /></div>
+      <Card title={`Trade by trade: ${sel.name}`} right={<span>{sel.trades} trades, newest first, at today’s size</span>}>
+        <Table tall head={['Entered', 'Exited', 'Expiry', 'NIFTY in', 'NIFTY out', 'Collected', 'Result', 'Worst MTM', 'On', 'Big NIFTY days inside', 'Legs']} rows={[...sel.tradeRows].reverse().map((t) => [t.entry, t.exit, t.expiry, t.spotIn, t.spotOut, inr(t.credit), <Money key="n" v={t.net} />, <Money key="m" v={t.worstMtm} />, t.worstMtmOn ?? '–', <span key="g" className="whitespace-normal text-[12px] text-ink-2">{t.bigDays.join(' · ') || '–'}</span>, <span key="l" className="whitespace-normal text-[12px] text-ink-2">{t.legs.join(', ')}</span>])} />
+        <Note>Big NIFTY days are a gap of 2% or more at the open, or a 3% move on the day, from NSE’s official index file. Worst MTM is at daily closes.</Note>
+      </Card>
+    </div>
+  );
+}
+
 const WORDS: [string, string][] = [
   ['Call (CE) and put (PE)', 'A call gains when the index rises. A put gains when it falls. Selling either earns the premium, and loses if the index moves through its strike.'],
   ['Strike', 'The index level an option is tied to.'],
@@ -518,7 +578,7 @@ const WORDS: [string, string][] = [
   ['To 2022 and since 2023', 'Rules were found on all years, so the later period is an extra check, not proof.'],
 ];
 
-const TABS = { summary: 'Summary', best: 'Best rules', straddle: 'Straddle lab', matrix: 'All combinations', long: 'Time frames', slide: 'December straddle', moves: 'Market moves', bank: 'NIFTY vs Bank Nifty', collar: 'Ironed Collar', shape: 'Your 2× and 3× shape', adjust: 'Adjustments', older: 'Older tests', words: 'Word meanings' } as const;
+const TABS = { summary: 'Summary', best: 'Best rules', compare: 'Straddle compare', straddle: 'Straddle lab', matrix: 'All combinations', long: 'Time frames', slide: 'December straddle', moves: 'Market moves', bank: 'NIFTY vs Bank Nifty', collar: 'Ironed Collar', shape: 'Your 2× and 3× shape', adjust: 'Adjustments', older: 'Older tests', words: 'Word meanings' } as const;
 
 export function SellingReportTool({ tool }: { tool: Tool }) {
   const { data, error } = useFeed<Report>('selling-report');
@@ -536,6 +596,7 @@ export function SellingReportTool({ tool }: { tool: Tool }) {
       </nav>
       {tab === 'summary' && <Summary r={data} />}
       {tab === 'best' && <Best r={data} />}
+      {tab === 'compare' && <CompareTab r={data} />}
       {tab === 'straddle' && <StraddleTab r={data} />}
       {tab === 'matrix' && <MatrixTab r={data} />}
       {tab === 'long' && <LongTab r={data} />}

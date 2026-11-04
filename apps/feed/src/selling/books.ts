@@ -54,7 +54,9 @@ export async function loadBooks(log: (m: string) => void = () => {}, u: string =
   // An expiry later moved for a holiday stays in older files under its old date. It never settled, so only dates that
   // really traded count when finding each month's last expiry; contracts not yet expired count as listed.
   const traded = new Set(meta.map((m) => m.date)), lastDate = meta.at(-1)!.date;
-  const realExpiries = allExpiries.filter((e) => traded.has(e) || e > lastDate);
+  // Past: only dates that really traded. Ahead: only what is listed on the latest day, as an older file can hold a moved date.
+  const ahead = new Set((await prisma.fnoEod.findMany({ where: { underlying: u, date: lastDate, kind: { in: ['CE', 'PE'] } }, distinct: ['expiry'], select: { expiry: true } })).map((r) => r.expiry));
+  const realExpiries = allExpiries.filter((e) => traded.has(e) || (e > lastDate && ahead.has(e)));
   const movedExpiries = allExpiries.filter((e) => !realExpiries.includes(e)).sort();
   const monthly = monthlyExpiries(realExpiries);
   const books: DayBook[] = [];

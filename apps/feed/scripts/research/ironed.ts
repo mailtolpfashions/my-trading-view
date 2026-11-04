@@ -12,7 +12,9 @@ const dates = meta.map((m) => m.date), idx = new Map(dates.map((d, i) => [d, i])
 const today = meta.at(-1)!, todayN = today.spotPaise! * today.lotSize!, YEARS = dates.length / 248;
 const exps = (await prisma.fnoEod.findMany({ where: { underlying: U, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true } })).map((r) => r.expiry).filter((e) => idx.has(e)).sort();
 const last = new Map<string, string>(); for (const e of exps) last.set(e.slice(0, 7), e);
-const monthly = [...last.values()];
+// listed today: expiries still ahead whose trade can already have finished
+for (const r of await prisma.fnoEod.findMany({ where: { underlying: U, date: today.date, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true }, orderBy: { expiry: 'asc' } })) if (r.expiry > today.date) last.set(r.expiry.slice(0, 7), r.expiry);
+const monthly = [...last.values()].sort();
 const vix = new Map((await prisma.indexEod.findMany({ where: { name: 'INDIA VIX' }, select: { date: true, closePaise: true } })).map((r) => [r.date, r.closePaise / 100]));
 const pcrRows = await prisma.fnoDerivedDay.findMany({ where: { underlying: U }, select: { date: true, expiry: true, ceOi: true, peOi: true } });
 const pcr = new Map(pcrRows.map((r) => [`${r.date}|${r.expiry}`, Number(r.ceOi) ? Number(r.peOi) / Number(r.ceOi) : 0]));
@@ -42,6 +44,7 @@ const results: { line: string; net: number }[] = [];
 for (const v of vars) {
   const out: { y: string; net: number }[] = []; let skip = 0, filtered = 0, adjustments = 0, forced = 0, booked = 0;
   for (const e of monthly) {
+    if (!idx.has(e)) continue; // this trade holds to expiry, so an expiry still ahead has not finished
     const iE = idx.get(e)!, iD = iE - v.before; if (iD < 1) continue;
     const d = dates[iD], m = M.get(d)!; if (!m.spotPaise || !m.lotSize) { skip++; continue; }
     if (v.filter) {

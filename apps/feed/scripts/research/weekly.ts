@@ -1,7 +1,7 @@
 // One-off test behind the option selling report, kept to reproduce it. Heavy: run after market hours.
 import { prisma } from '@mtv/db';
 import { computeOptionCharges, exerciseStt } from '@mtv/paper';
-import { positionMargin } from '@mtv/options';
+import { positionMargin, staleFlags } from '@mtv/options';
 import { spanOn } from '../../src/fno/span';
 const U = 'NIFTY', SLIP = 100, FROM = '2019-03-01';
 const meta = await prisma.fnoDayMeta.findMany({ where: { underlying: U }, select: { date: true, spotPaise: true, lotSize: true }, orderBy: { date: 'asc' } });
@@ -9,12 +9,13 @@ const dates = meta.map((m) => m.date), idx = new Map(dates.map((d, i) => [d, i])
 const today = meta.at(-1)!, todayN = today.spotPaise! * 65, T = today.spotPaise! / 100;
 const exps = (await prisma.fnoEod.findMany({ where: { underlying: U, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true } })).map((r) => r.expiry).filter((e) => idx.has(e) && e >= FROM).sort();
 const last = new Map<string, string>(); for (const e of exps) last.set(e.slice(0, 7), e);
-const monthly = [...last.values()];
+for (const r of await prisma.fnoEod.findMany({ where: { underlying: U, date: today.date, kind: 'CE' }, distinct: ['expiry'], select: { expiry: true }, orderBy: { expiry: 'asc' } })) if (r.expiry > today.date) last.set(r.expiry.slice(0, 7), r.expiry);
+const monthly = [...last.values()].sort().filter((e) => idx.has(e)); // these tests hold to expiry, or need it to have passed
 type R = { kind: string; strikePaise: number; closePaise: number };
 const cache = new Map<string, R[]>();
 const load = async (d: string, e: string) => {
   const k = d + e; let r = cache.get(k);
-  if (!r) { r = (await prisma.fnoEod.findMany({ where: { underlying: U, date: d, expiry: e, kind: { in: ['CE', 'PE'] }, traded: true, closePaise: { gt: 0 } }, select: { kind: true, strikePaise: true, closePaise: true } })) as R[]; cache.set(k, r); }
+  if (!r) { r = (await prisma.fnoEod.findMany({ where: { underlying: U, date: d, expiry: e, kind: { in: ['CE', 'PE'] }, traded: true, closePaise: { gt: 0 } }, select: { kind: true, strikePaise: true, closePaise: true, traded: true } })) as (R & { traded: boolean })[]; for (const kind of ['CE', 'PE']) { const l = r.filter((x: { kind: string; traded?: boolean; closePaise: number }) => x.kind === kind && x.traded !== false && x.closePaise > 0).sort((a: { strikePaise: number }, b: { strikePaise: number }) => a.strikePaise - b.strikePaise); staleFlags(l.map((x: { closePaise: number }) => x.closePaise), kind === 'PE').forEach((f: boolean, i: number) => { if (f) l[i].traded = false; }); } r = r.filter((x) => (x as R & { traded: boolean }).traded); cache.set(k, r); }
   return r;
 };
 const near = (rows: R[], k: string, t: number) => rows.filter((r) => r.kind === k).sort((a, b) => Math.abs(a.strikePaise - t) - Math.abs(b.strikePaise - t))[0];
