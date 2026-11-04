@@ -19,8 +19,18 @@ export type BacktestRequest = { strategy: EquityStrategy; universe: UniverseSpec
 
 const MAX_STOCKS = 4000;
 const MAX_TRADES = 20000;
-/** Instruments an intraday test may hold in memory, by its finest timeframe (a year of 1-minute bars is ~93,000 a stock). */
-const MAX_INTRADAY: Record<string, number> = { '1m': 25, '3m': 60, '5m': 100, '15m': 250, '30m': 400, '1h': 500 };
+/**
+ * Bars an intraday test may hold, across all its instruments, at its finest timeframe (test window plus warm-up).
+ * A year of 5-minute bars is about 21,000 a stock. Measured 2026-11-04: F&O stocks (218) on 5-minute bars for a year
+ * took about 400 bytes a bar at peak (1.9 GB) and 62 s; 5 million bars keeps a test near 2 GB under the 6 GB ceiling.
+ */
+const INTRADAY_BAR_BUDGET = Number(process.env.INTRADAY_BAR_BUDGET ?? 5_000_000);
+/** How many instruments fit the budget on `tf` bars between the dates (minute data covers about a year at most). */
+function intradayLimit(tf: Tf, fromT: number, toT: number): number {
+  const perDay = Math.ceil(375 / TF_MINUTES[tf]!);
+  const sessions = Math.ceil((Math.min((toT - fromT) / 86400, 366) + INTRADAY_WARMUP_DAYS) * (250 / 365));
+  return Math.max(1, Math.floor(INTRADAY_BAR_BUDGET / (perDay * sessions)));
+}
 /** Calendar days of minutes loaded before the test starts, for indicators to warm up. */
 const INTRADAY_WARMUP_DAYS = 45;
 /** Kite's own history has no minutes after 15:14 on these days (checked with Kite, 2026-11-03). */
@@ -55,7 +65,8 @@ export async function runStrategyBacktest(req: BacktestRequest) {
   // Intraday: only instruments with recorded minutes take part; too many would not fit in memory, so the test asks for fewer.
   const recorded = intra ? new Set(symbols.filter((x) => existsSync(path.join(live.store.dir, x)))) : null;
   if (recorded && !recorded.size) throw new StrategyError('No minute data is stored for these yet. Connect Kite (top right): the first connection downloads about a year of minutes for NIFTY 500, F&O stocks and the main indices.');
-  if (recorded && recorded.size > MAX_INTRADAY[finest!]) throw new StrategyError(`That is ${recorded.size} instruments with minute data; on ${finest} bars the limit is ${MAX_INTRADAY[finest!]}. Pick fewer (NIFTY 50 stocks, a watchlist or a few stocks), or a longer timeframe.`);
+  const limit = intra ? intradayLimit(finest!, fromT, toT) : Infinity;
+  if (recorded && recorded.size > limit) throw new StrategyError(`That is ${recorded.size} instruments with minute data; on ${finest} bars over these dates up to ${limit} fit in memory. Pick fewer (NIFTY 50 stocks, a watchlist or a few stocks), a shorter period, or a longer timeframe.`);
   for (let k = 0; k < symbols.length; k++) {
     if (k % 200 === 0) await new Promise((r) => setImmediate(r));
     const sym = symbols[k];
