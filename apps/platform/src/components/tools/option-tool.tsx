@@ -7,6 +7,8 @@ import { MaxPainTool } from './options/max-pain';
 import { OpenInterestTool } from './options/open-interest';
 import { PcrTool } from './options/pcr';
 import { PeCeTool, PriceVsOiTool } from './options/oi-series';
+import { SellingReportTool } from './options/selling-report';
+import { SellingStudyTool } from './options/selling-study';
 import { DecayTool, StraddleTool } from './options/straddle';
 import { IvGridTool, IvTool, SkewTool } from './options/volatility';
 
@@ -29,6 +31,8 @@ const TOOLS: Record<string, (p: { tool: Tool }) => React.ReactNode> = {
   'oi-spurts': OiSpurtsTool,
   'oi-clusters': OiClustersTool,
   'strategy-chart': StrategyChartTool,
+  'selling-study': SellingStudyTool,
+  'selling-report': SellingReportTool,
 };
 
 /** One option analysis tool, chosen by its slug (/options/<slug>). */

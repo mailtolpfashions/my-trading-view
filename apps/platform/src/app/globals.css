@@ -54,6 +54,13 @@
 }
 
 /* Dark: warm espresso canvas, lifted panels, a brighter saffron. */
+/* Chart series: fixed order, passes the colour-blind checks in both themes. Outside @theme, which drops unused names. */
+:root {
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+}
+
 :root[data-theme='dark'] {
   --color-canvas: #12100c;
   --color-panel: #1c1914;
@@ -70,6 +77,9 @@
   --color-accent-deep: #ffc266;
   --color-accent-label: #ffc266;
 
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
   --color-up: #2bc49a;
   --color-up-soft: #12302a;
   --color-down: #ff6b70;

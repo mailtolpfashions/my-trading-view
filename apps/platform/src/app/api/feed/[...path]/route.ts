@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 // The browser talks to the feed through this server, so the feed token never leaves it and the feed needs no extra
 // CORS origin. Only the routes the platform uses are passed on.
 const FEED = process.env.FEED_URL ?? 'http://127.0.0.1:4001';
-const ALLOWED = /^(today|dashboard|screener\/(meta|count|run)|candles|search|quotes|eod\/status|user\/(settings|screens|screens\/delete|screens\/favourite|recent|watchlists|watchlists\/add|watchlists\/delete|strategies|strategies\/delete|alerts|alerts\/delete|alerts\/enabled|alert-events|alert-events\/read)|strategy\/backtest|alerts\/(channels|test)|kite\/(status|login|logout)|intraday\/candles)$/;
+const ALLOWED = /^(today|dashboard|screener\/(meta|count|run)|candles|search|quotes|eod\/status|user\/(settings|screens|screens\/delete|screens\/favourite|recent|watchlists|watchlists\/add|watchlists\/delete|strategies|strategies\/delete|alerts|alerts\/delete|alerts\/enabled|alert-events|alert-events\/read)|strategy\/backtest|selling-report|selling-plan|selling-paper\/start|selling-decay|selling-study(\/[a-z0-9-]+)?|alerts\/(channels|test)|kite\/(status|login|logout)|intraday\/candles)$/;
 
 async function forward(req: NextRequest, path: string[]) {
   const route = path.join('/');

@@ -37,6 +37,8 @@ import { AlertEngine } from './alerts/engine';
 import { todayBrief } from './today/brief';
 import { channelInfo, send } from './alerts/channels';
 import { StrategyError, runStrategyBacktest, type BacktestRequest } from './strategy/backtest';
+import { planAndPaper, startPaperTrade } from './selling/plan';
+import { decayStudy, sellingReport, studyDetail, studyOverview } from './selling/study';
 import { StudyError, catalog as studyCatalog, computeStudy, encodeNonFinite } from './studies/library';
 import { findInstrument, loadEquities, searchInstruments } from './symbols';
 import { COUNTED_ROUTES, VisitorQuota } from './visitor-quota';
@@ -169,6 +171,11 @@ app.post<{ Body: { symbol?: string; tf?: string; strategy?: Strategy } }>('/api/
     return reply.code(500).send({ error: 'failed', message: 'Backtest failed' });
   }
 });
+
+app.get('/api/selling-report', async (_req, reply) => (await sellingReport()) ?? reply.code(404).send({ error: 'not_run', message: 'The report has not been built yet' }));
+app.get('/api/selling-decay', async (_req, reply) => (await decayStudy()) ?? reply.code(404).send({ error: 'not_run', message: 'The premium decay study has not been run yet' }));
+app.get('/api/selling-study', async (_req, reply) => (await studyOverview()) ?? reply.code(404).send({ error: 'not_run', message: 'The option-selling study has not been run yet' }));
+app.get<{ Params: { id: string } }>('/api/selling-study/:id', async (req, reply) => (await studyDetail(req.params.id)) ?? reply.code(404).send({ error: 'not_found', message: 'No such rule set' }));
 
 app.post<{ Body: { strategy?: OptionsStrategy } }>('/api/options-backtest', async (req, reply) => {
   const s = req.body?.strategy;
@@ -551,6 +558,8 @@ const userRoute = <B>(fn: (body: B) => Promise<unknown>) => async (req: FastifyR
     return reply.code(500).send({ error: 'store_failed', message: 'Your change could not be saved' });
   }
 };
+app.get('/api/selling-plan', userRoute(() => planAndPaper()));
+app.post('/api/selling-paper/start', userRoute(() => startPaperTrade()));
 app.get('/api/user/screens', userRoute(() => userStore.screens()));
 app.post('/api/user/screens', userRoute((b: Parameters<typeof userStore.saveScreen>[0]) => userStore.saveScreen(b)));
 app.post('/api/user/screens/delete', userRoute((b: { id: string }) => userStore.deleteScreen(b.id).then(() => ({ ok: true }))));

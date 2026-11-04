@@ -75,11 +75,11 @@ function table(csv: string, required: string[]) {
 const num = (s: string) => (s === '' ? 0 : Number(s.replaceAll(',', '')));
 
 function oldDate(s: string): string {
-  // 29-Jun-2023 -> 2023-06-29
+  // 29-Jun-2023 -> 2023-06-29. One old file (14 May 2012) writes the year in two digits.
   const [d, mon, y] = s.split('-');
   const m = MONTHS.indexOf(mon.toUpperCase()) + 1;
   if (!m) throw new Error(`Unrecognised expiry date ${s}`);
-  return `${y}-${String(m).padStart(2, '0')}-${d.padStart(2, '0')}`;
+  return `${y.length === 2 ? `20${y}` : y}-${String(m).padStart(2, '0')}-${d.padStart(2, '0')}`;
 }
 
 function checkRow(r: FnoRow) {

@@ -50,6 +50,24 @@ export type SavedStrategy = {
   backtests: BacktestRecord[];
 };
 
+/** One paper trade of the option-selling rule. Money is integer paise at the lot traded. */
+export type SellingPaperTrade = {
+  id: string;
+  openedOn: string;
+  expiry: string;
+  exitOn: string;
+  spotPaise: number;
+  creditPaise: number;
+  legs: { expiry: string; strikePaise: number; kind: 'CE' | 'PE'; side: 'BUY' | 'SELL'; qty: number; entryPaise: number; role: 'short' | 'wing' }[];
+  chargesPaise: number;
+  status: 'open' | 'closed';
+  closedOn: string | null;
+  why: string | null;
+  netPaise: number | null;
+  lastMarkOn: string;
+  lastPnlPaise: number;
+};
+
 export type AlertChannel = 'inApp' | 'telegram' | 'email' | 'whatsapp';
 export type Alert = {
   id: string;
@@ -94,7 +112,7 @@ export type DaySettings = {
 };
 export const DEFAULT_SETTINGS: DaySettings = { mode: 'intraday', capitalRupees: 500000, riskPerTradePct: 1, maxDailyLossRupees: 10000, maxTradesPerDay: 5 };
 
-type Data = { version: 1; settings?: DaySettings; screens: SavedScreen[]; watchlists: Watchlist[]; recent: RecentRun[]; strategies?: SavedStrategy[]; alerts?: Alert[]; alertEvents?: AlertEvent[] };
+type Data = { version: 1; sellingPaper?: SellingPaperTrade[]; settings?: DaySettings; screens: SavedScreen[]; watchlists: Watchlist[]; recent: RecentRun[]; strategies?: SavedStrategy[]; alerts?: Alert[]; alertEvents?: AlertEvent[] };
 
 export class UserStoreError extends Error {}
 
@@ -297,6 +315,14 @@ export class UserStore {
 
   markAlertEventsRead(ids?: string[]): Promise<void> {
     return this.change((d) => { for (const e of d.alertEvents ?? []) if (!ids || ids.includes(e.id)) e.read = true; });
+  }
+
+  async sellingPaper(): Promise<SellingPaperTrade[]> {
+    return (await this.load()).sellingPaper ?? [];
+  }
+
+  saveSellingPaper(trades: SellingPaperTrade[]): Promise<void> {
+    return this.change((d) => { d.sellingPaper = trades; });
   }
 
   async watchlists(): Promise<Watchlist[]> {
