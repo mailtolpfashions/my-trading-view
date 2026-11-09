@@ -28,11 +28,11 @@ const pct = (v: number | null) => (v == null ? '–' : `${(v * 100).toFixed(1)}%
 const th = 'px-3 py-2 text-left text-[11px] font-semibold text-muted whitespace-nowrap';
 const td = 'px-3 py-2 text-[13px] whitespace-nowrap tabular-nums';
 
-const HEADLINE: Record<Plan['status'], string> = {
-  enter: 'Enter today',
-  'low-iv': 'Entry day, but IV is low: skip this month',
-  wait: 'No trade today',
-};
+const dayName = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+// A rule enters only on its one entry day a month, so on other days say whether IV passes and when that day is.
+const headline = (p: Plan) => (p.status === 'enter' ? 'Enter today'
+  : p.status === 'low-iv' ? 'Entry day, but IV is low: skip this month'
+  : `${p.iv.high ? 'IV passes.' : 'IV is low now.'} Next entry day: ${dayName(p.entryOn)}`);
 
 function Fact({ label, value, cls = '' }: { label: string; value: React.ReactNode; cls?: string }) {
   return <div className="flex flex-col gap-0.5"><span className="text-[11px] font-semibold text-muted">{label}</span><span className={`text-[14px] font-semibold tabular-nums ${cls}`}>{value}</span></div>;
@@ -56,7 +56,7 @@ function PlanCard({ plan, paper, tested, about, title, onStarted }: { plan: Plan
     <Card title={<span className="flex items-center gap-1.5">{title}<InfoTip label={`About ${title}`}>{about}</InfoTip></span>} right={<span>Close of {plan.asOf}</span>}>
       <div className="flex flex-col gap-4 p-4">
         <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
-          <p className="text-[18px] font-extrabold tracking-[-0.01em]">{open ? 'Paper trade open' : HEADLINE[plan.status]}</p>
+          <p className="text-[18px] font-extrabold tracking-[-0.01em]">{open ? 'Paper trade open' : headline(plan)}</p>
           <Fact label="Next entry" value={plan.entryOn} />
           <Fact label="Exit by" value={plan.exitOn} />
           <Fact label="Expiry" value={plan.expiry} />

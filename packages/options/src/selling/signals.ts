@@ -37,6 +37,29 @@ export function ivRank(history: IvPoint[], date: string, window = 250): number |
 }
 
 /**
+ * A price for an option on one day, for marking a position. A traded close is used as it is. With no trade, NSE's
+ * settlement price is used but kept between the option's intrinsic value and the cheapest traded option of the same type
+ * that must be worth more (a lower-strike call, a higher-strike put): for far contracts with no trade the settlement price
+ * can be far off. 17 Apr 2020, Dec 2020 expiry: the 14000 CE had a settlement price of ₹911.60 while the 12000 CE traded at
+ * ₹118. Returns null when there is no price at all.
+ */
+export function boundedMark(
+  rows: Iterable<{ kind: string; strikePaise: number; closePaise: number; settlePaise: number; traded: boolean }>,
+  kind: 'CE' | 'PE', strikePaise: number, spotPaise: number,
+): number | null {
+  let own: { closePaise: number; settlePaise: number; traded: boolean } | null = null, cap = Infinity;
+  for (const x of rows) {
+    if (x.kind !== kind) continue;
+    if (x.strikePaise === strikePaise) { own = x; continue; }
+    if (x.traded && x.closePaise > 0 && (kind === 'CE' ? x.strikePaise < strikePaise : x.strikePaise > strikePaise)) cap = Math.min(cap, x.closePaise);
+  }
+  if (own?.traded && own.closePaise > 0) return own.closePaise;
+  if (!own || !(own.settlePaise > 0)) return null;
+  const intrinsic = Math.max(0, kind === 'CE' ? spotPaise - strikePaise : strikePaise - spotPaise);
+  return Math.max(intrinsic, Math.min(own.settlePaise, cap));
+}
+
+/**
  * Finds closing prices that cannot all be live together. For one expiry and option type, sorted by strike, prices must only
  * rise (puts) or only fall (calls). The longest run that obeys this is kept and the rest are flagged: NSE's close can be the
  * day's last trade from hours earlier. 12 Mar 2020: the 9450 PE closed at ₹104 while the 9400 PE closed at ₹360.

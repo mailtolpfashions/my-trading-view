@@ -30,6 +30,10 @@ export async function studyOverview() {
 export const decayStudy = () => readFile(path.resolve(DIR, '../selling-decay.json'), 'utf8').then((s) => JSON.parse(s) as unknown, () => null);
 
 /** Everything found so far, as one report for the app (built from the study logs). */
+export const sellingThree = () => readFile(path.resolve(DIR, '../selling-three.json'), 'utf8').then((s) => JSON.parse(s) as unknown, () => null);
+/** Research files written by scripts/selling-*.ts (selling-conclusion.ts writes conclusion and search-ui). */
+const RESEARCH = new Set(['callratio', 'combo', 'weekly-buy', 'yearly', 'workshop', 'calendar', 'calendar-far', 'search-ui', 'conclusion']);
+export const sellingResearch = (name: string) => (RESEARCH.has(name) ? readFile(path.resolve(DIR, `../selling-${name}.json`), 'utf8').then((s) => JSON.parse(s) as unknown, () => null) : Promise.resolve(null));
 export const sellingReport = () => readFile(path.resolve(DIR, '../selling-report.json'), 'utf8').then((s) => JSON.parse(s) as unknown, () => null);
 
 /** One rule set in full, with its trades. */

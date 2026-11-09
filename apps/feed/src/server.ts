@@ -38,7 +38,7 @@ import { todayBrief } from './today/brief';
 import { channelInfo, send } from './alerts/channels';
 import { StrategyError, runStrategyBacktest, type BacktestRequest } from './strategy/backtest';
 import { planAndPaper, startPaperTrade } from './selling/plan';
-import { decayStudy, sellingReport, studyDetail, studyOverview } from './selling/study';
+import { decayStudy, sellingReport, sellingResearch, sellingThree, studyDetail, studyOverview } from './selling/study';
 import { StudyError, catalog as studyCatalog, computeStudy, encodeNonFinite } from './studies/library';
 import { findInstrument, loadEquities, searchInstruments } from './symbols';
 import { COUNTED_ROUTES, VisitorQuota } from './visitor-quota';
@@ -172,6 +172,8 @@ app.post<{ Body: { symbol?: string; tf?: string; strategy?: Strategy } }>('/api/
   }
 });
 
+app.get('/api/selling-three', async (_req, reply) => (await sellingThree()) ?? reply.code(404).send({ error: 'not_run', message: 'The comparison has not been built yet' }));
+app.get<{ Params: { name: string } }>('/api/selling-research/:name', async (req, reply) => (await sellingResearch(req.params.name)) ?? reply.code(404).send({ error: 'not_run', message: 'This test has not been run yet' }));
 app.get('/api/selling-report', async (_req, reply) => (await sellingReport()) ?? reply.code(404).send({ error: 'not_run', message: 'The report has not been built yet' }));
 app.get('/api/selling-decay', async (_req, reply) => (await decayStudy()) ?? reply.code(404).send({ error: 'not_run', message: 'The premium decay study has not been run yet' }));
 app.get('/api/selling-study', async (_req, reply) => (await studyOverview()) ?? reply.code(404).send({ error: 'not_run', message: 'The option-selling study has not been run yet' }));
