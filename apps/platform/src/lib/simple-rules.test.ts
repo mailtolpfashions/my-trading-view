@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseFormula } from '@mtv/rules';
-import { CATALOGUE, parseRows, rowsFormula, rowsText, type Row } from './simple-rules';
+import { CATALOGUE, parseRows, rowsFormula, rowsText, type Row, parseRules } from './simple-rules';
 
 describe('simple rules', () => {
   const every: Row[] = CATALOGUE.flatMap((i) => i.conds.map((c) => ({ item: i.id, cond: c.id, p: {} })));
@@ -24,8 +24,14 @@ describe('simple rules', () => {
   });
 
   it('leaves formulas it did not make to the advanced editor', () => {
-    expect(parseRows('CLOSE > HIGHEST(HIGH, 20)[1]')).toBeNull();
+    expect(parseRows('ATR_PCT(14) > 3')).toBeNull();
     expect(parseRows('RSI(CLOSE, 14) > 70 OR CLOSE > OPEN')).toBeNull();
     expect(parseRows('')).toEqual([]);
+  });
+  it('reads "any of these" (OR) rules, and leaves AND mixed with OR to the advanced editor', () => {
+    expect(parseRules('RSI(CLOSE, 14) > 70 OR CLOSE > OPEN')).toEqual({ mode: 'any', rows: [{ item: 'rsi', cond: 'gt', p: { a: 14 }, v: 70 }, { item: 'candle', cond: 'green', p: {} }] });
+    expect(parseRules('RSI(CLOSE, 14) > 70 AND CLOSE > OPEN')?.mode).toBe('all');
+    expect(parseRules('RSI(CLOSE, 14) > 70 AND CLOSE > OPEN OR CLOSE > VWAP')).toBeNull();
+    expect(rowsFormula([{ item: 'rsi', cond: 'gt', p: { a: 14 }, v: 60 }, { item: 'pivot-d', cond: 'r1-x', p: {} }], 'any')).toBe('RSI(CLOSE, 14) > 60 OR CROSSOVER(CLOSE, PIVOT(CLASSIC, R1, D))');
   });
 });

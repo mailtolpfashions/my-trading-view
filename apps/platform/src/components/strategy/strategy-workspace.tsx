@@ -10,14 +10,14 @@ import { DEFAULT_INTRADAY, DEFAULT_STRATEGY, NEW_DOC, isIntradayTf, fromSaved, s
 import { userApi, type SavedScreen, type Watchlist } from '@/lib/user';
 import { confirmDialog } from '../dialog';
 import { InfoTip } from '../info-tip';
-import { ConditionEditor } from '../screener/condition-editor';
 import { Button, Card, Segmented, inputCls } from '../ui';
 import { CapitalPick, MaxOpenPick, PeriodPick, SessionPicks, SizePick, StopPick, TargetPick, TrailPick, WORD } from './strategy-form';
 import { BacktestResults } from './backtest-results';
 import { StrategyGallery } from './strategy-gallery';
 import { SymbolPicker, TEST_INDICES } from './symbol-picker';
-import { parseRows, rowsFormula, rowsText } from '@/lib/simple-rules';
-import { SimpleRules } from './simple-rules';
+import { RowBuilder } from '../conditions/row-builder';
+import { FormulaEditor } from '../screener/formula-editor';
+import { formulaToRows, rowsWords } from '@/lib/rows';
 import { useShell } from '../app/shell-context';
 import { UniverseSelect, isMyWatchlist } from '../screener/universe-picker';
 
@@ -129,11 +129,12 @@ export function StrategyWorkspace() {
             <span>Test on</span>
             <UniverseSelect universe={doc.universe} filters={{}} meta={meta} watchlists={watchlists} watch={watch} className={WORD}
               onChange={(universe) => setDoc({ ...doc, universe })} onPick={() => setDoc({ ...doc, universe: { kind: 'symbols', symbols: [] } })} />
-            <span>with</span>
+            <span>checking every</span>
             <select value={s.tf} onChange={(e) => set({ tf: e.target.value as EquityStrategy['tf'] })} aria-label="Candles" className={WORD}>
               {([['1m', '1-minute'], ['5m', '5-minute'], ['15m', '15-minute'], ['1h', '1-hour'], ['D', 'daily'], ['W', 'weekly'], ['M', 'monthly']] as const).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
-            <span>candles over</span>
+            <span>candle over</span>
+            <InfoTip label="Main timeframe">The main timeframe: signals are checked when each of these candles closes, and trades happen then. A condition can still read another timeframe (e.g. a daily trend filter) with its own &ldquo;on …&rdquo; choice below.</InfoTip>
             <PeriodPick s={s} set={set} className={WORD} />
             <Button variant="primary" onClick={run} disabled={running || !entryOk || !exitOk} className="ml-auto h-10 min-w-[150px] text-[15px]"><Play size={16} /> {running ? 'Testing…' : 'Run backtest'}</Button>
           </div>
@@ -143,15 +144,20 @@ export function StrategyWorkspace() {
           {isIntradayTf(s.tf) && s.from < yearsAgo(1) && <p className="text-[12.5px] text-muted">Minute candles go back about a year (stored Kite minutes), so the test starts where they do.</p>}
 
           <div className="grid gap-3 border-t border-dashed border-line-strong pt-3">
-            {/* entry */}
-            <Line label="Buy when" summary={ruleText(s.entry) || 'no rule yet'} bad={!entryOk} open={edit === 'entry'} onToggle={() => setEdit(edit === 'entry' ? null : 'entry')}
-              extra={screens.length > 0 && (
-                <select value="" onChange={(e) => { const sc = screens.find((x) => x.id === e.target.value); if (sc) set({ entry: sc.formula, tf: sc.tf as EquityStrategy['tf'] }); }} aria-label="Use a saved scan" className={`${inputCls} h-9 pr-7 text-[13px]`}>
-                  <option value="">Use a saved scan…</option>
-                  {screens.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                </select>
-              )} />
-            {edit === 'entry' && <div className="rounded-[12px] bg-raised p-3"><RuleEditor value={s.entry} onChange={(entry) => set({ entry })} meta={meta} tf={s.tf} lead="Buy when" emptyText="Add the conditions that open a trade." /></div>}
+            {/* entry: always open, as sentences */}
+            <section className="grid gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-[15px] font-bold text-ink">Buy when</h3>
+                {!entryOk && s.entry.trim() && <span className="text-[12.5px] text-down">this rule needs fixing</span>}
+                {screens.length > 0 && (
+                  <select value="" onChange={(e) => { const sc = screens.find((x) => x.id === e.target.value); if (sc) set({ entry: sc.formula, tf: sc.tf as EquityStrategy['tf'] }); }} aria-label="Use a saved scan" className={`${inputCls} ml-auto h-9 pr-7 text-[13px]`}>
+                    <option value="">Use one of my scans instead…</option>
+                    {screens.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  </select>
+                )}
+              </div>
+              <RuleEditor value={s.entry} onChange={(entry) => set({ entry })} meta={meta} tf={s.tf} lead="Buy when" starters emptyText="Pick a quick start above, or add the conditions that open a trade." />
+            </section>
 
             {/* exit */}
             <Row label="Exit">
@@ -159,8 +165,10 @@ export function StrategyWorkspace() {
               <TargetPick s={s} set={set} />
               <TrailPick s={s} set={set} />
             </Row>
-            <Line label="Sell when" summary={ruleText(s.exit) || 'no exit signal (stop, target or trailing ends the trade)'} bad={!exitOk} open={edit === 'exit'} onToggle={() => setEdit(edit === 'exit' ? null : 'exit')} />
-            {edit === 'exit' && <div className="rounded-[12px] bg-raised p-3"><RuleEditor value={s.exit ?? ''} onChange={(exit) => set({ exit })} meta={meta} tf={s.tf} lead="Sell when" emptyText="Without an exit signal, trades end at the stop, target, trailing stop or time exit." /></div>}
+            <section className="grid gap-2">
+              <h3 className="flex items-center gap-2 text-[15px] font-bold text-ink">Sell when <span className="text-[12.5px] font-normal text-muted">optional: without it, the stop, target or trailing stop ends the trade</span></h3>
+              <RuleEditor value={s.exit ?? ''} onChange={(exit) => set({ exit })} meta={meta} tf={s.tf} lead="Sell when" emptyText="" />
+            </section>
 
             {/* money */}
             <Row label="Money">
@@ -235,7 +243,7 @@ function StrategySentence({ doc }: { doc: StrategyDoc }) {
   const s = doc.strategy, u = doc.universe;
   const on = u.kind === 'symbols' ? (u.symbols.map((x) => TEST_INDICES.find((i) => i.symbol === x)?.name ?? x).slice(0, 4).join(', ') + (u.symbols.length > 4 ? ` and ${u.symbols.length - 4} more` : '')) || 'no stocks picked yet'
     : u.kind === 'index' ? `the ${u.name} stocks` : u.kind === 'fno' ? 'F&O stocks' : u.kind === 'watchlist' ? 'a watchlist' : 'all NSE stocks';
-  const rule = (f: string | undefined) => { const r = parseRows(f ?? ''); return r ? rowsText(r) : (f ?? '').trim(); };
+  const rule = (f: string | undefined) => { const r = formulaToRows(f ?? ''); return r ? rowsWords(r) : (f ?? '').trim(); };
   const entry = rule(s.entry), exit = rule(s.exit);
   const stop = s.stop.kind === 'pct' ? `${s.stop.value}% below the entry` : s.stop.kind === 'points' ? `₹${s.stop.value} below the entry` : s.stop.kind === 'atr' ? `${s.stop.mult} × ATR (${s.stop.length}) below the entry`
     : s.stop.kind === 'formula' ? (STOP_PICKS.find((x) => x.formula === (s.stop as { formula: string }).formula)?.text ?? (s.stop as { formula: string }).formula) + ', moving with it' : null;
@@ -254,42 +262,28 @@ function StrategySentence({ doc }: { doc: StrategyDoc }) {
 }
 
 /** Entry and exit rules: simple lists for common setups, or the full builder and formula editor. */
-function RuleEditor({ value, onChange, meta, tf, lead, emptyText }: { value: string; onChange: (f: string) => void; meta: Meta | null; tf: EquityStrategy['tf']; lead: string; emptyText: string }) {
-  const rows = parseRows(value);
-  const [mode, setMode] = useState<'simple' | 'advanced'>(rows ? 'simple' : 'advanced');
+function RuleEditor({ value, onChange, meta, tf, lead, emptyText, starters = false }: { value: string; onChange: (f: string) => void; meta: Meta | null; tf: EquityStrategy['tf']; lead: string; emptyText: string; starters?: boolean }) {
+  void lead;
+  const fits = formulaToRows(value) != null;
+  const [asFormula, setAsFormula] = useState(!fits);
   return (
-    <div className="grid gap-3">
-      <Segmented label="Editor" value={mode} onChange={setMode} options={[{ value: 'simple', label: 'Simple' }, { value: 'advanced', label: 'Advanced (builder or formula)' }]} />
-      {mode === 'simple' && rows && (
-        <>
-          {rows.length === 0 && <p className="text-[13px] text-muted">{emptyText}</p>}
-          <SimpleRules rows={rows} onChange={(r) => onChange(rowsFormula(r))} intraday={isIntradayTf(tf)} lead={lead} />
-          {rows.length > 0 && <p className="text-[12px] text-muted">Formula: <code className="font-mono">{value}</code></p>}
-        </>
-      )}
-      {mode === 'simple' && !rows && (
+    <div className="grid gap-2">
+      {!asFormula && fits && <RowBuilder formula={value} onChange={onChange} mainTf={tf} intraday={isIntradayTf(tf)} examples={starters} />}
+      {!asFormula && !fits && (
         <div className="grid gap-2 rounded-[12px] bg-raised px-4 py-3 text-[13.5px] text-ink-2">
-          <p>This rule uses something the simple lists don&apos;t have, so it can only be changed in the advanced editor.</p>
+          <p>This rule has parts the rows can&apos;t show (it was written as a formula).</p>
           <div className="flex gap-2">
-            <Button variant="quiet" className="h-9" onClick={() => setMode('advanced')}>Open the advanced editor</Button>
-            <Button variant="ghost" className="h-9" onClick={() => onChange('')}>Start this rule again in simple mode</Button>
+            <Button variant="quiet" className="h-9" onClick={() => setAsFormula(true)}>Show the formula</Button>
+            <Button variant="ghost" className="h-9" onClick={() => onChange('')}>Start again with rows</Button>
           </div>
         </div>
       )}
-      {mode === 'advanced' && <ConditionEditor value={value} onChange={onChange} meta={meta} screenTf={tf as Tf} rootLabel={lead} emptyText={emptyText} />}
-    </div>
-  );
-}
-
-/** One rule line: its plain-words summary and an Edit button that opens the rule editor below. */
-function Line({ label, summary, bad, open, onToggle, extra }: { label: string; summary: string; bad: boolean; open: boolean; onToggle: () => void; extra?: React.ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-[13.5px]">
-      <span className="w-[84px] shrink-0 font-semibold text-ink">{label}</span>
-      <span className={`min-w-0 flex-1 truncate ${bad ? 'text-down' : 'text-ink-2'}`} title={summary}>{summary}</span>
-      {extra}
-      <button type="button" onClick={onToggle} aria-expanded={open} className="inline-flex shrink-0 items-center gap-1 font-semibold text-accent-deep hover:underline">
-        {open ? 'Done' : 'Edit'} <ChevronDown size={13} className={open ? 'rotate-180' : ''} />
+      {asFormula && <FormulaEditor value={value} onChange={onChange} meta={meta} />}
+      {emptyText && !value.trim() && !asFormula && <p className="text-[12.5px] text-muted">{emptyText}</p>}
+      <button type="button" onClick={() => setAsFormula((a) => !a)} disabled={asFormula && formulaToRows(value) == null}
+        title={asFormula && formulaToRows(value) == null ? 'This formula has parts the rows cannot show' : undefined}
+        className="justify-self-start text-[12px] font-semibold text-muted hover:text-accent-deep disabled:opacity-50">
+        {asFormula ? '← Back to rows' : 'Formula (advanced)'}
       </button>
     </div>
   );
@@ -305,8 +299,6 @@ function Row({ label, tip, children }: { label: string; tip?: string; children: 
   );
 }
 
-/** A rule in plain words when the simple lists can read it, else the formula itself. */
-const ruleText = (f: string | undefined) => { const r = parseRows(f ?? ''); return r ? rowsText(r) : (f ?? '').trim(); };
 
 /** The settings most tests leave alone: description, style, time exit, order, ranking, costs. */
 function More({ doc, setDoc, s, set }: { doc: StrategyDoc; setDoc: (d: StrategyDoc) => void; s: EquityStrategy; set: (p: Partial<EquityStrategy>) => void }) {

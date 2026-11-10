@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Bell, ChevronDown, Eraser, FilePlus2, Play, Redo2, Save, SlidersHorizontal, Undo2 } from 'lucide-react';
-import { isIntraday } from '@mtv/rules';
+import { isIntraday, parseFormula } from '@mtv/rules';
 import { fromTree, group, toTree, type Group } from '@/lib/builder';
 import { FeedError, feed, showKept } from '@/lib/feed';
 import { DEFAULT_UNIVERSE, NEW_SCREEN, SCAN_DRAFT_KEY, type Meta, type Screen, type ScreenResult } from '@/lib/screener';
@@ -14,6 +14,9 @@ import { confirmDialog } from '../dialog';
 import { InfoTip } from '../info-tip';
 import { Button, Card, Segmented, inputCls } from '../ui';
 import { FormulaEditor, useFormula } from './formula-editor';
+import { MagicBox } from './magic-box';
+import { RowBuilder } from '../conditions/row-builder';
+import { formulaToRows } from '@/lib/rows';
 import { ScanGallery, Tested } from './scan-gallery';
 import { ResultsTable } from './results-table';
 import { TreeBuilder } from './tree-builder';
@@ -57,7 +60,7 @@ export function ScreenerWorkspace() {
   const [screens, setScreens] = useState<SavedScreen[] | null>(null);
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [presetId, setPresetId] = useState<string | null>(null); // the ready-made scan last opened
-  const [rulesOpen, setRulesOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(true); // the conditions show by default, as rows you can read and change
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(true); // the scan tiles, open until a scan runs
   const [runSoon, setRunSoon] = useState(false); // a tile was clicked: run its scan once it has loaded
@@ -165,6 +168,15 @@ export function ScreenerWorkspace() {
     update({ formula: fromTree(next) });
     lastEdit.current = { at: 0 };
   };
+
+  /** Magic filters: the conditions read from a phrase, added to the rules (or in their place). */
+  const applyMagic = (conditions: string[], replace: boolean) => {
+    const keep = !replace && screen.formula.trim() ? [`(${screen.formula})`] : [];
+    const p = parseFormula([...keep, ...conditions.map((c) => `(${c})`)].join(' AND '));
+    if (p.ok) { update({ formula: p.formula }); setView('builder'); }
+  };
+  /** Can the rows show this scan? (Candle patterns, time of day and the like need the formula view.) */
+  const rowsFit = useMemo(() => formulaToRows(screen.formula) != null, [screen.formula]);
 
   const parsed = useFormula(screen.formula);
   const canRun = !!parsed?.ok && parsed.type === 'bool' && !running;
@@ -336,23 +348,20 @@ export function ScreenerWorkspace() {
 
           {rulesOpen && (
             <div className="grid gap-3 rounded-[14px] bg-raised p-4">
+              <MagicBox onApply={applyMagic} />
               <div className="flex flex-wrap items-center gap-3">
                 <input value={screen.name} onChange={(e) => update({ name: e.target.value })} aria-label="Scan name" title="Scan name"
                   className={`${inputCls} h-9 min-w-[12rem] text-[14px] font-semibold`} />
-                <Segmented label="Editor" value={view} onChange={switchView}
-                  options={[{ value: 'builder', label: 'Builder', title: treeable ? undefined : 'Fix the formula first' }, { value: 'formula', label: 'Formula' }]} />
-                {view === 'builder' && (
-                  <div className="ml-auto flex items-center gap-1">
-                    <Button variant="ghost" className="h-9 px-2.5" onClick={undo} disabled={!hist.past.length} aria-label="Undo" title="Undo"><Undo2 size={16} /></Button>
-                    <Button variant="ghost" className="h-9 px-2.5" onClick={redo} disabled={!hist.future.length} aria-label="Redo" title="Redo"><Redo2 size={16} /></Button>
-                    <Button variant="ghost" className="h-9 px-2.5" onClick={() => commit(group())} disabled={!tree.children.length} title="Remove every condition"><Eraser size={16} /> Clear all</Button>
-                  </div>
+                <Segmented label="Editor" value={view === 'builder' && rowsFit ? 'builder' : 'formula'} onChange={(v) => setView(v === 'builder' && !rowsFit ? 'formula' : v)}
+                  options={[{ value: 'builder', label: 'Rows', title: rowsFit ? undefined : 'This scan has parts the rows cannot show' }, { value: 'formula', label: 'Formula (advanced)' }]} />
+                {view === 'builder' && rowsFit && (
+                  <Button variant="ghost" className="ml-auto h-9 px-2.5" onClick={() => update({ formula: '' })} disabled={!screen.formula.trim()} title="Remove every condition"><Eraser size={16} /> Clear all</Button>
                 )}
               </div>
-              {view === 'builder'
-                ? <TreeBuilder root={tree} meta={meta} screenTf={screen.tf} onChange={commit} />
+              {view === 'builder' && rowsFit
+                ? <RowBuilder formula={screen.formula} onChange={(formula) => update({ formula })} mainTf={screen.tf} intraday={isIntraday(screen.tf)} examples />
                 : <FormulaEditor value={screen.formula} onChange={(formula) => update({ formula })} meta={meta} />}
-              {parsed && !parsed.ok && view === 'builder' && <p className="text-[13px] text-down">Finish or fix the condition marked in red.</p>}
+              {view === 'builder' && !rowsFit && <p className="text-[12.5px] text-muted">This scan uses parts the rows can&apos;t show (candle patterns, time of day…), so it is shown as a formula.</p>}
             </div>
           )}
           {error && <p role="alert" className="rounded-[12px] bg-down-soft px-3 py-2 text-[13.5px] text-down">{error}</p>}

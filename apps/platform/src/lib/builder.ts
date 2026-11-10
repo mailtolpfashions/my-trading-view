@@ -10,7 +10,8 @@ import { parseFormula, print, type Node, type Tf } from '@mtv/rules';
 import { joinRowTf, splitRowTf } from './screener';
 
 export type Join = 'AND' | 'OR';
-export type Leaf = { kind: 'leaf'; id: string; not: boolean; tf: Tf | null | 'mixed'; text: string };
+/** One condition row. `off`: switched off in the builder (kept on screen, left out of the formula). */
+export type Leaf = { kind: 'leaf'; id: string; not: boolean; tf: Tf | null | 'mixed'; text: string; off?: boolean };
 /** `joins[i]` sits between children[i] and children[i + 1]. */
 export type Group = { kind: 'group'; id: string; not: boolean; children: Item[]; joins: Join[] };
 export type Item = Leaf | Group;
@@ -65,7 +66,7 @@ function seqText(g: Group): string {
 function itemText(i: Item): string {
   let core: string;
   if (i.kind === 'leaf') {
-    if (!i.text.trim()) return '';
+    if (i.off || !i.text.trim()) return '';
     core = i.tf === 'mixed' ? i.text : joinRowTf(i.tf, i.text);
   } else {
     core = seqText(i);

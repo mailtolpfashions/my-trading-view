@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDown, ArrowUp, Copy, FolderPlus, Plus, Search, Type, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ClipboardCopy, Copy, FolderPlus, Plus, Search, Type, X } from 'lucide-react';
 import { parseFormula, type Tf } from '@mtv/rules';
 import { OPS, addTo, duplicateItem, fromComparison, group, leaf, mapItem, moveItem, reading, setAllJoins, setJoin, toComparison, type Comparison, type Group, type Item, type Join, type Leaf, type Op } from '@/lib/builder';
 import { TF_LABEL, type Meta, type Param } from '@/lib/screener';
@@ -15,7 +15,7 @@ const icon = 'grid h-8 w-8 shrink-0 place-items-center rounded-[8px] text-muted 
 type Ctx = { meta: Meta | null; screenTf: Tf; change: (root: Group, key?: string) => void; root: Group; rootLabel: string };
 
 /** Groups of conditions, nested as deep as needed. `change(next, key)`: edits with the same key merge into one undo step. */
-export function TreeBuilder({ root, meta, screenTf, onChange, rootLabel = 'Stocks must match' }: { root: Group; meta: Meta | null; screenTf: Tf; onChange: (root: Group, key?: string) => void; rootLabel?: string }) {
+export function TreeBuilder({ root, meta, screenTf, onChange, rootLabel = 'Stock' }: { root: Group; meta: Meta | null; screenTf: Tf; onChange: (root: Group, key?: string) => void; rootLabel?: string }) {
   return <GroupView g={root} isRoot ctx={{ meta, screenTf, change: onChange, root, rootLabel }} />;
 }
 
@@ -25,16 +25,16 @@ function GroupView({ g, isRoot, ctx, first, last }: { g: Group; isRoot?: boolean
     <div className={isRoot ? 'grid gap-3' : 'grid gap-3 rounded-[14px] border border-line-strong bg-raised/60 p-3'}>
       <div className="flex flex-wrap items-center gap-2">
         <NotToggle on={g.not} onChange={(not) => edit((x) => ({ ...x, not }))} />
-        <span className="text-[13px] text-ink-2">{isRoot ? ctx.rootLabel : 'Group (in brackets)'}</span>
-        {g.children.length > 2 && (
-          <span className="flex items-center gap-1 text-[12px] text-muted">
-            Set all:
-            {(['AND', 'OR'] as const).map((j) => (
-              <button key={j} type="button" onClick={() => ctx.change(setAllJoins(ctx.root, g.id, j))}
-                className="h-6 rounded-[6px] border border-line-strong px-1.5 font-semibold text-ink-2 hover:text-ink">{j}</button>
-            ))}
-          </span>
-        )}
+        <span className="flex flex-wrap items-center gap-1.5 text-[14px] text-ink-2">
+          {isRoot ? ctx.rootLabel : 'Group:'} passes
+          <select value={allJoins(g)} onChange={(e) => ctx.change(setAllJoins(ctx.root, g.id, e.target.value === 'any' ? 'OR' : 'AND'))} aria-label="All or any"
+            className="h-8 cursor-pointer rounded-[8px] border-0 bg-accent-soft px-2 pr-6 text-[14px] font-bold text-accent-deep focus:outline-none">
+            <option value="all">all</option>
+            <option value="any">any</option>
+            {allJoins(g) === 'mixed' && <option value="mixed">a mix (see the AND / OR below)</option>}
+          </select>
+          of the below {isRoot ? 'filters' : 'conditions'}:
+        </span>
         {!isRoot && (
           <div className="ml-auto flex items-center">
             <button type="button" className={icon} disabled={first} onClick={() => ctx.change(moveItem(ctx.root, g.id, -1))} aria-label="Move group up"><ArrowUp size={15} /></button>
@@ -55,7 +55,8 @@ function GroupView({ g, isRoot, ctx, first, last }: { g: Group; isRoot?: boolean
                   : <LeafView l={c} ctx={ctx} first={i === 0} last={i === g.children.length - 1} />}
               </div>
             </div>
-            {i < g.children.length - 1 && <JoinSelect value={g.joins[i] ?? 'AND'} onChange={(j) => ctx.change(setJoin(ctx.root, g.id, i, j))} />}
+            {/* Each AND / OR shows only when the group mixes them; otherwise "all" / "any" above says it. */}
+            {i < g.children.length - 1 && allJoins(g) === 'mixed' && <JoinSelect value={g.joins[i] ?? 'AND'} onChange={(j) => ctx.change(setJoin(ctx.root, g.id, i, j))} />}
           </li>
         ))}
       </ol>
@@ -76,6 +77,9 @@ function GroupView({ g, isRoot, ctx, first, last }: { g: Group; isRoot?: boolean
     </div>
   );
 }
+
+/** "all" when every join is AND, "any" when every one is OR, otherwise "mixed". */
+const allJoins = (g: Group): 'all' | 'any' | 'mixed' => (g.joins.every((j) => j === 'AND') ? 'all' : g.joins.every((j) => j === 'OR') ? 'any' : 'mixed');
 
 /** The AND / OR between two rows. */
 function JoinSelect({ value, onChange }: { value: Join; onChange: (j: Join) => void }) {
@@ -111,13 +115,13 @@ function LeafView({ l, ctx, first, last }: { l: Leaf; ctx: Ctx; first: boolean; 
   const bad = p && (!p.ok || p.type !== 'bool');
 
   return (
-    <div className="grid gap-1.5">
+    <div className={`grid gap-1.5 ${l.off ? 'opacity-45' : ''}`}>
       <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
         <NotToggle on={l.not} onChange={(not) => set({ not })} />
         <select value={mixed ? 'mixed' : l.tf ?? ''} disabled={mixed} aria-label="Timeframe of this condition"
           title={mixed ? 'This condition compares two timeframes; edit them in the text' : 'Timeframe for this condition'}
           onChange={(e) => set({ tf: (e.target.value || null) as Tf | null })}
-          className={`${inputCls} w-[160px] shrink-0 pr-7 ${l.tf && !mixed ? 'border-accent font-semibold text-accent-deep' : ''}`}>
+          className={`h-10 w-[150px] shrink-0 cursor-pointer rounded-[10px] border-0 bg-raised px-2.5 pr-7 text-[13.5px] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${l.tf && !mixed ? 'font-semibold text-accent-deep' : 'text-ink-2'}`}>
           <option value="">Scan ({TF_LABEL[ctx.screenTf]})</option>
           <TimeframeOptions />
           {mixed && <option value="mixed">Mixed</option>}
@@ -126,6 +130,11 @@ function LeafView({ l, ctx, first, last }: { l: Leaf; ctx: Ctx; first: boolean; 
           ? <ComparisonEditor value={cmp} meta={ctx.meta} onChange={(c, part) => set({ text: fromComparison(c) }, `${l.id}:${part}`)} />
           : <LeafText value={l.text} bad={!!bad} onChange={(text) => set({ text }, `${l.id}:text`)} />}
         <div className="flex shrink-0 items-center">
+          <button type="button" role="switch" aria-checked={!l.off} onClick={() => set({ off: !l.off })} title={l.off ? 'Switched off: not part of the scan. Click to switch on' : 'On: click to switch off without deleting'}
+            className={`relative mx-1 h-5 w-9 shrink-0 rounded-full transition-colors ${l.off ? 'bg-line-strong' : 'bg-up'}`}>
+            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${l.off ? 'left-0.5' : 'left-[18px]'}`} />
+          </button>
+          <button type="button" className={icon} onClick={() => void navigator.clipboard?.writeText(l.tf && l.tf !== 'mixed' ? `[${l.tf}] (${l.text})` : l.text)} aria-label="Copy this condition" title="Copy this condition as text"><ClipboardCopy size={15} /></button>
           <button type="button" className={icon} onClick={() => setMode(structured ? 'text' : 'fields')} disabled={!structured && !cmp && !!l.text.trim()} aria-pressed={!structured}
             title={structured ? 'Edit as formula text' : cmp ? 'Edit as value, operator, value' : 'This condition is not a single comparison'} aria-label="Switch editing mode">
             <Type size={15} />
@@ -169,7 +178,8 @@ function ComparisonEditor({ value, meta, onChange }: { value: Comparison | null;
   return (
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 lg:flex-nowrap">
       <Operand value={c.left} meta={meta} placeholder="Indicator or price, e.g. RSI(CLOSE, 14)" onChange={(left) => update({ left }, 'left')} />
-      <select value={c.op} onChange={(e) => update({ op: e.target.value as Op }, 'op')} aria-label="Operator" className={`${inputCls} w-[150px] shrink-0 pr-7`}>
+      <select value={c.op} onChange={(e) => update({ op: e.target.value as Op }, 'op')} aria-label="Operator"
+        className="h-10 w-[140px] shrink-0 cursor-pointer rounded-[10px] border-0 bg-accent-soft px-2.5 pr-7 text-[13.5px] font-bold text-accent-deep focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
         {OPS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
       <Operand value={c.right} meta={meta} placeholder="Value, e.g. 55 or EMA(CLOSE, 50)" onChange={(right) => update({ right }, 'right')} />

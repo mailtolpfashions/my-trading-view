@@ -22,11 +22,11 @@ import type { TicketStart } from '@/lib/tradelab';
 const NAV: { href: string; label: string; match: string[] }[] = [
   { href: '/today', label: 'Today', match: ['/today'] },
   { href: '/scanner', label: 'Scanner', match: ['/scanner'] },
-  { href: '/strategies', label: 'Strategies', match: ['/strategies'] },
+  { href: '/strategies', label: 'Backtest', match: ['/strategies'] },
   { href: '/options', label: 'Options', match: ['/options', '/backtest/options'] },
-  { href: '/tradelab', label: 'Trade lab', match: ['/tradelab'] },
   { href: '/chart', label: 'Charts', match: ['/chart'] },
   { href: '/tools', label: 'Tools', match: ['/tools', '/futures', '/market', '/research', '/practice', '/learn', '/watchlists', '/alerts', '/connect'] },
+  { href: '/tradelab', label: 'Trade lab', match: ['/tradelab'] },
 ];
 
 /** Pages laid out edge to edge (the rest keep a 1600px column until their own redesign). */
