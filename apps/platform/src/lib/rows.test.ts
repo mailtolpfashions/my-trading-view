@@ -27,8 +27,44 @@ describe('condition rows', () => {
   it('every example opens as rows', () => {
     for (const x of ROW_EXAMPLES) expect(formulaToRows(x.formula), x.label).not.toBeNull();
   });
+  it('reads candles-ago values and any multiplier, and writes them back the same', () => {
+    for (const f of [
+      'RSI(CLOSE, 14)[1] < 30 AND CLOSE > CLOSE[1]',
+      'CLOSE[1] < SMA(CLOSE, 20)[1] AND CLOSE > SMA(CLOSE, 20)',
+      'SUPERTREND_DIR(10, 3) = 1 AND SUPERTREND_DIR(10, 3)[1] = -1',
+      'CLOSE >= 0.98 * [D] HIGHEST(HIGH, 252)[1]',
+      'CLOSE > OR_HIGH(15) AND RVOL_CUM(20) > 1.5',
+    ]) {
+      const rows = formulaToRows(f);
+      expect(rows, f).not.toBeNull();
+      expect(rowsToFormula(rows!), f).toBe(parseFormula(f).ok ? (parseFormula(f) as { formula: string }).formula : f);
+    }
+    const r = formulaToRows('RSI(CLOSE, 14)[1] < 30')!;
+    expect(r[0].left).toMatchObject({ ind: 'rsi', p: [14], ago: 1 });
+    expect(rowsWords(r)).toBe('RSI 14 1 candle ago is less than 30');
+    // a multiplier written after the value reads the same
+    expect(formulaToRows('CLOSE >= HIGHEST(HIGH, 252) * 0.98')).toBeNull(); // no [1]: not the 52-week-high row, stays a formula
+    expect(formulaToRows('VOLUME > SMA(VOLUME, 20) * 1.7')![0].right).toMatchObject({ ind: 'volsma', mult: 1.7 });
+  });
   it('leaves rules the rows cannot show to the formula view', () => {
     expect(formulaToRows('HAMMER AND CLOSE > OPEN')).toBeNull();
     expect(formulaToRows('')).toEqual([]);
+  });
+});
+
+describe('Backtest templates and Scanner presets', () => {
+  it('every Backtest template opens as rows (entry and exit)', async () => {
+    const { TEMPLATES } = await import('./strategy');
+    for (const t of TEMPLATES) {
+      expect(formulaToRows(t.patch.entry ?? ''), `${t.id} entry`).not.toBeNull();
+      if (t.patch.exit) expect(formulaToRows(t.patch.exit), `${t.id} exit`).not.toBeNull();
+    }
+  });
+  it('a scan handed to Backtest keeps its rule, timeframe and stocks', async () => {
+    const { strategyFromScan } = await import('./strategy');
+    const d = strategyFromScan({ name: 'ORB', formula: 'CLOSE > OR_HIGH(15)', tf: '5m', universe: { kind: 'index', name: 'NIFTY 50' } });
+    expect(d.strategy).toMatchObject({ tf: '5m', entry: 'CLOSE > OR_HIGH(15)', intraday: { squareOff: '15:00' }, stop: { kind: 'pct', value: 1 } });
+    expect(d.universe).toEqual({ kind: 'index', name: 'NIFTY 50' });
+    expect(strategyFromScan({ name: 'x', formula: 'CLOSE > 1', tf: 'D', universe: { kind: 'index', name: 'NIFTY 50' } }).strategy.intraday).toBeUndefined();
   });
 });

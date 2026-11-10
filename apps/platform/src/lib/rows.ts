@@ -7,7 +7,8 @@
 import { parseFormula, print, type Node, type Tf } from '@mtv/rules';
 
 /** A value a row compares: an indicator (with its settings) on a timeframe ('' = the main one), or a number. */
-export type Operand = { tf: string; ind: string; p: number[]; num?: number; mult?: number };
+/** `ago`: the value N candles back (on its timeframe). `mult`: any multiplier (2 × average volume, 0.98 × high). */
+export type Operand = { tf: string; ind: string; p: number[]; num?: number; mult?: number; ago?: number };
 export type RowOp = '>' | '<' | '>=' | '<=' | '=' | 'xup' | 'xdn';
 /** `join`: how the NEXT row connects to this one. `on`: false = kept on screen, left out of the rule. */
 export type CondRow = { id: string; left: Operand; op: RowOp; right: Operand; join: 'AND' | 'OR' | 'NOT'; on: boolean };
@@ -24,18 +25,37 @@ export const INDICATORS: Ind[] = [
   { id: 'plow', group: 'Price', label: () => 'Previous low', tpl: 'LOW[1]', presets: [[]] },
   { id: 'chg', group: 'Price', label: () => '% change from previous candle', tpl: 'CHANGE_PCT(CLOSE, 1)', presets: [[]] },
   { id: 'vwap', group: 'Price', label: () => 'VWAP', tpl: 'VWAP', presets: [[]], intraday: true },
+  { id: 'gap', group: 'Price', label: () => 'Gap % at the open', tpl: 'GAP_PCT', presets: [[]] },
   { id: 'sma', group: 'Moving averages', label: (p) => `SMA ${p[0]}`, tpl: 'SMA(CLOSE, {0})', presets: [[5], [10], [20], [50], [100], [200]] },
   { id: 'ema', group: 'Moving averages', label: (p) => `EMA ${p[0]}`, tpl: 'EMA(CLOSE, {0})', presets: [[5], [9], [13], [20], [21], [50], [100], [200]] },
   { id: 'rsi', group: 'Momentum', label: (p) => `RSI ${p[0]}`, tpl: 'RSI(CLOSE, {0})', presets: [[7], [9], [14], [21]] },
   { id: 'macd', group: 'Momentum', label: () => 'MACD line', tpl: 'MACD_LINE(CLOSE, 12, 26, 9)', presets: [[]] },
   { id: 'macds', group: 'Momentum', label: () => 'MACD signal', tpl: 'MACD_SIGNAL(CLOSE, 12, 26, 9)', presets: [[]] },
-  { id: 'stoch', group: 'Momentum', label: (p) => `Stochastic ${p[0]}`, tpl: 'STOCH_K({0}, 3)', presets: [[14]] },
+  { id: 'macdh', group: 'Momentum', label: () => 'MACD histogram', tpl: 'MACD_HIST(CLOSE, 12, 26, 9)', presets: [[]] },
+  { id: 'stoch', group: 'Momentum', label: (p) => `Stochastic %K ${p[0]}${p[1] !== 1 ? ` (smoothed ${p[1]})` : ''}`, tpl: 'STOCH_K({0}, {1})', presets: [[14, 1], [14, 3]] },
+  { id: 'stochd', group: 'Momentum', label: (p) => `Stochastic %D ${p[0]}`, tpl: 'STOCH_D({0}, {1}, 3)', presets: [[14, 1]] },
+  { id: 'willr', group: 'Momentum', label: (p) => `Williams %R ${p[0]}`, tpl: 'WILLR({0})', presets: [[14]] },
+  { id: 'cci', group: 'Momentum', label: (p) => `CCI ${p[0]}`, tpl: 'CCI(HLC3, {0})', presets: [[20]] },
+  { id: 'mfi', group: 'Momentum', label: (p) => `MFI ${p[0]}`, tpl: 'MFI({0})', presets: [[14]] },
+  { id: 'roc', group: 'Momentum', label: (p) => `Rate of change ${p[0]} (%)`, tpl: 'ROC(CLOSE, {0})', presets: [[9]] },
   { id: 'adx', group: 'Trend', label: (p) => `ADX ${p[0]}`, tpl: 'ADX({0}, {0})', presets: [[14]] },
+  { id: 'pdi', group: 'Trend', label: (p) => `+DI ${p[0]}`, tpl: 'PLUS_DI({0})', presets: [[14]] },
+  { id: 'mdi', group: 'Trend', label: (p) => `−DI ${p[0]}`, tpl: 'MINUS_DI({0})', presets: [[14]] },
   { id: 'st', group: 'Trend', label: (p) => `Supertrend ${p[0]}, ${p[1]}`, tpl: 'SUPERTREND({0}, {1})', presets: [[7, 3], [10, 2], [10, 3], [14, 2], [21, 1]] },
+  { id: 'stdir', group: 'Trend', label: (p) => `Supertrend ${p[0]}, ${p[1]} direction (1 up, −1 down)`, tpl: 'SUPERTREND_DIR({0}, {1})', presets: [[7, 3], [10, 2], [10, 3], [14, 2], [21, 1]] },
+  { id: 'chop', group: 'Trend', label: (p) => `Choppiness ${p[0]}`, tpl: 'CHOP({0})', presets: [[14]] },
   { id: 'bbu', group: 'Trend', label: (p) => `Bollinger upper ${p[0]}`, tpl: 'BB_UPPER(CLOSE, {0}, 2)', presets: [[20]] },
+  { id: 'bbm', group: 'Trend', label: (p) => `Bollinger middle ${p[0]}`, tpl: 'BB_MIDDLE(CLOSE, {0}, 2)', presets: [[20]] },
   { id: 'bbl', group: 'Trend', label: (p) => `Bollinger lower ${p[0]}`, tpl: 'BB_LOWER(CLOSE, {0}, 2)', presets: [[20]] },
+  { id: 'atr', group: 'Volatility', label: (p) => `ATR ${p[0]}`, tpl: 'ATR({0})', presets: [[14]] },
+  { id: 'atrp', group: 'Volatility', label: (p) => `ATR ${p[0]} as % of price`, tpl: 'ATR_PCT({0})', presets: [[14]] },
+  { id: 'hv', group: 'Volatility', label: (p) => `Historical volatility ${p[0]} (%)`, tpl: 'HV({0})', presets: [[10], [20]] },
   { id: 'vol', group: 'Volume', label: () => 'Volume', tpl: 'VOLUME', presets: [[]] },
   { id: 'volsma', group: 'Volume', label: (p) => `Volume SMA ${p[0]}`, tpl: 'SMA(VOLUME, {0})', presets: [[5], [10], [20], [50]] },
+  { id: 'avgvol', group: 'Volume', label: (p) => `Average volume ${p[0]} (this candle included)`, tpl: 'AVG_VOLUME({0})', presets: [[20]] },
+  { id: 'rvoltod', group: 'Volume', label: (p) => `Relative volume at this time of day (vs last ${p[0]} days)`, tpl: 'RVOL_TOD({0})', presets: [[20]], intraday: true },
+  { id: 'rvol', group: 'Volume', label: (p) => `Relative volume (vs last ${p[0]} candles)`, tpl: 'RVOL({0})', presets: [[20]] },
+  { id: 'rvolc', group: 'Volume', label: (p) => `Relative volume so far today (vs last ${p[0]} days)`, tpl: 'RVOL_CUM({0})', presets: [[20]], intraday: true },
   { id: 'hh', group: 'Levels', label: (p) => (p[0] === 252 ? '52-week high (before today)' : `Highest high of last ${p[0]}`), tpl: 'HIGHEST(HIGH, {0})[1]', presets: [[5], [10], [20], [50], [252]] },
   { id: 'll', group: 'Levels', label: (p) => (p[0] === 252 ? '52-week low (before today)' : `Lowest low of last ${p[0]}`), tpl: 'LOWEST(LOW, {0})[1]', presets: [[5], [10], [20], [50], [252]] },
   { id: 'pp', group: 'Levels', label: () => 'Pivot P (daily)', tpl: 'PIVOT(CLASSIC, P, D)', presets: [[]] },
@@ -46,11 +66,12 @@ export const INDICATORS: Ind[] = [
   { id: 'orh', group: 'Levels', label: (p) => `Opening range high ${p[0]} min`, tpl: 'OR_HIGH({0})', presets: [[15], [30]], intraday: true },
   { id: 'orl', group: 'Levels', label: (p) => `Opening range low ${p[0]} min`, tpl: 'OR_LOW({0})', presets: [[15], [30]], intraday: true },
 ];
-export const IND_GROUPS = ['Price', 'Moving averages', 'Momentum', 'Trend', 'Volume', 'Levels'];
+export const IND_GROUPS = ['Price', 'Moving averages', 'Momentum', 'Trend', 'Volatility', 'Volume', 'Levels'];
 
 export const OPS: [RowOp, string][] = [['>', 'greater than'], ['<', 'less than'], ['>=', 'greater or equal'], ['<=', 'less or equal'], ['xup', 'crosses above'], ['xdn', 'crosses below'], ['=', 'equal to']];
 export const TFS: [string, string][] = [['1m', '1 min'], ['3m', '3 min'], ['5m', '5 min'], ['15m', '15 min'], ['30m', '30 min'], ['1h', '1 hour'], ['D', 'Daily'], ['W', 'Weekly'], ['M', 'Monthly']];
-export const MULTS = [0.5, 1, 1.5, 2, 2.5, 3, 4, 5];
+export const AGOS = [0, 1, 2, 3, 4, 5, 10, 20];
+export const agoLabel = (n: number) => (n ? `${n} candle${n === 1 ? '' : 's'} ago` : 'now');
 
 /** Example rules to start from (each one is plain rows: change anything after). */
 export const ROW_EXAMPLES: { label: string; formula: string; intraday?: boolean }[] = [
@@ -66,7 +87,9 @@ export const ROW_EXAMPLES: { label: string; formula: string; intraday?: boolean 
 
 export const indKey = (o: Operand) => (o.ind === 'num' ? 'num' : `${o.ind}:${o.p.join(',')}`);
 export const indOf = (id: string) => INDICATORS.find((i) => i.id === id);
-export const operandLabel = (o: Operand) => (o.ind === 'num' ? String(o.num ?? 0) : indOf(o.ind)?.label(o.p) ?? o.ind);
+/** Indicators that already look back (Previous close, Highest high of last N…) take no extra "candles ago". */
+export const canGoBack = (o: Pick<Operand, 'ind'>) => o.ind !== 'num' && !(indOf(o.ind)?.tpl ?? ']').endsWith(']');
+export const operandLabel =(o: Operand) => (o.ind === 'num' ? String(o.num ?? 0) : indOf(o.ind)?.label(o.p) ?? o.ind);
 
 let seq = 0;
 export const newRow = (): CondRow => ({ id: `r${++seq}`, left: { tf: '', ind: 'close', p: [] }, op: '>', right: { tf: '', ind: 'sma', p: [20] }, join: 'AND', on: true });
@@ -78,7 +101,8 @@ function operandText(o: Operand): string {
   if (o.ind === 'num') return String(o.num ?? 0);
   const i = indOf(o.ind);
   if (!i) return 'CLOSE';
-  const core = `${o.tf ? `[${o.tf}] ` : ''}${fill(i.tpl, o.p)}`;
+  const back = o.ago && canGoBack(o) ? `[${o.ago}]` : '';
+  const core = `${o.tf ? `[${o.tf}] ` : ''}${fill(i.tpl, o.p)}${back}`;
   return o.mult && o.mult !== 1 ? `${o.mult} * ${core}` : core;
 }
 export function rowText(r: CondRow): string {
@@ -110,9 +134,22 @@ const TEMPLATES = INDICATORS.map((i) => {
 function readOperand(n: Node): Operand | null {
   let mult: number | undefined, tf = '';
   if (n.t === 'bin' && n.op === '*' && n.a.t === 'num') { mult = n.a.v; n = n.b; }
+  else if (n.t === 'bin' && n.op === '*' && n.b.t === 'num') { mult = n.b.v; n = n.a; }
   if (n.t === 'num') return mult ? null : { tf: '', ind: 'num', p: [], num: n.v };
-  if (n.t === 'neg' && n.a.t === 'num') return { tf: '', ind: 'num', p: [], num: -n.a.v };
+  if (n.t === 'neg' && n.a.t === 'num') return mult ? null : { tf: '', ind: 'num', p: [], num: -n.a.v };
   if (n.t === 'tf') { tf = n.tf; n = n.a; }
+  const m = mult ? { mult } : {};
+  const whole = matchInd(n);
+  if (whole) return { tf, ...whole, ...m };
+  // An indicator N candles ago: RSI(CLOSE, 14)[1]
+  if (n.t === 'ref' && n.n > 0) {
+    const inner = matchInd(n.a);
+    if (inner && canGoBack(inner)) return { tf, ...inner, ago: n.n, ...m };
+  }
+  return null;
+}
+
+function matchInd(n: Node): { ind: string; p: number[] } | null {
   const text = print(n);
   for (const { i, re, keys } of TEMPLATES) {
     const m = re.exec(text);
@@ -120,7 +157,7 @@ function readOperand(n: Node): Operand | null {
     const p: number[] = [];
     keys.forEach((k, j) => { p[k] = Number(m[j + 1]); });
     if (i.id === 'adx' && p.length > 1 && p[0] !== p[1]) continue;
-    return { tf, ind: i.id, p: p.filter((x) => x != null), ...(mult ? { mult } : {}) };
+    return { ind: i.id, p: p.filter((x) => x != null) };
   }
   return null;
 }
@@ -164,7 +201,7 @@ export type { Tf };
 
 const OP_WORDS: Record<RowOp, string> = { '>': 'is greater than', '<': 'is less than', '>=': 'is at least', '<=': 'is at most', '=': 'equals', xup: 'crosses above', xdn: 'crosses below' };
 const TF_WORDS: Record<string, string> = Object.fromEntries(TFS);
-const operandWords = (o: Operand) => (o.ind === 'num' ? String(o.num ?? 0) : `${o.mult && o.mult !== 1 ? `${o.mult} × ` : ''}${operandLabel(o)}${o.tf ? ` (${TF_WORDS[o.tf] ?? o.tf})` : ''}`);
+const operandWords = (o: Operand) => (o.ind === 'num' ? String(o.num ?? 0) : `${o.mult && o.mult !== 1 ? `${o.mult} × ` : ''}${operandLabel(o)}${o.tf ? ` (${TF_WORDS[o.tf] ?? o.tf})` : ''}${o.ago ? ` ${agoLabel(o.ago)}` : ''}`);
 /** The rows in plain words: "Close crosses above SMA 20 (Daily) and RSI 14 is greater than 60". */
 export function rowsWords(rows: CondRow[]): string {
   const on = rows.filter((r) => r.on);

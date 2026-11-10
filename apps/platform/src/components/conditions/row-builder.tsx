@@ -5,11 +5,26 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Plus, X } from 'lucide-react';
-import { IND_GROUPS, INDICATORS, MULTS, OPS, ROW_EXAMPLES, TFS, formulaToRows, indKey, newRow, rowsToFormula, type CondRow, type Operand } from '@/lib/rows';
+import { AGOS, IND_GROUPS, INDICATORS, OPS, agoLabel, canGoBack, ROW_EXAMPLES, TFS, formulaToRows, indKey, newRow, rowsToFormula, type CondRow, type Operand } from '@/lib/rows';
 
 const SEL = 'h-10 cursor-pointer rounded-[10px] border border-line-strong bg-panel pl-2.5 pr-7 text-[13.5px] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-default disabled:opacity-40';
 const TF_WORD: Record<string, string> = { '1m': '1 min', '3m': '3 min', '5m': '5 min', '15m': '15 min', '30m': '30 min', '1h': '1 hour', D: 'Daily', W: 'Weekly', M: 'Monthly' };
 
+
+/** "× n": any positive number (2 = twice the average volume, 0.98 = within 2% below). Typing stays free; a blank or 0 is not sent. */
+function MultInput({ value, onChange }: { value: number; onChange: (m: number) => void }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => { if (Number(text) !== value) setText(String(value)); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <label className={`${SEL} flex w-[86px] cursor-text items-center gap-1 pr-2`} title="Times the second value: 2 = twice it, 0.98 = 2% below it">
+      <span className="text-muted">×</span>
+      <input type="number" step="any" min="0" value={text} aria-label="Times the second value"
+        onChange={(e) => { setText(e.target.value); const m = Number(e.target.value); if (e.target.value !== '' && m > 0) onChange(m); }}
+        onBlur={() => { if (!(Number(text) > 0)) { setText('1'); onChange(1); } }}
+        className="num w-full min-w-0 bg-transparent focus:outline-none" />
+    </label>
+  );
+}
 
 /**
  * Rows for `formula`; edits come back as a formula. Switched-off rows stay while editing (they are not in the formula,
@@ -45,7 +60,9 @@ export function RowBuilder({ formula, onChange, mainTf, intraday, examples = fal
           const v = e.target.value;
           if (v === 'num') return on({ tf: '', ind: 'num', p: [], num: o.num ?? 50 });
           const [id, ps] = v.split(':');
-          on({ tf: o.ind === 'num' ? '' : o.tf, ind: id, p: ps ? ps.split(',').map(Number) : [], mult: o.mult });
+          const next: Operand = { tf: o.ind === 'num' ? '' : o.tf, ind: id, p: ps ? ps.split(',').map(Number) : [], mult: o.mult };
+          if (o.ago && canGoBack(next)) next.ago = o.ago;
+          on(next);
         }}>
         {allowNumber && <option value="num">Number</option>}
         {!known && o.ind !== 'num' && <option value={key}>{INDICATORS.find((i) => i.id === o.ind)?.label(o.p) ?? key}</option>}
@@ -58,6 +75,17 @@ export function RowBuilder({ formula, onChange, mainTf, intraday, examples = fal
     );
   };
 
+  const agoSelect = (o: Operand, on: (o: Operand) => void, label: string) => {
+    if (!canGoBack(o)) return null;
+    const ago = o.ago ?? 0;
+    return (
+      <select value={ago} onChange={(e) => on({ ...o, ago: Number(e.target.value) || undefined })} aria-label={label}
+        title="The value now, or as it was some candles back (e.g. RSI 1 candle ago was below 30)" className={`${SEL} w-[124px] ${ago ? 'border-accent text-accent-deep' : 'text-ink-2'}`}>
+        {(AGOS.includes(ago) ? AGOS : [...AGOS, ago]).map((n) => <option key={n} value={n}>{agoLabel(n)}</option>)}
+      </select>
+    );
+  };
+
   return (
     <div className="grid gap-2">
       <p className="text-[12.5px] text-muted">Each row compares two values. The dropdown after a row says how the next row joins: <b>AND</b> (both must be true), <b>OR</b> (either one), <b>NOT</b> (and the next one must not be true).</p>
@@ -66,18 +94,16 @@ export function RowBuilder({ formula, onChange, mainTf, intraday, examples = fal
           <span className="num w-5 shrink-0 text-center text-[12.5px] font-bold text-muted">{i + 1}</span>
           {tfSelect(r.left, (tf) => set(i, { left: { ...r.left, tf } }), 'Time of the first value')}
           {indSelect(r.left, (left) => set(i, { left }), 'First value', false)}
+          {agoSelect(r.left, (left) => set(i, { left }), 'When: first value')}
           <select value={r.op} onChange={(e) => set(i, { op: e.target.value as CondRow['op'] })} aria-label="Compare" className={`${SEL} w-[150px] border-accent/50 bg-accent-soft font-bold text-accent-deep`}>
             {OPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
           {tfSelect(r.right, (tf) => set(i, { right: { ...r.right, tf } }), 'Time of the second value')}
           {indSelect(r.right, (right) => set(i, { right }), 'Second value', true)}
+          {agoSelect(r.right, (right) => set(i, { right }), 'When: second value')}
           {r.right.ind === 'num'
             ? <input type="number" step="any" value={r.right.num ?? 0} onChange={(e) => set(i, { right: { ...r.right, num: Number(e.target.value) } })} aria-label="Number" className={`${SEL} num w-[90px] pr-2`} />
-            : (
-              <select value={r.right.mult ?? 1} onChange={(e) => set(i, { right: { ...r.right, mult: Number(e.target.value) === 1 ? undefined : Number(e.target.value) } })} aria-label="Times" title="Times the second value (e.g. volume more than 2 × its average)" className={`${SEL} w-[78px]`}>
-                {MULTS.map((m) => <option key={m} value={m}>× {m}</option>)}
-              </select>
-            )}
+            : <MultInput value={r.right.mult ?? 1} onChange={(m) => set(i, { right: { ...r.right, mult: m === 1 ? undefined : m } })} />}
           {i < rows.length - 1
             ? (
               <select value={r.join} onChange={(e) => set(i, { join: e.target.value as CondRow['join'] })} aria-label="How the next row joins" className={`${SEL} w-[86px] font-bold ${r.join === 'AND' ? '' : 'border-accent text-accent-deep'}`}>

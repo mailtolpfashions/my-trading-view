@@ -6,7 +6,7 @@ import { AlertTriangle, Bell, ChevronDown, FilePlus2, Play, Save } from 'lucide-
 import { parseFormula, type Tf } from '@mtv/rules';
 import { FeedError, feed, showKept } from '@/lib/feed';
 import type { Meta } from '@/lib/screener';
-import { DEFAULT_INTRADAY, DEFAULT_STRATEGY, NEW_DOC, isIntradayTf, fromSaved, strategyApi, type BacktestResult, type EquityStrategy, type SavedStrategy, type StrategyDoc } from '@/lib/strategy';
+import { DEFAULT_INTRADAY, DEFAULT_STRATEGY, NEW_DOC, STRATEGY_HANDOFF_KEY, isIntradayTf, fromSaved, strategyApi, type BacktestResult, type EquityStrategy, type SavedStrategy, type StrategyDoc } from '@/lib/strategy';
 import { userApi, type SavedScreen, type Watchlist } from '@/lib/user';
 import { confirmDialog } from '../dialog';
 import { InfoTip } from '../info-tip';
@@ -44,6 +44,7 @@ export function StrategyWorkspace() {
   const { watch } = useShell(); // the side panel's watchlist, for "My watchlist"
   /** The strategy tiles under the editor: open until a backtest runs or one is opened. */
   const [galleryOpen, setGalleryOpen] = useState(true);
+  const [incoming, setIncoming] = useState<StrategyDoc | null>(null);
   const scrollTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
   const refresh = useCallback(() => { strategyApi.list().then(setList, (e: Error) => setError(e.message)); }, []);
@@ -52,6 +53,11 @@ export function StrategyWorkspace() {
       const d = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null') as StrategyDoc | null;
       if (d?.strategy) { setDoc({ ...NEW_DOC, ...d, strategy: { ...DEFAULT_STRATEGY, ...d.strategy } }); setBase(localStorage.getItem(BASE_KEY)); }
     } catch { /* a broken draft is ignored */ }
+    try {
+      const h = JSON.parse(localStorage.getItem(STRATEGY_HANDOFF_KEY) ?? 'null') as StrategyDoc | null;
+      localStorage.removeItem(STRATEGY_HANDOFF_KEY);
+      if (h?.strategy?.entry) setIncoming(h);
+    } catch { /* none */ }
     showKept(['screener/meta', setMeta], ['user/strategies', setList], ['user/screens', setScreens], ['user/watchlists', setWatchlists]);
     feed<Meta>('screener/meta').then(setMeta, (e: Error) => setError(e.message));
     userApi.screens().then(setScreens, () => {});
@@ -77,6 +83,14 @@ export function StrategyWorkspace() {
     setBase(b);
     try { localStorage.setItem(BASE_KEY, b); } catch { /* storage blocked */ }
   };
+
+  // A scan sent from the Scanner opens like a template (asking first if unsaved work would be lost). A saved
+  // strategy's draft waits for the list, so an unchanged one is not mistaken for unsaved work.
+  useEffect(() => {
+    if (!incoming || (doc.id && saved == null && !list)) return;
+    setIncoming(null);
+    leaving(() => { open(incoming, null); setGalleryOpen(false); });
+  }, [incoming, list, saved]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const entryOk = (() => { const p = s.entry.trim() ? parseFormula(s.entry) : null; return !!p?.ok && p.type === 'bool'; })();
   const exitOk = (() => { if (!s.exit?.trim()) return true; const p = parseFormula(s.exit); return p.ok && p.type === 'bool'; })();

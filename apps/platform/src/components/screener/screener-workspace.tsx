@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
-import { Bell, ChevronDown, Eraser, FilePlus2, Play, Redo2, Save, SlidersHorizontal, Undo2 } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Bell, ChevronDown, Eraser, FilePlus2, FlaskConical, Play, Redo2, Save, SlidersHorizontal, Undo2 } from 'lucide-react';
 import { isIntraday, parseFormula } from '@mtv/rules';
 import { fromTree, group, toTree, type Group } from '@/lib/builder';
 import { FeedError, feed, showKept } from '@/lib/feed';
@@ -23,6 +23,7 @@ import { TreeBuilder } from './tree-builder';
 import { StockCountText, UniverseFilterFields, UniverseSelect, filterCount, isMyWatchlist, useStockCount } from './universe-picker';
 import { useShell } from '../app/shell-context';
 import { TimeframeOptions } from '../timeframe-select';
+import { STRATEGY_HANDOFF_KEY, strategyFromScan } from '@/lib/strategy';
 
 const DRAFT_KEY = SCAN_DRAFT_KEY;
 /** What an unsaved scan looked like when it was opened (a ready-made scan or an empty one). */
@@ -43,6 +44,7 @@ const PILL = 'inline-flex h-9 items-center gap-1.5 rounded-full border border-li
  */
 export function ScreenerWorkspace() {
   const params = useSearchParams();
+  const router = useRouter();
   const [meta, setMeta] = useState<Meta | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [screen, setScreen] = useState<Screen>(NEW_SCREEN);
@@ -329,6 +331,8 @@ export function ScreenerWorkspace() {
               {dirty && <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-semibold text-accent-deep">Unsaved</span>}
               <Button className="h-9" onClick={() => save(false)} disabled={!dirty && !!screen.id} title={screen.id ? 'Save changes to this scan' : 'Save to My scans'}><Save size={15} /> Save</Button>
               {screen.id && <Button variant="ghost" className="h-9" onClick={() => save(true)}>Save as new</Button>}
+              <Button variant="ghost" className="h-9" disabled={!(parsed?.ok && parsed.type === 'bool')} title="Open this rule in Backtest with the same timeframe and stocks"
+                onClick={() => { try { localStorage.setItem(STRATEGY_HANDOFF_KEY, JSON.stringify(strategyFromScan(screen))); } catch { /* storage blocked */ } router.push('/strategies'); }}><FlaskConical size={15} /> Backtest this</Button>
               {screen.id && <Link href={`/alerts?screen=${screen.id}`} className="inline-flex h-9 items-center gap-1.5 rounded-[12px] px-3 text-[14px] font-semibold text-ink-2 hover:bg-raised hover:text-ink"><Bell size={15} /> Alert me</Link>}
               <Button variant="ghost" className="h-9" onClick={() => leaving(() => load({ ...NEW_SCREEN, formula: '', tf: modeTf }, null))} title="Start an empty scan on NIFTY 50"><FilePlus2 size={15} /> New</Button>
             </span>
@@ -352,16 +356,16 @@ export function ScreenerWorkspace() {
               <div className="flex flex-wrap items-center gap-3">
                 <input value={screen.name} onChange={(e) => update({ name: e.target.value })} aria-label="Scan name" title="Scan name"
                   className={`${inputCls} h-9 min-w-[12rem] text-[14px] font-semibold`} />
-                <Segmented label="Editor" value={view === 'builder' && rowsFit ? 'builder' : 'formula'} onChange={(v) => setView(v === 'builder' && !rowsFit ? 'formula' : v)}
+                <Segmented label="Editor" value={view} onChange={setView}
                   options={[{ value: 'builder', label: 'Rows', title: rowsFit ? undefined : 'This scan has parts the rows cannot show' }, { value: 'formula', label: 'Formula (advanced)' }]} />
-                {view === 'builder' && rowsFit && (
+                {view === 'builder' && (
                   <Button variant="ghost" className="ml-auto h-9 px-2.5" onClick={() => update({ formula: '' })} disabled={!screen.formula.trim()} title="Remove every condition"><Eraser size={16} /> Clear all</Button>
                 )}
               </div>
+              {view === 'builder' && !rowsFit && <p className="rounded-[10px] bg-panel px-3 py-2 text-[13px] text-ink-2">This scan uses parts the rows can&apos;t show (candle patterns, rising/falling, maths like ABS or ×…), so it stays a formula. Edit it below, or clear it to start with rows.</p>}
               {view === 'builder' && rowsFit
                 ? <RowBuilder formula={screen.formula} onChange={(formula) => update({ formula })} mainTf={screen.tf} intraday={isIntraday(screen.tf)} examples />
                 : <FormulaEditor value={screen.formula} onChange={(formula) => update({ formula })} meta={meta} />}
-              {view === 'builder' && !rowsFit && <p className="text-[12.5px] text-muted">This scan uses parts the rows can&apos;t show (candle patterns, time of day…), so it is shown as a formula.</p>}
             </div>
           )}
           {error && <p role="alert" className="rounded-[12px] bg-down-soft px-3 py-2 text-[13.5px] text-down">{error}</p>}

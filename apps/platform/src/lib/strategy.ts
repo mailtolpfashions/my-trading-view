@@ -2,6 +2,7 @@
 // and the data service calls.
 
 import type { Candle } from '@mtv/shared';
+import { PRESETS } from '@mtv/rules';
 import { feed } from './feed';
 import type { UniverseSpec } from './screener';
 
@@ -40,30 +41,53 @@ export const DEFAULT_STRATEGY: EquityStrategy = {
   slippagePct: 0.05, broker: 'zerodha', charges: true, from: '2023-01-01', to: today(), riskFreePct: 6,
 };
 
-export const NEW_DOC: StrategyDoc = { name: 'Untitled strategy', description: '', style: 'swing', strategy: DEFAULT_STRATEGY, universe: { kind: 'index', name: 'NIFTY 100' } };
+/** A scan handed to Backtest ("Backtest this" on the Scanner): read once by the Backtest page, then removed. */
+export const STRATEGY_HANDOFF_KEY = 'platform.strategy.fromScan';
+
+/**
+ * A scan as a strategy: the same rule as the entry, timeframe and stocks. Stop and target are the defaults
+ * (2% / 5% daily; 1% / 2% intraday, squared off in the owner's window). The scan's extra filters (price, volume…)
+ * do not carry over: Backtest has only the minimum traded value.
+ */
+export function strategyFromScan(scan: { name: string; formula: string; tf: string; universe: UniverseSpec }): StrategyDoc {
+  const intraday = isIntradayTf(scan.tf);
+  return {
+    name: scan.name, description: `From the scan "${scan.name}". Stop and target are defaults: set your own before trusting the result.`,
+    style: intraday ? 'intraday' : 'swing', universe: scan.universe,
+    strategy: {
+      ...DEFAULT_STRATEGY, tf: scan.tf as StrategyTf, entry: scan.formula, exit: '',
+      ...(intraday ? { intraday: DEFAULT_INTRADAY, stop: { kind: 'pct', value: 1 }, target: { kind: 'pct', value: 2 }, from: yearAgo() } : {}),
+    },
+  };
+}
+
+export const NEW_DOC: StrategyDoc ={ name: 'Untitled strategy', description: '', style: 'swing', strategy: DEFAULT_STRATEGY, universe: { kind: 'index', name: 'NIFTY 100' } };
 
 export type Template = { id: string; name: string; about: string; style: 'intraday' | 'swing' | 'positional'; patch: Partial<EquityStrategy> };
+
+/** A Scanner preset's rule: templates that share a setup with a scan build on it, so the two always mean the same thing. */
+const scan = (id: string) => { const p = PRESETS.find((x) => x.id === id); if (!p) throw new Error(`No scan preset ${id}`); return p.formula; };
 
 /** Ready-made equity strategies (spec 11). Each one is an ordinary strategy: open it, read it, change it, test it. */
 export const TEMPLATES: Template[] = [
   { id: 'ema-cross-rsi', name: 'EMA crossover with RSI', style: 'swing', about: 'Buy when EMA 20 crosses above EMA 50 with RSI(14) above 55 on 1.5× volume; 2% stop, 5% target, out when the EMAs cross back.',
     patch: { entry: 'CROSSOVER(EMA(CLOSE, 20), EMA(CLOSE, 50)) AND RSI(CLOSE, 14) > 55 AND VOLUME > 1.5 * AVG_VOLUME(20)[1]', exit: 'CROSSUNDER(EMA(CLOSE, 20), EMA(CLOSE, 50))', stop: { kind: 'pct', value: 2 }, target: { kind: 'pct', value: 5 } } },
-  { id: 'rsi-reversal', name: 'RSI reversal', style: 'swing', about: 'Buy when RSI(14) climbs back above 30 while the stock is above its 200-day average; sell when RSI passes 60. ATR stop.',
-    patch: { entry: 'CROSSOVER(RSI(CLOSE, 14), 30) AND CLOSE > SMA(CLOSE, 200)', exit: 'RSI(CLOSE, 14) > 60', stop: { kind: 'atr', mult: 2, length: 14 }, target: { kind: 'none' } } },
-  { id: 'macd-momentum', name: 'MACD momentum', style: 'swing', about: 'Buy on a MACD signal crossover above the zero line; sell on the reverse crossover. 3% stop.',
-    patch: { entry: 'CROSSOVER(MACD_LINE(CLOSE, 12, 26, 9), MACD_SIGNAL(CLOSE, 12, 26, 9)) AND MACD_LINE(CLOSE, 12, 26, 9) > 0', exit: 'CROSSUNDER(MACD_LINE(CLOSE, 12, 26, 9), MACD_SIGNAL(CLOSE, 12, 26, 9))', stop: { kind: 'pct', value: 3 }, target: { kind: 'none' } } },
-  { id: 'supertrend', name: 'Supertrend trend following', style: 'positional', about: 'Buy when Supertrend (10, 3) turns bullish with ADX above 20; the Supertrend line is the trailing stop.',
-    patch: { entry: 'SUPERTREND_DIR(10, 3) = 1 AND SUPERTREND_DIR(10, 3)[1] = -1 AND ADX(14, 14) > 20', exit: '', stop: { kind: 'formula', formula: 'SUPERTREND(10, 3)' }, target: { kind: 'none' } } },
+  { id: 'rsi-reversal', name: 'RSI leaves oversold, above SMA 200', style: 'swing', about: 'The "RSI leaves oversold" scan (RSI 14 back above 30) while the stock is above its 200-day average; sell when RSI passes 60. ATR stop.',
+    patch: { entry: `${scan('rsi-oversold-exit')} AND CLOSE > SMA(CLOSE, 200)`, exit: 'RSI(CLOSE, 14) > 60', stop: { kind: 'atr', mult: 2, length: 14 }, target: { kind: 'none' } } },
+  { id: 'macd-momentum', name: 'MACD bullish crossover above zero', style: 'swing', about: 'The "MACD bullish crossover" scan, taken only above the zero line; sell on the reverse crossover. 3% stop.',
+    patch: { entry: `${scan('macd-cross')} AND MACD_LINE(CLOSE, 12, 26, 9) > 0`, exit: 'CROSSUNDER(MACD_LINE(CLOSE, 12, 26, 9), MACD_SIGNAL(CLOSE, 12, 26, 9))', stop: { kind: 'pct', value: 3 }, target: { kind: 'none' } } },
+  { id: 'supertrend', name: 'Supertrend turns bullish, ADX above 20', style: 'positional', about: 'The "Supertrend turns bullish" scan (10, 3) with ADX above 20; the Supertrend line is the trailing stop.',
+    patch: { entry: `${scan('supertrend-flip')} AND ADX(14, 14) > 20`, exit: '', stop: { kind: 'formula', formula: 'SUPERTREND(10, 3)' }, target: { kind: 'none' } } },
   { id: 'bollinger-reversal', name: 'Bollinger Band reversal', style: 'swing', about: 'Buy when the close crosses back above the lower band (20, 2); sell at the middle band. 4% stop.',
     patch: { entry: 'CROSSOVER(CLOSE, BB_LOWER(CLOSE, 20, 2))', exit: 'CLOSE > BB_MIDDLE(CLOSE, 20, 2)', stop: { kind: 'pct', value: 4 }, target: { kind: 'none' } } },
-  { id: '52w-breakout', name: '52-week high breakout', style: 'positional', about: 'Buy a close above the previous 252-day high on 2× volume; trail 10% below the highest high.',
-    patch: { entry: 'CLOSE > HIGHEST(HIGH, 252)[1] AND RVOL(20) > 2', exit: '', stop: { kind: 'pct', value: 8 }, target: { kind: 'none' }, trail: { kind: 'pct', value: 10 } } },
+  { id: '52w-breakout', name: '52-week high breakout on 2× volume', style: 'positional', about: 'The "52-week high breakout" scan (a close above the previous 252-day high) on 2× volume; trail 10% below the highest high.',
+    patch: { entry: `${scan('52w-high-breakout')} AND RVOL(20) > 2`, exit: '', stop: { kind: 'pct', value: 8 }, target: { kind: 'none' }, trail: { kind: 'pct', value: 10 } } },
   { id: 'st-rsi-15m', name: 'Supertrend + RSI, 15 minutes', style: 'intraday', about: 'Intraday, 15-minute candles from 09:20: buy while Supertrend (10, 3) is bullish and RSI (14) is above 70; the stop follows the Supertrend line; squared off at 15:15.',
     patch: { tf: '15m', intraday: { firstEntry: '09:20', lastEntry: '15:00', squareOff: '15:15' }, entry: 'SUPERTREND_DIR(10, 3) = 1 AND RSI(CLOSE, 14) > 70', exit: '', stop: { kind: 'formula', formula: 'SUPERTREND(10, 3)' }, target: { kind: 'none' }, trail: { kind: 'none' }, maxOpen: 1, pyramid: 1, cooldownBars: 0, sizing: { mode: 'percent', pct: 100 }, from: yearAgo() } },
-  { id: 'vwap-breakout', name: 'VWAP breakout', style: 'intraday', about: 'Intraday, 5-minute bars: buy a close back above VWAP on 1.5× the usual volume for the time of day; out below VWAP. 1% stop, 2% target, squared off at 15:15.',
-    patch: { tf: '5m', entry: 'CROSSOVER(CLOSE, VWAP) AND RVOL_TOD(20) > 1.5', exit: 'CROSSUNDER(CLOSE, VWAP)', stop: { kind: 'pct', value: 1 }, target: { kind: 'pct', value: 2 }, maxOpen: 5, sizing: { mode: 'percent', pct: 20 }, minAvgValueCr: 20, from: yearAgo() } },
-  { id: 'orb', name: 'Opening range breakout', style: 'intraday', about: 'Intraday, 5-minute bars: buy a close above the first 15 minutes\' high on busier-than-usual volume; stop at the range low, target 2× the risk, squared off at 15:15.',
-    patch: { tf: '5m', entry: 'CLOSE > OR_HIGH(15) AND RVOL_CUM(20) > 1.5', exit: '', stop: { kind: 'formula', formula: 'OR_LOW(15)' }, target: { kind: 'rr', value: 2 }, maxOpen: 5, pyramid: 1, cooldownBars: 100, sizing: { mode: 'percent', pct: 20 }, minAvgValueCr: 20, from: yearAgo() } },
+  { id: 'vwap-breakout', name: 'Crosses above VWAP on volume', style: 'intraday', about: 'Intraday, 5-minute bars: the "Crosses above VWAP" scan (back above VWAP, above the day\'s open) on 1.5× the usual volume for the time of day; out below VWAP. 1% stop, 2% target, squared off at 15:15.',
+    patch: { tf: '5m', entry: `${scan('vwap-reclaim')} AND RVOL_TOD(20) > 1.5`, exit: 'CROSSUNDER(CLOSE, VWAP)', stop: { kind: 'pct', value: 1 }, target: { kind: 'pct', value: 2 }, maxOpen: 5, sizing: { mode: 'percent', pct: 20 }, minAvgValueCr: 20, from: yearAgo() } },
+  { id: 'orb', name: 'Opening range breakout (15 min)', style: 'intraday', about: 'Intraday, 5-minute bars: the scan of the same name (a close above the first 15 minutes\' high on busier-than-usual volume); stop at the range low, target 2× the risk, squared off at 15:15.',
+    patch: { tf: '5m', entry: scan('orb-15-breakout'), exit: '', stop: { kind: 'formula', formula: 'OR_LOW(15)' }, target: { kind: 'rr', value: 2 }, maxOpen: 5, pyramid: 1, cooldownBars: 100, sizing: { mode: 'percent', pct: 20 }, minAvgValueCr: 20, from: yearAgo() } },
 ];
 
 // ---- results ----
