@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ExternalLink, Play } from 'lucide-react';
-import { chartHref } from '@/components/app/shell-context';
+import { chartHref, useShell } from '@/components/app/shell-context';
 import { UniverseSelect } from '@/components/screener/universe-picker';
 import { FeedError, feed } from '@/lib/feed';
 import { fmt } from '@/lib/format';
@@ -21,6 +21,7 @@ type Pick = { name: string; formula: string; tf: Screen['tf']; candle: Screen['c
 let memory: { key: string; universe: UniverseSpec; result: ScreenResult | null } | null = null;
 
 export function ScanPanel({ watch, onOpen }: { watch: string[]; onOpen?: () => void }) {
+  const { openTicket } = useShell();
   const [meta, setMeta] = useState<Meta | null>(null);
   const [screens, setScreens] = useState<SavedScreen[]>([]);
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
@@ -90,14 +91,16 @@ export function ScanPanel({ watch, onOpen }: { watch: string[]; onOpen?: () => v
       {result && <p className="px-4 pt-2 text-[12px] text-muted"><b className="text-ink">{result.matches}</b> of {result.scanned.toLocaleString('en-IN')} match</p>}
       <ul ref={list} className="min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
         {result?.rows.map((r) => (
-          <li key={r.symbol}>
-            <Link href={chartHref(r.symbol)} onClick={onOpen} className="flex items-center gap-2 rounded-[10px] px-2 py-2 hover:bg-raised">
+          <li key={r.symbol} className="group flex items-center gap-1">
+            <Link href={chartHref(r.symbol)} onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-2 rounded-[10px] px-2 py-2 hover:bg-raised">
               <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{r.symbol}</span>
               <span className="num text-right leading-tight">
                 <span className="block text-[13px] font-semibold">{fmt(r.close)}</span>
                 <span className={`block text-[11.5px] font-semibold ${r.changePct == null ? 'text-ink-2' : r.changePct >= 0 ? 'text-up' : 'text-down'}`}>{r.changePct == null ? '' : `${r.changePct > 0 ? '+' : ''}${r.changePct.toFixed(2)}%`}</span>
               </span>
             </Link>
+            <button type="button" onClick={() => { onOpen?.(); openTicket({ symbol: r.symbol }); }} aria-label={`Trade ${r.symbol} in Trade lab`} title="Trade (paper)"
+              className="h-7 shrink-0 rounded-[8px] px-1.5 text-[11px] font-bold text-accent-deep opacity-0 hover:bg-accent-soft focus:opacity-100 group-hover:opacity-100">Trade</button>
           </li>
         ))}
         {result && !result.rows.length && <li className="px-2 py-6 text-center text-[13px] text-muted">No stock matches right now.</li>}

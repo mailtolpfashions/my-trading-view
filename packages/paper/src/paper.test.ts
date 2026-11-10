@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyRate, brokerById, buildLedger, computeCharges, computeFuturesCharges, computeOptionCharges, evaluate, exerciseStt, expirySettlementCharges, formatRupees, funds, toPaise, unrealisedPaise, validateOrder, type Trade } from './index';
+import { applyRate, brokerById, buildLedger, computeCharges, computeFuturesCharges, computeOptionCharges, evaluate, evaluateBook, exerciseStt, expirySettlementCharges, formatRupees, funds, toPaise, unrealisedPaise, validateOrder, type Trade } from './index';
 
 describe('money', () => {
   it('parses rupees to integer paise without float error', () => {
@@ -160,6 +160,12 @@ describe('ledger (FIFO, exact paise)', () => {
   it('rejects corrupt trades instead of producing wrong balances', () => {
     expect(() => buildLedger([trade('1', 'BUY', 0, 100)], 0)).toThrow(/Corrupt/);
   });
+  it('settles an option that expires worthless at ₹0', () => {
+    const l = buildLedger([trade('1', 'BUY', 75, 20, { symbol: 'NIFTY26N1724500CE', product: 'NRML' }), { ...trade('2', 'SELL', 75, 0, { symbol: 'NIFTY26N1724500CE', product: 'NRML' }), pricePaise: 0 }], 0);
+    expect(l.realisedPaise).toBe(-75 * 20_00);
+    expect(l.positions[0].qty).toBe(0);
+    expect(() => buildLedger([{ ...trade('1', 'BUY', 1, 1), pricePaise: -1 }], 0)).toThrow(/Corrupt/);
+  });
 });
 
 describe('funds (1× margin)', () => {
@@ -204,5 +210,27 @@ describe('matching', () => {
     expect(validateOrder({ side: 'BUY', type: 'SLM', qty: 1, triggerPaise: p(99) }, p(100))).toMatch(/above/);
     expect(validateOrder({ side: 'SELL', type: 'SL', qty: 1, triggerPaise: p(95), pricePaise: p(96) }, p(100))).toMatch(/at or below/);
     expect(validateOrder({ side: 'BUY', type: 'LIMIT', qty: 10, pricePaise: p(99.5) }, p(100))).toBeNull();
+  });
+});
+
+describe('Trade lab fills on the live order book', () => {
+  const q = { ltpPaise: 100_00, bidPaise: 99_50, askPaise: 100_50 };
+  it('a market buy pays the ask and a sell gets the bid', () => {
+    expect(evaluateBook({ side: 'BUY', type: 'MARKET', triggered: false }, q, true)).toMatchObject({ action: 'fill', pricePaise: 100_50, fromBook: true });
+    expect(evaluateBook({ side: 'SELL', type: 'MARKET', triggered: false }, q, true)).toMatchObject({ action: 'fill', pricePaise: 99_50 });
+  });
+  it('falls back to the last price when that side of the book is empty', () => {
+    expect(evaluateBook({ side: 'BUY', type: 'MARKET', triggered: false }, { ...q, askPaise: 0 }, true)).toMatchObject({ pricePaise: 100_00, fromBook: false });
+  });
+  it('a marketable limit fills at the book, a resting one at its own price', () => {
+    expect(evaluateBook({ side: 'BUY', type: 'LIMIT', pricePaise: 101_00, triggered: false }, q, true)).toMatchObject({ action: 'fill', pricePaise: 100_50 });
+    expect(evaluateBook({ side: 'BUY', type: 'LIMIT', pricePaise: 100_00, triggered: false }, q, true)).toMatchObject({ action: 'wait' });
+    expect(evaluateBook({ side: 'BUY', type: 'LIMIT', pricePaise: 100_00, triggered: false }, { ltpPaise: 99_80, bidPaise: 99_70, askPaise: 99_90 }, false)).toMatchObject({ action: 'fill', pricePaise: 100_00 });
+  });
+  it('a stop triggers on the last price, then a stop-market takes the book', () => {
+    const o = { side: 'SELL' as const, type: 'SLM' as const, triggerPaise: 99_00, triggered: false };
+    expect(evaluateBook(o, q, false)).toMatchObject({ action: 'wait' });
+    expect(evaluateBook(o, { ltpPaise: 98_90, bidPaise: 98_80, askPaise: 99_00 }, false)).toMatchObject({ action: 'trigger' });
+    expect(evaluateBook({ ...o, triggered: true }, { ltpPaise: 98_90, bidPaise: 98_80, askPaise: 99_00 }, true)).toMatchObject({ action: 'fill', pricePaise: 98_80 });
   });
 });

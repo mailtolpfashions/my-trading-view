@@ -48,8 +48,9 @@ export function buildLedger(trades: Trade[], startingCashPaise: Paise): Ledger {
   let cash = startingCashPaise, charges = 0, realised = 0;
 
   for (const t of sorted) {
-    if (!Number.isSafeInteger(t.qty) || t.qty <= 0 || !Number.isSafeInteger(t.pricePaise) || t.pricePaise <= 0) {
-      throw new Error(`Corrupt trade ${t.id}: qty and price must be positive integers`);
+    // Price 0 is allowed: an option that expires worthless settles at ₹0.
+    if (!Number.isSafeInteger(t.qty) || t.qty <= 0 || !Number.isSafeInteger(t.pricePaise) || t.pricePaise < 0) {
+      throw new Error(`Corrupt trade ${t.id}: qty must be a positive integer and price a whole number of paise, not negative`);
     }
     const k = key(t.symbol, t.product);
     const p = pos.get(k) ?? { symbol: t.symbol, product: t.product, qty: 0, openCostPaise: 0, realisedPaise: 0, buyQty: 0, sellQty: 0, buyValuePaise: 0, sellValuePaise: 0, chargesPaise: 0, lastTradeDate: t.tradeDate };

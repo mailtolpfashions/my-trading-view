@@ -43,7 +43,7 @@ const CHART_TYPES: [ChartType, string, typeof CandlestickChart][] = [
 
 /** TradingView-style chart page for one symbol (from the address); the watchlist and scanner are the app's right-hand panel. */
 export function ChartWorkspace({ symbol }: { symbol: string }) {
-  const { openSearch, notify } = useShell();
+  const { openSearch, notify, openTicket } = useShell();
   const [savedTf, setTf] = usePersisted<Timeframe>('mtv.tf', 'D');
   const tf: Timeframe = TFS.includes(savedTf) ? savedTf : 'D';
   const intraday = INTRADAY_TFS.includes(tf);
@@ -273,6 +273,8 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
             </button>
             {menu === 'patterns' && <PatternPicker picked={pickedPatterns} onChange={setPickedPatterns} meta={patternMeta?.patterns ?? null} found={patternCount} />}
           </div>
+          <button type="button" onClick={() => openTicket({ symbol })} title="Paper trade this in Trade lab"
+            className="flex h-[30px] items-center gap-1.5 rounded-full bg-accent-soft px-3 text-[12.5px] font-bold text-accent-deep hover:bg-accent hover:text-accent-ink">Trade</button>
           {loading && <span className="ml-3 text-[12px] text-muted">Loading…</span>}
           <span className="flex-1" />
           {!loading && <span className="hidden sm:block"><DataCheck quality={data.quality} delayed={false} /></span>}

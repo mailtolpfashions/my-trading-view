@@ -52,3 +52,35 @@ export function validateOrder(o: NewOrder, ltp: Paise): string | null {
   }
   return null;
 }
+
+/** The live market for one instrument: last traded price and the best bid and ask (0 = that side is empty). */
+export type BookQuote = { ltpPaise: Paise; bidPaise: Paise; askPaise: Paise };
+
+/** Price a marketable order takes now: a buy pays the ask, a sell gets the bid; the LTP when that side is empty. */
+export function takePrice(side: Side, q: BookQuote): { pricePaise: Paise; fromBook: boolean } {
+  const book = side === 'BUY' ? q.askPaise : q.bidPaise;
+  return book > 0 ? { pricePaise: book, fromBook: true } : { pricePaise: q.ltpPaise, fromBook: false };
+}
+
+/**
+ * Like `evaluate`, on the live order book (Trade lab). A market order (or a stop-market once triggered) takes the ask or
+ * bid. A limit order that is marketable when placed fills at the better of its limit and the book; a resting limit
+ * fills at its own price once the book or a trade reaches it. Stops trigger on the last traded price.
+ */
+export function evaluateBook(o: MatchOrder, q: BookQuote, isNew: boolean): MatchResult & { fromBook?: boolean } {
+  if (o.type === 'MARKET') { const t = takePrice(o.side, q); return { action: 'fill', pricePaise: t.pricePaise, fromBook: t.fromBook }; }
+  if ((o.type === 'SL' || o.type === 'SLM') && !o.triggered) {
+    return triggerHit(o.side, q.ltpPaise, o.triggerPaise!) ? { action: 'trigger' } : { action: 'wait' };
+  }
+  if (o.type === 'SLM') { const t = takePrice(o.side, q); return { action: 'fill', pricePaise: t.pricePaise, fromBook: t.fromBook }; }
+  const limit = o.pricePaise!;
+  const book = o.side === 'BUY' ? q.askPaise : q.bidPaise;
+  if (isNew && book > 0) {
+    // Marketable now: trades against the book at the book's price, never worse than the limit.
+    if (o.side === 'BUY' ? book <= limit : book >= limit) return { action: 'fill', pricePaise: book, fromBook: true };
+    return { action: 'wait' };
+  }
+  // Resting: the book or a trade has come to the limit.
+  const reached = (book > 0 && (o.side === 'BUY' ? book <= limit : book >= limit)) || crossed(o.side, q.ltpPaise, limit);
+  return reached ? { action: 'fill', pricePaise: limit, fromBook: book > 0 } : { action: 'wait' };
+}

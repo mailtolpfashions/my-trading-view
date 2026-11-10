@@ -42,6 +42,7 @@ import { decayStudy, sellingReport, sellingResearch, sellingThree, studyDetail, 
 import { intraday } from '@mtv/options';
 import { patternEvidence, presetEvidence } from './screener/evidence';
 import { paperLog, takeTodayIfDue } from './paperlog/blind-buy';
+import { tradeLabRoutes } from './tradelab/routes';
 import { buildSnapshot as buildSellerSnapshot, loadEvidence as loadSellerEvidence, sellerDays } from './seller/snapshot';
 import { StudyError, catalog as studyCatalog, computeStudy, encodeNonFinite } from './studies/library';
 import { findInstrument, loadEquities, searchInstruments } from './symbols';
@@ -553,6 +554,9 @@ app.post<{ Body: { rules?: RuleSet } }>('/api/scan', async (req, reply) => {
     return reply.code(500).send({ error: 'scan_failed', message: 'Scan failed' });
   }
 });
+
+// ---- Trade lab: paper trading of stocks, futures and options on live Kite prices (tradelab/) ----
+tradeLabRoutes(app);
 
 // ---- Paper log: the blind-buy scan run at 9:30 each trading day, closed at 3:00 pm (paper only; paperlog/blind-buy.ts) ----
 app.get('/api/paperlog/blind-buy', async () => paperLog());

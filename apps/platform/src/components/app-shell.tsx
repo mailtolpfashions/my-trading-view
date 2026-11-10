@@ -15,19 +15,22 @@ import { LiveChip } from './live-status';
 import { Logo } from './logo';
 import { ThemeToggle } from './theme-toggle';
 import { WatchPanel } from './app/watch-panel';
+import { OrderTicket } from './tradelab/order-ticket';
+import type { TicketStart } from '@/lib/tradelab';
 
-/** Six plain choices; every other tool is a card on the Tools page. */
+/** Seven plain choices; every other tool is a card on the Tools page. */
 const NAV: { href: string; label: string; match: string[] }[] = [
   { href: '/today', label: 'Today', match: ['/today'] },
   { href: '/scanner', label: 'Scanner', match: ['/scanner'] },
   { href: '/strategies', label: 'Strategies', match: ['/strategies'] },
   { href: '/options', label: 'Options', match: ['/options', '/backtest/options'] },
+  { href: '/tradelab', label: 'Trade lab', match: ['/tradelab'] },
   { href: '/chart', label: 'Charts', match: ['/chart'] },
   { href: '/tools', label: 'Tools', match: ['/tools', '/futures', '/market', '/research', '/practice', '/learn', '/watchlists', '/alerts', '/connect'] },
 ];
 
 /** Pages laid out edge to edge (the rest keep a 1600px column until their own redesign). */
-const FULL_WIDTH = ['/today', '/scanner', '/chart', '/strategies'];
+const FULL_WIDTH = ['/today', '/scanner', '/chart', '/strategies', '/tradelab'];
 /** Full width on this exact page only (its tool pages under /options/… keep the column). */
 const FULL_WIDTH_EXACT = ['/options'];
 
@@ -41,6 +44,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [watch, setWatch] = usePersisted<string[]>('mtv.watchlist', DEFAULT_WATCH);
   const [search, setSearch] = useState<null | 'chart' | 'watch'>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [ticket, setTicket] = useState<TicketStart | null>(null);
   const [panelOpen, setPanelOpen] = usePersisted<boolean>('mtv.watchPanel', true);
   const [drawer, setDrawer] = useState(false);
   const panelOpenRef = useRef(panelOpen);
@@ -66,7 +70,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     writePersisted('mtv.tf', mode ? MODE_TF[mode].chart : 'D');
     router.push(chartHref(symbol));
   }, [router]);
-  const shell: Shell = useMemo(() => ({ quotes, asOf, watch, setWatch, openSearch: setSearch, openChart, notify: setNotice }), [quotes, asOf, watch, setWatch, openChart]);
+  const shell: Shell = useMemo(() => ({ quotes, asOf, watch, setWatch, openSearch: setSearch, openChart, notify: setNotice, openTicket: (s?: TicketStart) => setTicket(s ?? {}) }), [quotes, asOf, watch, setWatch, openChart]);
 
   return (
     <ShellContext.Provider value={shell}>
@@ -107,6 +111,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           setSearch(null);
         }} />
       <DialogHost />
+      {ticket && <OrderTicket start={ticket} onClose={() => setTicket(null)} onPlaced={(m) => setNotice(m.length > 90 ? `${m.slice(0, 88)}…` : m)} />}
       {notice && <div role="status" className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-[12px] bg-deep px-4 py-2.5 text-[13.5px] text-white shadow-[var(--shadow-pop)]">{notice}</div>}
     </ShellContext.Provider>
   );

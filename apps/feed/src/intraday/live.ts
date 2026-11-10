@@ -96,6 +96,8 @@ export class LiveService {
   }
 
   get symbols() { return this.universe; }
+  /** The live Kite connection, while streaming (Trade lab prices its orders from it). */
+  kite(): KiteProvider | null { return this.status.state === 'live' ? this.provider : null; }
   has(symbol: string) { return this.universe.includes(symbol); }
 
   /** Starts (or restarts) everything once a Kite session exists. */

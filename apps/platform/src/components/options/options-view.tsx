@@ -14,6 +14,9 @@ import { SavedPositions, type SavedPosition } from './saved-positions';
 import { InfoTip } from '@/components/info-tip';
 import { SPOT_VOL_FIT } from '@mtv/options';
 import { UnderlyingPicker } from '@/components/tools/controls';
+import { useShell } from '@/components/app/shell-context';
+import { confirmDialog } from '@/components/dialog';
+import { labApi } from '@/lib/tradelab';
 import { TradingDatePicker } from '@/components/tools/trading-date-picker';
 
 const RATE = 0.065; // matches the feed's model rate; affects estimates only
@@ -40,6 +43,7 @@ export function OptionsView() {
   // The template that produced the current legs; shown as selected until the legs change.
   const [template, setTemplate] = useState<{ id: string; legs: BuilderLeg[] } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const { notify } = useShell();
   /** The right-hand panel: the strategy builder, or the simulator (a position built on a past day, followed to expiry). */
   const [panel, setPanel] = useState<'builder' | 'simulator'>('builder');
   const chainCache = useRef(new Map<string, Chain>());
@@ -99,6 +103,28 @@ export function OptionsView() {
     if (same) setLegs(legs.map((l) => (l.id === same.id ? { ...l, lots: l.lots + 1 } : l)));
     else setLegs([...legs, { id: `l${++seq}`, kind: 'FUT', side: s, strikePaise: 0, expiry, lots: 1, pricePaise: f.closePaise, iv: null, greeks: { delta: 1, theta: 0, vega: 0 } }]);
     if (!f.traded) setNotice(`The ${fmtDate(expiry)} future did not trade that day: its price is NSE's carried-forward close.`);
+  }
+
+  /** Places every leg in Trade lab (paper) at market: live bid/ask, overnight (NRML), each leg's lots. */
+  async function tradeInLab() {
+    const ok = await confirmDialog({
+      title: `Paper trade ${legs.length} leg${legs.length > 1 ? 's' : ''} in Trade lab?`,
+      message: `${legs.map((l) => `${l.side === 'BUY' ? 'Buy' : 'Sell'} ${l.lots} lot${l.lots > 1 ? 's' : ''} ${underlying} ${fmtDate(l.expiry).slice(0, 6)} ${l.kind === 'FUT' ? 'FUT' : `${fmtStrike(l.strikePaise)} ${l.kind}`}`).join(' · ')}. Each leg is placed at market on live prices (bid / ask), not at the prices shown here. Paper only: nothing goes to a broker.`,
+      confirmLabel: 'Place in Trade lab',
+    });
+    if (!ok) return;
+    const done: string[] = [], failed: string[] = [];
+    for (const l of legs) {
+      const name = `${l.kind === 'FUT' ? 'FUT' : `${fmtStrike(l.strikePaise)} ${l.kind}`}`;
+      try {
+        const c = await labApi.contracts(underlying, l.kind === 'FUT' ? undefined : l.expiry, 40);
+        const row = l.kind === 'FUT' ? c.futures.find((f) => f.expiry === l.expiry) : c.strikes.find((r) => r.strike * 100 === l.strikePaise)?.[l.kind];
+        if (!row) { failed.push(`${name}: not in today's live contracts`); continue; }
+        const o = await labApi.place({ symbol: row.symbol, side: l.side, product: 'NRML', type: 'MARKET', qty: l.lots * row.lot, reason: 'From the Options strategy builder' });
+        done.push(`${name} ${o.avgFillPaise != null ? `@ ₹${(o.avgFillPaise / 100).toFixed(2)}` : o.status}`);
+      } catch (e) { failed.push(`${name}: ${(e as Error).message}`); }
+    }
+    notify(failed.length ? `Trade lab: ${done.length} placed, ${failed.length} not (${failed[0]})` : `Trade lab: ${done.join(', ')}`);
   }
 
   /** Undo from the chain: one lot less on the most recently added leg of this contract; the leg goes at zero lots. */
@@ -430,6 +456,10 @@ export function OptionsView() {
             )}
             <SavedPositions underlying={underlying} date={chain?.date ?? null} legs={legs} onLoad={loadSaved}
               suggestedName={`${underlying} ${(template && template.legs === legs ? TEMPLATES.find((t) => t.id === template.id)?.name : null) ?? `${legs.length}-leg position`} · ${chain ? fmtDate(chain.date) : ''}`} />
+            {legs.length > 0 && !past && (
+              <button type="button" onClick={() => void tradeInLab()} title="Place these legs in Trade lab (paper) at live prices"
+                className="rounded-full bg-accent-soft px-3 py-1 text-[12px] font-bold text-accent-deep hover:bg-accent hover:text-accent-ink">Paper trade in Trade lab</button>
+            )}
             {legs.length > 0 && <button type="button" onClick={() => setLegs([])} className="rounded-full px-3 py-1 text-[12px] font-semibold text-muted hover:bg-down-soft hover:text-down">Clear</button>}
           </div>
         </div>

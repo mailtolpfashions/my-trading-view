@@ -148,8 +148,21 @@ model PaperOrder {
   triggered    Boolean      @default(false)
   avgFillPaise BigInt?
   rejectReason String?
-  /// Set on system orders, e.g. AUTO_SQUAREOFF for intraday positions closed at 15:20 IST
+  /// Set on system orders, e.g. AUTO_SQUAREOFF for intraday positions closed at the square-off time, EXPIRY
   tag          String?
+  /// Trade lab: NSE (stocks) or NFO (futures and options); `symbol` is the exchange's trading symbol
+  exchange     String       @default("NSE")
+  /// Units per lot for F&O (orders are whole lots); null for stocks
+  lotSize      Int?
+  /// The entry order this exit belongs to (stop and target legs of a bracket: one fills, the other is cancelled)
+  parentId     String?
+  /// Bracket levels on an entry order: once it fills, a stop and a target exit are placed
+  stopPaise    BigInt?
+  targetPaise  BigInt?
+  /// MANUAL, or AUTO:<rule id> for orders placed by an automatic rule
+  source       String       @default("MANUAL")
+  /// Why the order was placed or how it ended, in plain words (fills at bid/ask, square-off, rejections)
+  reason       String?
   /// IST trading date, YYYY-MM-DD
   tradeDate    String
   createdAt    DateTime     @default(now())
@@ -477,6 +490,8 @@ model PaperTrade {
   chargesPaise BigInt
   /// Itemised charges (brokerage, STT, exchange, SEBI, stamp, GST, DP) in paise
   charges      Json
+  /// NSE (stocks) or NFO (futures and options)
+  exchange     String       @default("NSE")
   time         DateTime
   tradeDate    String
 

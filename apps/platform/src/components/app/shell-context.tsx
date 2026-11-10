@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from 'react';
 import type { Quote } from '@mtv/shared';
+import type { TicketStart } from '@/lib/tradelab';
 
 export type Shell = {
   /** Last NSE closes for the ribbon and the watchlist, and their trading day. */
@@ -13,6 +14,8 @@ export type Shell = {
   /** Opens a symbol's daily chart page. */
   openChart: (symbol: string) => void;
   notify: (message: string) => void;
+  /** Opens the Trade lab order ticket (paper trading), optionally on a symbol or an F&O underlying. */
+  openTicket: (start?: TicketStart) => void;
 };
 
 export const ShellContext = createContext<Shell | null>(null);

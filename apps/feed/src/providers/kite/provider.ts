@@ -66,6 +66,9 @@ export function parseKiteCandles(rows: [string, number, number, number, number, 
 
 const kiteDate = (sec: number) => new Date((sec + IST) * 1000).toISOString().slice(0, 19).replace('T', ' ');
 
+/** One NFO contract from Kite's instrument list: a future (strike 0) or an option. */
+export type NfoContract = { token: number; tradingsymbol: string; underlying: string; kind: 'FUT' | 'CE' | 'PE'; expiry: string; strike: number; lot: number };
+
 export class KiteProvider implements MarketDataProvider {
   readonly status = { provider: 'kite', delayed: false } as const;
   private tokens = new Map<string, number>(); // our symbol -> instrument token
@@ -73,6 +76,9 @@ export class KiteProvider implements MarketDataProvider {
   private ticks = new Map<number, Tick>();
   /** NFO option contracts per underlying, from Kite's instrument list. */
   private options = new Map<string, OptionContract[]>();
+  /** Every NFO contract (futures and options of every underlying), by trading symbol: what Trade lab can trade. */
+  private nfo = new Map<string, NfoContract>();
+  private nfoByUnderlying = new Map<string, NfoContract[]>();
   /** NFO index futures per underlying. */
   private futures = new Map<string, { token: number; tradingsymbol: string; expiry: string; lot: number }[]>();
   private candleCache = new TtlCache<Candle[]>();
@@ -127,9 +133,16 @@ export class KiteProvider implements MarketDataProvider {
     this.symbolsByToken.clear();
     this.options.clear();
     this.futures.clear();
+    this.nfo.clear();
+    this.nfoByUnderlying.clear();
     for (const line of lines.slice(1)) {
       const c = splitCsvLine(line);
       const token = Number(c[cTok]);
+      if ((c[cSeg] === 'NFO-FUT' || c[cSeg] === 'NFO-OPT') && (c[cType] === 'FUT' || c[cType] === 'CE' || c[cType] === 'PE')) {
+        const k: NfoContract = { token, tradingsymbol: c[cSym], underlying: c[cName], kind: c[cType] as NfoContract['kind'], expiry: c[cExp], strike: Number(c[cStrike]) || 0, lot: Number(c[cLot]) };
+        this.nfo.set(k.tradingsymbol, k);
+        (this.nfoByUnderlying.get(k.underlying) ?? this.nfoByUnderlying.set(k.underlying, []).get(k.underlying)!).push(k);
+      }
       if (c[cSeg] === 'NFO-FUT' && (LIVE_CHAIN_UNDERLYINGS as readonly string[]).includes(c[cName])) {
         const list = this.futures.get(c[cName]) ?? [];
         list.push({ token, tradingsymbol: c[cSym], expiry: c[cExp], lot: Number(c[cLot]) });
@@ -155,6 +168,17 @@ export class KiteProvider implements MarketDataProvider {
     const opts = [...this.options].map(([u, l]) => `${u} ${l.length}`).join(', ') + `; futures: ${[...this.futures].map(([u, l]) => `${u} ${l.length}`).join(', ') || 'none'}`;
     this.log(`Kite instruments loaded: ${this.tokens.size} symbols, options: ${opts || 'none'}${missing.length ? `; indices not found: ${missing.join(', ')}` : ''}`);
   }
+
+  /** An NFO future or option by its trading symbol (e.g. NIFTY26NOV24500CE), any underlying. */
+  nfoContract(tradingsymbol: string): NfoContract | undefined { return this.nfo.get(tradingsymbol); }
+  /** Every listed NFO future and option of one underlying (stock or index), any expiry. */
+  nfoContracts(underlying: string): NfoContract[] { return this.nfoByUnderlying.get(underlying) ?? []; }
+  /** Underlyings with F&O contracts listed today. */
+  nfoUnderlyings(): string[] { return [...this.nfoByUnderlying.keys()].sort(); }
+  /** The latest tick of any instrument token (stocks, indices, futures, options). */
+  tickByToken(token: number): Tick | undefined { return this.ticks.get(token); }
+  /** Streams these tokens with the order book (full mode), within Kite's 3,000-instrument limit. */
+  watchTokens(tokens: number[]) { if (tokens.length) this.ticker.subscribe(tokens, 'full'); }
 
   /** NFO option contracts of an underlying with a live chain (NIFTY, BANKNIFTY), every listed expiry. */
   optionContracts(underlying: string): OptionContract[] { return this.options.get(underlying) ?? []; }

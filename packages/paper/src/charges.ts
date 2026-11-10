@@ -15,8 +15,8 @@
 import { applyRate, type Paise } from './money';
 
 export type Side = 'BUY' | 'SELL';
-/** CNC = delivery, MIS = intraday (squared off the same day). */
-export type Product = 'CNC' | 'MIS';
+/** CNC = delivery, MIS = intraday (squared off the same day), NRML = F&O carried overnight (until expiry). */
+export type Product = 'CNC' | 'MIS' | 'NRML';
 export type Segment = 'EQ_DELIVERY' | 'EQ_INTRADAY' | 'FUT' | 'OPT';
 
 type Statutory = {

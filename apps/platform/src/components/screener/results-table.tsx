@@ -9,6 +9,7 @@ import { userApi, type Watchlist } from '@/lib/user';
 import { promptDialog } from '../dialog';
 import { InfoTip } from '../info-tip';
 import { Button, inputCls } from '../ui';
+import { useShell } from '../app/shell-context';
 
 type SortKey = 'symbol' | 'close' | 'changePct' | 'volume' | 'avgValueCr' | `col:${number}`;
 
@@ -19,6 +20,7 @@ const dateText = (d: string | null) => (d ? new Date(`${d}T00:00:00Z`).toLocaleD
 export function ResultsTable({ result, columns, onColumns, watchlists, onWatchlists }: {
   result: ScreenResult; columns: string[]; onColumns: (c: string[]) => void; watchlists: Watchlist[]; onWatchlists: () => void;
 }) {
+  const { openTicket } = useShell();
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'avgValueCr', dir: -1 });
   const [open, setOpen] = useState<string | null>(null);
@@ -123,6 +125,7 @@ export function ResultsTable({ result, columns, onColumns, watchlists, onWatchli
                           <Link href={`/chart/${encodeURIComponent(r.symbol)}?tf=${result.tf}`} className="inline-flex shrink-0 h-9 items-center gap-1.5 rounded-[10px] bg-panel px-3 text-[13px] font-semibold text-ink shadow-[var(--shadow-panel)] hover:text-accent-deep">
                             <LineChart size={15} /> Open chart
                           </Link>
+                          <button type="button" onClick={() => openTicket({ symbol: r.symbol })} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[10px] bg-accent-soft px-3 text-[13px] font-bold text-accent-deep hover:bg-accent hover:text-accent-ink">Trade (paper)</button>
                           <AddToWatchlist symbols={[r.symbol]} label={`Add ${r.symbol} to a watchlist`} watchlists={watchlists} onChanged={onWatchlists} compact />
                           <CopySymbol symbol={r.symbol} />
                           <div className="grid gap-1">
