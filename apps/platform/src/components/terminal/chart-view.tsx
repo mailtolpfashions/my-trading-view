@@ -11,9 +11,12 @@ import {
   LineStyle,
   PriceScaleMode,
   createChart,
+  createSeriesMarkers,
   createTextWatermark,
   type IChartApi,
   type ISeriesApi,
+  type ISeriesMarkersPluginApi,
+  type SeriesMarker,
   type ITextWatermarkPluginApi,
   type MouseEventParams,
   type SeriesType,
@@ -26,10 +29,11 @@ import type { Candle, Timeframe } from '@mtv/shared';
 import { IndicatorRenderer } from 'lightweight-charts-indicators/render';
 import { Settings2 } from 'lucide-react';
 import { DrawingLayer, type AlertLine } from '@/lib/chart/drawings/layer';
-import { computeLib, fetchCatalog, type LibIndicator, type LibStudy } from '@/lib/chart/library';
+import { calcInputs, computeLib, fetchCatalog, withLevels, type LibIndicator, type LibStudy } from '@/lib/chart/library';
 import { COLORS, ONE_POINT, TWO_POINT, channelOffset, hitTest, isPosition, mirroredStop, loadDrawings, logicalToTime, measureText, newId, saveDrawings, timeToLogical, type Drawing, type Point, type Tool } from '@/lib/chart/drawings/model';
-import { DOWN, UP, studyById, type PointColors } from '@/lib/chart/studies';
+import { DOWN, UP, studyById, studyParams, type PointColors, type StudyValues } from '@/lib/chart/studies';
 import { fmt, tfLabel } from '@/lib/format';
+import type { ChartPattern } from '@/lib/patterns';
 import { CHART_COLORS, chartThemeOptions, useTheme } from '@/lib/theme';
 import { DrawingRail } from './drawing-rail';
 
@@ -76,6 +80,12 @@ type Props = {
   compare?: CompareLine[];
   onRemoveCompare?: (symbol: string) => void;
   settings?: ChartSettings;
+  /** Settings of the quick indicators (RSI length, pivot type…), by indicator id; missing ones use the defaults. */
+  studySettings?: Record<string, StudyValues>;
+  /** The settings button on a quick indicator's legend line. */
+  onEditStudy?: (id: string) => void;
+  /** Candlestick patterns to mark: an arrow under bullish ones, over bearish ones, a dot for neutral ones. */
+  patterns?: ChartPattern[];
 };
 
 export type CompareLine = { symbol: string; name: string; color: string; candles: Candle[] };
@@ -94,6 +104,7 @@ export function ChartView(p: Props) {
   const mainRef = useRef<ISeriesApi<SeriesType> | null>(null);
   const volRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const wmRef = useRef<ITextWatermarkPluginApi<Time> | null>(null);
+  const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const compareRef = useRef(new Map<string, ISeriesApi<'Line'>>());
   const builtRef = useRef<Built[]>([]);
   const builtKey = useRef('');
@@ -221,7 +232,27 @@ export function ChartView(p: Props) {
       : chart.addSeries(CandlestickSeries, ohlc);
     mainRef.current.setData([]); // filled by the data effect below
     mainRef.current.attachPrimitive(layer.current); // drawings follow the main series
+    markersRef.current = createSeriesMarkers(mainRef.current, []); // pattern markers follow it too
   }, [p.chartType]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- candlestick pattern markers ----
+  useEffect(() => {
+    const up = p.settings?.upColor ?? UP, down = p.settings?.downColor ?? DOWN;
+    const few = (p.patterns?.length ?? 0) <= 80; // names beside the arrows only while they stay readable
+    const list: SeriesMarker<Time>[] = (p.patterns ?? []).map((x) => ({
+      time: toChart(x.time),
+      position: x.side === 'bullish' ? 'belowBar' : 'aboveBar',
+      shape: x.side === 'bullish' ? 'arrowUp' : x.side === 'bearish' ? 'arrowDown' : 'circle',
+      color: x.side === 'bullish' ? up : x.side === 'bearish' ? down : colors.zero,
+      text: few ? x.label : undefined,
+      size: 1,
+    }));
+    list.sort((a, b) => (a.time as number) - (b.time as number));
+    markersRef.current?.setMarkers(list);
+  }, [p.patterns, p.chartType, p.settings?.upColor, p.settings?.downColor, colors.zero]);
+
+  // The indicators and their settings as one key: a change rebuilds the indicator series (levels and panes may change).
+  const studyKey = JSON.stringify(p.studies.map((id) => [id, p.studySettings?.[id] ?? null]));
 
   // ---- data, studies and view ----
   useEffect(() => {
@@ -242,14 +273,14 @@ export function ChartView(p: Props) {
     volRef.current!.setData(hasVolume ? c.map((b) => ({ time: toChart(b.time), value: b.volume, color: b.close >= b.open ? 'rgba(10,155,118,0.28)' : 'rgba(229,72,77,0.28)' })) : []);
 
     // Rebuild indicator series only when the selection changes; otherwise just refresh their data.
-    const key = p.studies.join(',');
+    const key = studyKey;
     if (key !== builtKey.current) {
       clearLib(); // pane numbers change: library indicators are drawn again after this rebuild
       builtRef.current.forEach((b) => b.series.forEach((s) => chart.removeSeries(s)));
       for (let i = chart.panes().length - 1; i > 0; i--) chart.removePane(i);
       let nextPane = 1;
       builtRef.current = p.studies.flatMap((id) => {
-        const st = studyById(id);
+        const st = studyById(id, p.studySettings?.[id]);
         if (!st) return [];
         const pane = st.place === 'main' ? 0 : nextPane++;
         const series = st.lines.map((ln) => {
@@ -270,7 +301,7 @@ export function ChartView(p: Props) {
     }
     computed.current = new Map();
     for (const b of builtRef.current) {
-      const st = studyById(b.id)!;
+      const st = studyById(b.id, p.studySettings?.[b.id])!;
       const out = st.compute(c);
       computed.current.set(b.id, out);
       st.lines.forEach((ln, i) => {
@@ -300,7 +331,7 @@ export function ChartView(p: Props) {
       setPaneTops(chart.panes().map((pane) => { const t = top; top += pane.getHeight() + 1; return t; }));
     }));
     setVersion((v) => v + 1);
-  }, [p.candles, p.chartType, p.studies, p.loadKey, p.visibleSeconds]);
+  }, [p.candles, p.chartType, studyKey, p.loadKey, p.visibleSeconds]); // eslint-disable-line react-hooks/exhaustive-deps -- studyKey covers studies and their settings
 
   // ---- TradingView-library indicators: calculated by the feed service on the chart's own data, drawn by the
   // library's renderer. Runs after the data effect above (effects run in order), so our panes are already laid out. ----
@@ -333,13 +364,13 @@ export function ChartView(p: Props) {
     void (async () => {
       for (const { s, entry, pane } of plan) {
         let result;
-        try { result = await computeLib(p.symbol, p.tf, s.id, s.inputs, ctrl.signal); } catch { continue; }
+        try { result = await computeLib(p.symbol, p.tf, s.id, calcInputs(s.inputs), ctrl.signal); } catch { continue; }
         if (gen !== libGen.current) return; // a newer symbol/timeframe/indicator set replaced this run
         let r = libRenderers.current.get(s.uid);
         const fresh = !r;
         if (!r) { r = new IndicatorRenderer(chart, { paneIndex: pane, mainSeries: main }); libRenderers.current.set(s.uid, r); }
         try {
-          r.render(entry as never, result as never, bars as never, { inputs: s.inputs, reuseSeries: !fresh, lastValueVisible: !entry.overlay });
+          r.render(withLevels(entry, s.inputs) as never, result as never, bars as never, { inputs: calcInputs(s.inputs), reuseSeries: !fresh, lastValueVisible: !entry.overlay });
           libResults.current.set(s.uid, result as LibResult);
         } catch { /* a bad result must not break the chart */ }
       }
@@ -550,6 +581,7 @@ export function ChartView(p: Props) {
   const tone = ch >= 0 ? 'text-up' : 'text-down';
   // Read after the data effect rebuilds the series; its setVersion call re-renders with the new list.
   const studyRows = builtRef.current;
+  const tfNote = p.tf === 'D' ? '' : ' Tested on daily candles; on this timeframe it is not tested.';
 
   // Library indicators in the legend: name, values at the crosshair (or the last bar), settings and remove.
   let libPane = 1 + new Set(studyRows.filter((b) => b.pane > 0).map((b) => b.pane)).size;
@@ -574,7 +606,7 @@ export function ChartView(p: Props) {
   };
 
   const row = (id: string) => {
-    const st = studyById(id)!;
+    const st = studyById(id, p.studySettings?.[id])!;
     const out = computed.current.get(id);
     return (
       <div key={id} className="pointer-events-auto flex w-fit items-center gap-1.5 text-[12px] text-ink-2">
@@ -584,6 +616,9 @@ export function ChartView(p: Props) {
           const col = out?.colors?.[ln.key]?.[i] ?? ln.color;
           return <span key={ln.key} className="num" style={{ color: col }}>{v == null ? '—' : fmt(v)}</span>;
         })}
+        {studyParams(id).length > 0 && p.onEditStudy && (
+          <button type="button" onClick={() => p.onEditStudy!(id)} className="rounded px-1 text-muted hover:bg-raised hover:text-ink" aria-label={`${st.name} settings`} title="Settings"><Settings2 size={12} /></button>
+        )}
         <button type="button" onClick={() => p.onRemoveStudy(id)} className="rounded px-1 text-muted hover:bg-raised hover:text-ink" aria-label={`Remove ${st.name}`}>
           <X size={12} />
         </button>
@@ -652,6 +687,16 @@ export function ChartView(p: Props) {
               </div>
             );
           })}
+          {(p.patterns ?? []).filter((x) => x.time === bar.time).map((x) => (
+            <div key={x.name} className="pointer-events-auto flex w-fit items-center gap-1.5 text-[12px] text-ink-2"
+              title={`${x.rule}\n\n${x.verdict.word}${x.verdict.line ? `: ${x.verdict.line}` : ''}. ${x.verdict.detail}${tfNote}`}>
+              <span className={`font-bold ${x.side === 'bullish' ? 'text-up' : x.side === 'bearish' ? 'text-down' : 'text-muted'}`}>{x.side === 'bullish' ? '▲' : x.side === 'bearish' ? '▼' : '●'}</span>
+              <b className="font-semibold text-ink">{x.label}</b>
+              <i className={`inline-block h-2 w-2 rounded-full ${x.verdict.tone}`} aria-hidden="true" />
+              <span>{x.verdict.word}</span>
+              {x.band && <span className="text-down">· closed at a price band (could not trade at this close)</span>}
+            </div>
+          ))}
           {studyRows.filter((b) => b.pane === 0).map((b) => row(b.id))}
           {libRows.filter((x) => x.pane === 0).map(libRow)}
         </div>

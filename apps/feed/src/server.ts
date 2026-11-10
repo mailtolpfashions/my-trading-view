@@ -7,7 +7,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { BacktestError, OptionsBacktestError, STUDY_HORIZONS, SimError, StudyTally, breakIndices, findEvents, runBacktest, runOptionsBacktest, simulatePosition, type OptionsStrategy, type SimInput, type RuleSet, type Strategy, type StudyEvent } from '@mtv/backtest';
 import { prisma } from '@mtv/db';
 import { positionMargin } from '@mtv/options';
-import { EOD_TIMEFRAMES, type DataStatus, type EodTimeframe, type Quote } from '@mtv/shared';
+import { EOD_TIMEFRAMES, type Candle, type DataStatus, type EodTimeframe, type Quote } from '@mtv/shared';
 import { verifyFeedToken, type FeedClaims } from '@mtv/shared/feed-token';
 import { activeSession, clearSession, createSession, kiteConfigured, loadSession, loginUrl } from './providers/kite/session';
 import { live, setLiveLog } from './intraday/instance';
@@ -31,7 +31,7 @@ import { BREADTH_INDICES, RRG_BENCHMARKS, RRG_SECTORS, allBreadth, indexBreadth,
 import { ScanError, runScan } from './signals/scanner';
 import { ScreenError, cachedHistory, runScreen, type ScreenRequest } from './screener/screener';
 import { UNIVERSE_INDICES, industries, resolveUniverse, type UniverseFilters, type UniverseSpec } from './screener/universe';
-import { CONDITION_LIBRARY, FIELDS, FUNCTIONS, PRESETS } from '@mtv/rules';
+import { CONDITION_LIBRARY, FIELDS, FUNCTIONS, PATTERNS, PRESETS } from '@mtv/rules';
 import { UserStoreError, userStore } from './user/store';
 import { AlertEngine } from './alerts/engine';
 import { todayBrief } from './today/brief';
@@ -39,6 +39,10 @@ import { channelInfo, send } from './alerts/channels';
 import { StrategyError, runStrategyBacktest, type BacktestRequest } from './strategy/backtest';
 import { planAndPaper, startPaperTrade } from './selling/plan';
 import { decayStudy, sellingReport, sellingResearch, sellingThree, studyDetail, studyOverview } from './selling/study';
+import { intraday } from '@mtv/options';
+import { patternEvidence, presetEvidence } from './screener/evidence';
+import { paperLog, takeTodayIfDue } from './paperlog/blind-buy';
+import { buildSnapshot as buildSellerSnapshot, loadEvidence as loadSellerEvidence, sellerDays } from './seller/snapshot';
 import { StudyError, catalog as studyCatalog, computeStudy, encodeNonFinite } from './studies/library';
 import { findInstrument, loadEquities, searchInstruments } from './symbols';
 import { COUNTED_ROUTES, VisitorQuota } from './visitor-quota';
@@ -172,6 +176,34 @@ app.post<{ Body: { symbol?: string; tf?: string; strategy?: Strategy } }>('/api/
   }
 });
 
+// ---- intraday option-seller engine (user's spec v14; packages/options/src/intraday) ----
+// Live: the view at this moment, with the previous view of the day and what changed. Replay: ?at=YYYY-MM-DDTHH:MM.
+const sellerLast = new Map<string, { at: number; view: intraday.View }>();
+app.get<{ Querystring: { at?: string } }>('/api/seller/view', async (req, reply) => {
+  const ev = await loadSellerEvidence().catch(() => null);
+  if (!ev) return reply.code(404).send({ error: 'not_run', message: 'The evidence study has not been run yet (scripts/research/seller-v14-evidence.ts)' });
+  const evidence = { sessions: ev.sessions, from: ev.from, to: ev.to, built: ev.built, notes: ev.notes, baseRates: ev.baseRates };
+  const at = req.query.at;
+  if (at) {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(at)) return reply.code(400).send({ error: 'bad_time', message: 'Use YYYY-MM-DDTHH:MM' });
+    const now = Math.floor(Date.parse(`${at}:00+05:30`) / 1000);
+    const view = intraday.analyze(await buildSellerSnapshot(now, { live: true, source: `replay of ${at.slice(0, 10)}` }), ev);
+    return { view, previous: null, changed: [], replay: true, coverage: null, evidence };
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const view = intraday.analyze(await buildSellerSnapshot(now, { live: live.status.state === 'live' }), ev);
+  const day = new Date((now + 19800) * 1000).toISOString().slice(0, 10);
+  const prev = sellerLast.get(day);
+  const changed = prev ? intraday.whatChanged(prev.view, view) : [];
+  if (!prev || changed.length || now - prev.at >= 45 * 60) sellerLast.set(day, { at: now, view });
+  return {
+    view, replay: false, changed, evidence, coverage: live.status.options.coverage.NIFTY ?? null,
+    previous: prev ? { at: prev.at, sellerView: prev.view.sellerView, mode: prev.view.mode, setup: prev.view.setup ? `${prev.view.setup.side} ${prev.view.setup.strike}` : null } : null,
+  };
+});
+// Recorded days that can be replayed: option-minute coverage per day
+app.get('/api/seller/days', async () => sellerDays());
+
 app.get('/api/selling-three', async (_req, reply) => (await sellingThree()) ?? reply.code(404).send({ error: 'not_run', message: 'The comparison has not been built yet' }));
 app.get<{ Params: { name: string } }>('/api/selling-research/:name', async (req, reply) => (await sellingResearch(req.params.name)) ?? reply.code(404).send({ error: 'not_run', message: 'This test has not been run yet' }));
 app.get('/api/selling-report', async (_req, reply) => (await sellingReport()) ?? reply.code(404).send({ error: 'not_run', message: 'The report has not been built yet' }));
@@ -228,7 +260,7 @@ app.post<{ Body: SimBody }>('/api/options-sim', async (req, reply) => {
   if (!b || !(BACKTEST_UNDERLYINGS as readonly string[]).includes(b.underlying)) return reply.code(400).send({ error: 'bad_position', message: 'The simulator covers NIFTY and BANKNIFTY' });
   try {
     const started = performance.now();
-    const result = await simulatePosition({ underlying: b.underlying, entryDate: b.entryDate, legs: b.legs, broker: brokerById(b.broker) }, prismaOptionsData);
+    const result = await simulatePosition({ underlying: b.underlying, entryDate: b.entryDate, legs: b.legs, exits: b.exits, broker: brokerById(b.broker) }, prismaOptionsData);
     req.log.info({ entry: b.entryDate, legs: b.legs?.length, days: result.days.length, ms: Math.round(performance.now() - started) }, 'options simulation');
     return result;
   } catch (e) {
@@ -483,11 +515,20 @@ app.post<{ Body: { symbol?: string; tf?: string; id?: string; inputs?: Record<st
   const symbol = String(req.body?.symbol ?? '').toUpperCase();
   const tf = String(req.body?.tf ?? '');
   if (!findInstrument(symbol)) return reply.code(404).send({ error: 'unknown_symbol', message: `Unknown symbol ${symbol}` });
-  if (!isEodTf(tf)) return reply.code(400).send({ error: 'bad_timeframe', message: 'End-of-day data: D, W or M' });
-  const h = history(symbol, tf); // the same candles the chart shows
-  if (!h) return reply.code(404).send({ error: 'no_data', message: `No data for ${symbol}` });
+  // Minute charts send their timeframe as minutes ('1', '5', '15', '60'); they use the same live bars the chart shows.
+  const minuteTf = ({ '1': '1m', '5': '5m', '15': '15m', '60': '1h' } as Record<string, Tf>)[tf];
+  let candles: Candle[];
+  if (minuteTf) {
+    if (!live.has(symbol)) return reply.code(404).send({ error: 'no_intraday', message: `${symbol} has no minute data` });
+    candles = await live.bars(symbol, minuteTf, true);
+  } else {
+    if (!isEodTf(tf)) return reply.code(400).send({ error: 'bad_timeframe', message: 'Timeframes: 1, 5, 15, 60 minutes, D, W or M' });
+    const h = history(symbol, tf); // the same candles the chart shows
+    if (!h) return reply.code(404).send({ error: 'no_data', message: `No data for ${symbol}` });
+    candles = h.candles;
+  }
   try {
-    const result = await computeStudy(String(req.body?.id ?? ''), h.candles, req.body?.inputs ?? {});
+    const result = await computeStudy(String(req.body?.id ?? ''), candles, req.body?.inputs ?? {});
     reply.header('Content-Type', 'application/json');
     return JSON.stringify({ result }, encodeNonFinite);
   } catch (e) {
@@ -513,13 +554,25 @@ app.post<{ Body: { rules?: RuleSet } }>('/api/scan', async (req, reply) => {
   }
 });
 
+// ---- Paper log: the blind-buy scan run at 9:30 each trading day, closed at 3:00 pm (paper only; paperlog/blind-buy.ts) ----
+app.get('/api/paperlog/blind-buy', async () => paperLog());
+setInterval(() => { takeTodayIfDue().catch((e) => app.log.warn({ err: e }, 'paper log: could not take the list for today')); }, 60_000);
+
+// ---- Candlestick patterns: every pattern's rule and its test on NSE daily history (the chart finds the patterns
+// itself with packages/rules findPatterns, on the bars it already shows) ----
+app.get('/api/patterns/meta', async () => {
+  const e = await patternEvidence();
+  return { built: e.built, patterns: PATTERNS.map((p) => ({ name: p.name, side: p.side, bars: p.bars, rule: p.rule, evidence: e.patterns[p.name] ?? null })) };
+});
+
 // ---- Stock screener (packages/rules on NSE end-of-day history) ----
 // Everything the builder and the formula editor need to describe the language: fields, functions, presets, universes.
 app.get('/api/screener/meta', async () => ({
   timeframes: ['D', 'W', 'M'],
   fields: FIELDS.map(({ name, summary }) => ({ name, summary })),
   functions: FUNCTIONS.map(({ name, group, returns, params, summary }) => ({ name, group, returns, params, summary })),
-  presets: PRESETS,
+  // each preset with its test result on our NSE history (screener/evidence.ts)
+  ...(await presetEvidence().then((e) => ({ presets: PRESETS.map((p) => ({ ...p, evidence: e.presets[p.id] ?? null })), evidenceBuilt: e.built }))),
   library: CONDITION_LIBRARY,
   indices: UNIVERSE_INDICES,
   industries: await industries(),

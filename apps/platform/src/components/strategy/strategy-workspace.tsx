@@ -2,33 +2,33 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, ArrowRight, Bell, FilePlus2, Play, Save, Trash2 } from 'lucide-react';
+import { AlertTriangle, Bell, ChevronDown, FilePlus2, Play, Save } from 'lucide-react';
 import { parseFormula, type Tf } from '@mtv/rules';
 import { FeedError, feed, showKept } from '@/lib/feed';
-import type { Meta, UniverseSpec } from '@/lib/screener';
-import { DEFAULT_INTRADAY, DEFAULT_STRATEGY, NEW_DOC, isIntradayTf, type IntradayRules, TEMPLATES, fromSaved, strategyApi, type BacktestResult, type EquityStrategy, type SavedStrategy, type StrategyDoc } from '@/lib/strategy';
-import { ago, userApi, type SavedScreen, type Watchlist } from '@/lib/user';
+import type { Meta } from '@/lib/screener';
+import { DEFAULT_INTRADAY, DEFAULT_STRATEGY, NEW_DOC, isIntradayTf, fromSaved, strategyApi, type BacktestResult, type EquityStrategy, type SavedStrategy, type StrategyDoc } from '@/lib/strategy';
+import { userApi, type SavedScreen, type Watchlist } from '@/lib/user';
 import { confirmDialog } from '../dialog';
 import { InfoTip } from '../info-tip';
 import { ConditionEditor } from '../screener/condition-editor';
 import { Button, Card, Segmented, inputCls } from '../ui';
+import { CapitalPick, MaxOpenPick, PeriodPick, SessionPicks, SizePick, StopPick, TargetPick, TrailPick, WORD } from './strategy-form';
 import { BacktestResults } from './backtest-results';
+import { StrategyGallery } from './strategy-gallery';
 import { SymbolPicker, TEST_INDICES } from './symbol-picker';
 import { parseRows, rowsFormula, rowsText } from '@/lib/simple-rules';
 import { SimpleRules } from './simple-rules';
+import { useShell } from '../app/shell-context';
+import { UniverseSelect, isMyWatchlist } from '../screener/universe-picker';
 
-const STEPS = ['Basics', 'Stocks', 'Entry', 'Exit', 'Risk', 'Backtest'] as const;
-type Step = (typeof STEPS)[number];
 const DRAFT_KEY = 'platform.strategy.draft';
 const BASE_KEY = 'platform.strategy.draftBase';
-const MAIN_INDICES = ['NIFTY 50', 'NIFTY 100', 'NIFTY 200', 'NIFTY 500', 'NIFTY MIDCAP 150', 'NIFTY SMALLCAP 250'];
 const BROKERS = [['zerodha', 'Zerodha'], ['upstox', 'Upstox'], ['fyers', 'FYERS'], ['angelone', 'Angel One'], ['dhan', 'Dhan']] as const;
 
 export function StrategyWorkspace() {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [doc, setDoc] = useState<StrategyDoc>(NEW_DOC);
   const [saved, setSaved] = useState<string | null>(null);
-  const [step, setStep] = useState<Step>('Basics');
   const [list, setList] = useState<SavedStrategy[] | null>(null);
   const [screens, setScreens] = useState<SavedScreen[]>([]);
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
@@ -38,6 +38,13 @@ export function StrategyWorkspace() {
   const [notice, setNotice] = useState<string | null>(null);
   /** An unsaved strategy as it was opened (a template or an empty one), kept with the draft across reloads. */
   const [base, setBase] = useState<string | null>(null);
+  /** Which rule editor is open (entry or exit), and whether the extra settings show. */
+  const [edit, setEdit] = useState<'entry' | 'exit' | null>(null);
+  const [more, setMore] = useState(false);
+  const { watch } = useShell(); // the side panel's watchlist, for "My watchlist"
+  /** The strategy tiles under the editor: open until a backtest runs or one is opened. */
+  const [galleryOpen, setGalleryOpen] = useState(true);
+  const scrollTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
   const refresh = useCallback(() => { strategyApi.list().then(setList, (e: Error) => setError(e.message)); }, []);
   useEffect(() => {
@@ -65,7 +72,7 @@ export function StrategyWorkspace() {
     void confirmDialog({ title: 'Discard unsaved changes?', message: 'Your changes to this strategy are not saved.', confirmLabel: 'Discard changes', cancelLabel: 'Keep editing', danger: true }).then((ok) => ok && go());
   };
   const open = (d: StrategyDoc, savedVersion: string | null) => {
-    setDoc(d); setSaved(savedVersion); setResult(null); setError(null); setStep('Entry');
+    setDoc(d); setSaved(savedVersion); setResult(null); setError(null); setEdit(null);
     const b = JSON.stringify(d);
     setBase(b);
     try { localStorage.setItem(BASE_KEY, b); } catch { /* storage blocked */ }
@@ -89,109 +96,106 @@ export function StrategyWorkspace() {
   const runKey = JSON.stringify({ strategy: doc.strategy, universe: doc.universe });
   const [resultKey, setResultKey] = useState<string | null>(null);
   const run = async () => {
-    setStep('Backtest');
     setRunning(true);
     setError(null);
     try {
       const key = runKey;
       setResult(await strategyApi.backtest(doc));
       setResultKey(key);
+      setGalleryOpen(false);
       if (doc.id) refresh();
     } catch (e) { setError(e instanceof FeedError ? e.message : 'The backtest could not run. Is the data service running?'); }
     finally { setRunning(false); }
   };
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[300px_1fr]">
-      <Library list={list} activeId={doc.id}
-        onTemplate={(t) => leaving(() => open({ ...NEW_DOC, name: t.name, description: t.about, style: t.style, strategy: { ...DEFAULT_STRATEGY, ...t.patch }, universe: doc.universe }, null))}
-        onOpen={(x) => leaving(() => open(fromSaved(x), JSON.stringify(fromSaved(x))))}
-        onDelete={(x) => { void confirmDialog({ title: `Delete "${x.name}"?`, message: 'Its backtest history goes with it.', confirmLabel: 'Delete', danger: true }).then((ok) => void (ok && strategyApi.remove(x.id).then(() => { if (doc.id === x.id) { setDoc((d) => ({ ...d, id: undefined })); setSaved(null); } refresh(); }, (e: Error) => setError(e.message)))); }} />
-
-      <div className="grid min-w-0 gap-5">
-        <Card title={
-          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+    <div className="grid min-w-0 content-start gap-5">
+        <section className="panel grid gap-4 p-5">
+          {/* name and saving */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <input value={doc.name} onChange={(e) => setDoc({ ...doc, name: e.target.value })} aria-label="Strategy name" title={doc.name} className="min-w-[8rem] max-w-full bg-transparent text-[18px] font-semibold tracking-[-0.01em] [field-sizing:content] focus:outline-none" />
-            {dirty && <span className="shrink-0 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-semibold text-accent-deep">Unsaved changes</span>}
+            {dirty && <span className="shrink-0 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-semibold text-accent-deep">Unsaved</span>}
             {notice && <span className="text-[12.5px] font-semibold text-up" role="status">{notice}</span>}
-          </span>
-        } actions={
-          <>
-            <Button onClick={() => save(false)} disabled={!dirty && !!doc.id}><Save size={15} /> Save</Button>
-            {doc.id && <Button variant="ghost" onClick={() => save(true)}>Save as new</Button>}
-            {doc.id && <Link href={`/alerts?strategy=${doc.id}`} className="inline-flex h-10 items-center gap-1.5 rounded-[12px] px-3 text-[14px] font-semibold text-ink-2 hover:bg-raised hover:text-ink"><Bell size={15} /> Alert</Link>}
-            <Button variant="ghost" onClick={() => leaving(() => open({ ...NEW_DOC }, null))}><FilePlus2 size={15} /> New</Button>
-          </>
-        }>
-          <nav aria-label="Steps" className="mb-5 flex flex-wrap gap-1.5">
-            {STEPS.map((st, i) => {
-              const flag = (st === 'Entry' && !entryOk) || (st === 'Exit' && !exitOk);
-              return (
-                <button key={st} type="button" onClick={() => setStep(st)} aria-current={step === st ? 'step' : undefined}
-                  className={`flex h-9 items-center gap-2 rounded-[10px] px-3 text-[13.5px] font-semibold ${step === st ? 'bg-inverse text-on-inverse' : 'border border-line-strong text-ink-2 hover:text-ink'}`}>
-                  <span className={`grid h-5 w-5 place-items-center rounded-full text-[11px] ${step === st ? 'bg-on-inverse/15' : 'bg-raised'}`}>{i + 1}</span>{st}
-                  {flag && <span className="h-1.5 w-1.5 rounded-full bg-down" aria-label="needs attention" />}
-                </button>
-              );
-            })}
-          </nav>
+            <span className="ml-auto flex flex-wrap items-center gap-1.5">
+              <Button className="h-9" onClick={() => save(false)} disabled={!dirty && !!doc.id}><Save size={15} /> Save</Button>
+              {doc.id && <Button variant="ghost" className="h-9" onClick={() => save(true)}>Save as new</Button>}
+              {doc.id && <Link href={`/alerts?strategy=${doc.id}`} className="inline-flex h-9 items-center gap-1.5 rounded-[12px] px-3 text-[14px] font-semibold text-ink-2 hover:bg-raised hover:text-ink"><Bell size={15} /> Alert</Link>}
+              <Button variant="ghost" className="h-9" onClick={() => leaving(() => open({ ...NEW_DOC }, null))}><FilePlus2 size={15} /> New</Button>
+            </span>
+          </div>
+
+          {/* the sentence: which stocks, which candles, which period */}
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 text-[clamp(16px,1.5vw,19px)] font-semibold text-ink">
+            <span>Test on</span>
+            <UniverseSelect universe={doc.universe} filters={{}} meta={meta} watchlists={watchlists} watch={watch} className={WORD}
+              onChange={(universe) => setDoc({ ...doc, universe })} onPick={() => setDoc({ ...doc, universe: { kind: 'symbols', symbols: [] } })} />
+            <span>with</span>
+            <select value={s.tf} onChange={(e) => set({ tf: e.target.value as EquityStrategy['tf'] })} aria-label="Candles" className={WORD}>
+              {([['1m', '1-minute'], ['5m', '5-minute'], ['15m', '15-minute'], ['1h', '1-hour'], ['D', 'daily'], ['W', 'weekly'], ['M', 'monthly']] as const).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+            <span>candles over</span>
+            <PeriodPick s={s} set={set} className={WORD} />
+            <Button variant="primary" onClick={run} disabled={running || !entryOk || !exitOk} className="ml-auto h-10 min-w-[150px] text-[15px]"><Play size={16} /> {running ? 'Testing…' : 'Run backtest'}</Button>
+          </div>
+          {doc.universe.kind === 'symbols' && !isMyWatchlist(doc.universe) && (
+            <SymbolPicker symbols={doc.universe.symbols} onChange={(symbols) => setDoc({ ...doc, universe: { kind: 'symbols', symbols } })} />
+          )}
+          {isIntradayTf(s.tf) && s.from < yearsAgo(1) && <p className="text-[12.5px] text-muted">Minute candles go back about a year (stored Kite minutes), so the test starts where they do.</p>}
+
+          <div className="grid gap-3 border-t border-dashed border-line-strong pt-3">
+            {/* entry */}
+            <Line label="Buy when" summary={ruleText(s.entry) || 'no rule yet'} bad={!entryOk} open={edit === 'entry'} onToggle={() => setEdit(edit === 'entry' ? null : 'entry')}
+              extra={screens.length > 0 && (
+                <select value="" onChange={(e) => { const sc = screens.find((x) => x.id === e.target.value); if (sc) set({ entry: sc.formula, tf: sc.tf as EquityStrategy['tf'] }); }} aria-label="Use a saved scan" className={`${inputCls} h-9 pr-7 text-[13px]`}>
+                  <option value="">Use a saved scan…</option>
+                  {screens.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </select>
+              )} />
+            {edit === 'entry' && <div className="rounded-[12px] bg-raised p-3"><RuleEditor value={s.entry} onChange={(entry) => set({ entry })} meta={meta} tf={s.tf} lead="Buy when" emptyText="Add the conditions that open a trade." /></div>}
+
+            {/* exit */}
+            <Row label="Exit">
+              <StopPick s={s} set={set} />
+              <TargetPick s={s} set={set} />
+              <TrailPick s={s} set={set} />
+            </Row>
+            <Line label="Sell when" summary={ruleText(s.exit) || 'no exit signal (stop, target or trailing ends the trade)'} bad={!exitOk} open={edit === 'exit'} onToggle={() => setEdit(edit === 'exit' ? null : 'exit')} />
+            {edit === 'exit' && <div className="rounded-[12px] bg-raised p-3"><RuleEditor value={s.exit ?? ''} onChange={(exit) => set({ exit })} meta={meta} tf={s.tf} lead="Sell when" emptyText="Without an exit signal, trades end at the stop, target, trailing stop or time exit." /></div>}
+
+            {/* money */}
+            <Row label="Money">
+              <CapitalPick s={s} set={set} />
+              <SizePick s={s} set={set} />
+              <MaxOpenPick s={s} set={set} />
+              <label className="flex items-center gap-1.5 text-[13px] text-ink-2">Broker
+                <select value={s.broker} onChange={(e) => set({ broker: e.target.value })} aria-label="Broker" className="h-9 cursor-pointer rounded-[10px] border border-line-strong bg-panel pl-2.5 pr-7 text-[13px] font-semibold">{BROKERS.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
+              </label>
+            </Row>
+
+            {/* the trading day, for minute candles */}
+            {isIntradayTf(s.tf) && (
+              <Row label="Day" tip="Trades start when a signal candle closes; nothing opens after the last entry; every position is closed at Close all. Keep it before your broker's own auto square-off.">
+                <SessionPicks rules={s.intraday ?? DEFAULT_INTRADAY} onChange={(intraday) => set({ intraday })} />
+              </Row>
+            )}
+
+            <button type="button" onClick={() => setMore((m) => !m)} aria-expanded={more} className="inline-flex w-fit items-center gap-1 text-[13px] font-semibold text-accent-deep hover:underline">
+              {more ? 'Fewer settings' : 'More settings'} <ChevronDown size={13} className={more ? 'rotate-180' : ''} />
+            </button>
+            {more && <More doc={doc} setDoc={setDoc} s={s} set={set} />}
+          </div>
 
           <StrategySentence doc={doc} />
-          {step === 'Basics' && <Basics doc={doc} setDoc={setDoc} />}
-          {step === 'Stocks' && <Stocks universe={doc.universe} meta={meta} watchlists={watchlists} onChange={(universe) => setDoc({ ...doc, universe })} />}
-          {step === 'Entry' && (
-            <div className="grid gap-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="eyebrow">Signal timeframe</span>
-                <Segmented label="Timeframe" value={s.tf} onChange={(tf) => set({ tf })}
-                  options={[{ value: '1m', label: '1m' }, { value: '5m', label: '5m' }, { value: '15m', label: '15m' }, { value: '1h', label: '1h' }, { value: 'D', label: 'Daily' }, { value: 'W', label: 'Weekly' }, { value: 'M', label: 'Monthly' }]} />
-                <InfoTip label="Timeframes">
-                  <p>Signals are read at the close of these bars and traded at the next bar&apos;s open. Any condition can be put on another timeframe (for example a daily trend filter on a 5-minute strategy) from the picker beside it.</p>
-                  <p>Minute timeframes use the stored Kite minutes (about a year, for NIFTY 500, F&amp;O stocks and the main indices). Orders never carry to the next day, and every position is squared off the same day.</p>
-                </InfoTip>
-                {screens.length > 0 && (
-                  <select value="" onChange={(e) => { const sc = screens.find((x) => x.id === e.target.value); if (sc) set({ entry: sc.formula, tf: sc.tf as EquityStrategy['tf'] }); }} aria-label="Use a saved screen" className={`${inputCls} ml-auto pr-8`}>
-                    <option value="">Use a saved screen as the entry…</option>
-                    {screens.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                  </select>
-                )}
-              </div>
-              {isIntradayTf(s.tf) && <SessionTimes rules={s.intraday ?? DEFAULT_INTRADAY} onChange={(intraday) => set({ intraday })} />}
-              <RuleEditor value={s.entry} onChange={(entry) => set({ entry })} meta={meta} tf={s.tf} lead="Buy when" emptyText="Add the conditions that open a trade." />
-            </div>
-          )}
-          {step === 'Exit' && <Exit s={s} set={set} meta={meta} />}
-          {step === 'Risk' && <Risk s={s} set={set} />}
-          {step === 'Backtest' && (
-            <div className="grid gap-4">
-              <div className="flex flex-wrap items-end gap-3">
-                <Field label="From"><input type="date" value={s.from} onChange={(e) => set({ from: e.target.value })} className={`${inputCls} num`} /></Field>
-                <Field label="To"><input type="date" value={s.to} onChange={(e) => set({ to: e.target.value })} className={`${inputCls} num`} /></Field>
-                <Field label="Risk-free rate % a year" tip="Used for Sharpe and Sortino. Set it to the current 91-day T-bill yield."><NumIn v={s.riskFreePct} on={(v) => set({ riskFreePct: v ?? 0 })} /></Field>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="eyebrow">Quick period</span>
-                {([['1 year', 1], ['3 years', 3], ['5 years', 5], ['All data', 20]] as const).map(([label, years]) => (
-                  <button key={label} type="button" onClick={() => set({ from: yearsAgo(years), to: todayIst() })}
-                    className="h-8 rounded-[9px] border border-line-strong px-3 text-[13px] font-semibold text-ink-2 hover:text-ink">{label}</button>
-                ))}
-              </div>
-              {daysBetween(s.from, s.to) < 365 && (
-                <p className="rounded-[12px] bg-down-soft px-3 py-2 text-[13px] text-down">
-                  This test covers {Math.max(0, daysBetween(s.from, s.to))} day{daysBetween(s.from, s.to) === 1 ? '' : 's'}. A signal at one bar&apos;s close trades at the next bar&apos;s open, so short tests show few or no trades. Pick at least a year (use Quick period).
-                </p>
-              )}
-            </div>
-          )}
-
-          <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-dashed border-line-strong pt-4">
-            <Button variant="primary" onClick={run} disabled={running || !entryOk || !exitOk} className="min-w-[160px]"><Play size={16} /> {running ? 'Testing…' : 'Run backtest'}</Button>
-            {step !== 'Backtest' && <Button variant="ghost" onClick={() => setStep(STEPS[STEPS.indexOf(step) + 1])}>Next: {STEPS[STEPS.indexOf(step) + 1]} <ArrowRight size={15} /></Button>}
-            {!entryOk && <span className="text-[13px] text-down">Add a valid entry condition (step 3).</span>}
-            {entryOk && !exitOk && <span className="text-[13px] text-down">Fix the exit condition (step 4).</span>}
-          </div>
-          {error && <p role="alert" className="mt-3 rounded-[12px] bg-down-soft px-3 py-2 text-[13.5px] text-down">{error}</p>}
-        </Card>
+          {!entryOk && <p className="text-[13px] text-down">Add a valid buy rule (Buy when → Edit).</p>}
+          {entryOk && !exitOk && <p className="text-[13px] text-down">Fix the sell rule (Sell when → Edit).</p>}
+          {daysBetween(s.from, s.to) < 365 && <p className="rounded-[12px] bg-down-soft px-3 py-2 text-[13px] text-down">This test covers {Math.max(0, daysBetween(s.from, s.to))} days. Short tests show few or no trades: pick at least a year.</p>}
+          {error && <p role="alert" className="rounded-[12px] bg-down-soft px-3 py-2 text-[13.5px] text-down">{error}</p>}
+        </section>
+        {/* Every strategy as a tile: saved ones and templates; a click opens it in the editor above */}
+        <StrategyGallery open={galleryOpen} onToggle={() => setGalleryOpen((o) => !o)} list={list} activeId={doc.id}
+          onTemplate={(t) => leaving(() => { open({ ...NEW_DOC, name: t.name, description: t.about, style: t.style, strategy: { ...DEFAULT_STRATEGY, ...t.patch }, universe: doc.universe }, null); setGalleryOpen(false); scrollTop(); })}
+          onOpen={(x) => leaving(() => { open(fromSaved(x), JSON.stringify(fromSaved(x))); setGalleryOpen(false); scrollTop(); })}
+          onDelete={(x) => { void confirmDialog({ title: `Delete "${x.name}"?`, message: 'Its backtest history goes with it.', confirmLabel: 'Delete', danger: true }).then((ok) => void (ok && strategyApi.remove(x.id).then(() => { if (doc.id === x.id) { setDoc((d) => ({ ...d, id: undefined })); setSaved(null); } refresh(); }, (e: Error) => setError(e.message)))); }} />
         {running && <Card><p className="text-[14px] text-ink-2">Testing on every stock in the list, bar by bar…</p></Card>}
         {result && !running && resultKey !== runKey && (
           <p role="status" className="flex flex-wrap items-center gap-2 rounded-[12px] bg-accent-soft px-4 py-2.5 text-[13.5px] text-ink-2">
@@ -201,44 +205,6 @@ export function StrategyWorkspace() {
           </p>
         )}
         {result && !running && <div className={resultKey !== runKey ? 'opacity-50' : undefined}><BacktestResults r={result} /></div>}
-      </div>
-    </div>
-  );
-}
-
-function Library({ list, activeId, onTemplate, onOpen, onDelete }: { list: SavedStrategy[] | null; activeId?: string; onTemplate: (t: (typeof TEMPLATES)[number]) => void; onOpen: (s: SavedStrategy) => void; onDelete: (s: SavedStrategy) => void }) {
-  return (
-    <div className="grid h-fit gap-5 xl:sticky xl:top-24">
-      <Card title="My strategies">
-        <ul className="grid max-h-[40vh] gap-1 overflow-y-auto">
-          {!list && <li className="text-[13px] text-muted">Loading…</li>}
-          {list?.length === 0 && <li className="text-[13px] text-muted">None saved yet. Start from a template below, or build one.</li>}
-          {list?.map((x) => {
-            const b = x.backtests[0];
-            return (
-              <li key={x.id} className={`group flex items-start rounded-[10px] ${x.id === activeId ? 'bg-accent-soft' : 'hover:bg-raised'}`}>
-                <button type="button" onClick={() => onOpen(x)} className="min-w-0 flex-1 px-2.5 py-2 text-left">
-                  <span className="block truncate text-[14px] font-medium">{x.name}</span>
-                  <span className="block text-[12px] text-muted">{b ? `Tested ${ago(b.at)}: ${b.returnPct >= 0 ? '+' : ''}${b.returnPct.toFixed(1)}%, max DD ${b.maxDrawdownPct.toFixed(1)}%` : 'Not tested yet'}</span>
-                </button>
-                <button type="button" onClick={() => onDelete(x)} aria-label={`Delete ${x.name}`} className="m-1.5 grid h-7 w-7 place-items-center rounded-[8px] text-muted opacity-0 hover:text-down group-hover:opacity-100 focus:opacity-100"><Trash2 size={14} /></button>
-              </li>
-            );
-          })}
-        </ul>
-      </Card>
-      <Card title="Templates">
-        <ul className="grid gap-1">
-          {TEMPLATES.map((t) => (
-            <li key={t.id}>
-              <button type="button" onClick={() => onTemplate(t)} className="w-full rounded-[10px] px-2.5 py-2 text-left hover:bg-raised">
-                <span className="flex items-center gap-2 text-[14px] font-medium">{t.name}{t.style === 'intraday' && <span className="rounded-full bg-raised px-1.5 text-[10.5px] font-semibold text-muted">intraday</span>}</span>
-                <span className="line-clamp-2 block text-[12px] text-muted">{t.about}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </Card>
     </div>
   );
 }
@@ -315,191 +281,64 @@ function RuleEditor({ value, onChange, meta, tf, lead, emptyText }: { value: str
   );
 }
 
-/** Intraday: the last time a new trade may start and the time everything is squared off. */
-function SessionTimes({ rules, onChange }: { rules: IntradayRules; onChange: (r: IntradayRules) => void }) {
+/** One rule line: its plain-words summary and an Edit button that opens the rule editor below. */
+function Line({ label, summary, bad, open, onToggle, extra }: { label: string; summary: string; bad: boolean; open: boolean; onToggle: () => void; extra?: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-end gap-4 rounded-[12px] bg-raised px-4 py-3">
-      <Field label="Start trades from"><input type="time" min="09:15" max="15:30" value={rules.firstEntry ?? '09:15'} onChange={(e) => onChange({ ...rules, firstEntry: e.target.value })} className={`${inputCls} num w-[130px]`} /></Field>
-      <Field label="No new trades from"><input type="time" min="09:15" max="15:30" value={rules.lastEntry} onChange={(e) => onChange({ ...rules, lastEntry: e.target.value })} className={`${inputCls} num w-[130px]`} /></Field>
-      <Field label="Square off at"><input type="time" min="09:15" max="15:30" value={rules.squareOff} onChange={(e) => onChange({ ...rules, squareOff: e.target.value })} className={`${inputCls} num w-[130px]`} /></Field>
-      <p className="max-w-[420px] pb-2 text-[12.5px] text-muted">A trade starts when the signal candle closes, so with 15-minute candles the first possible entry is 09:30. Open positions are closed at the square-off bar&apos;s open, or at the day&apos;s last bar if the data ends earlier. Check your broker&apos;s own auto square-off time and keep this before it.</p>
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-[13.5px]">
+      <span className="w-[84px] shrink-0 font-semibold text-ink">{label}</span>
+      <span className={`min-w-0 flex-1 truncate ${bad ? 'text-down' : 'text-ink-2'}`} title={summary}>{summary}</span>
+      {extra}
+      <button type="button" onClick={onToggle} aria-expanded={open} className="inline-flex shrink-0 items-center gap-1 font-semibold text-accent-deep hover:underline">
+        {open ? 'Done' : 'Edit'} <ChevronDown size={13} className={open ? 'rotate-180' : ''} />
+      </button>
     </div>
   );
 }
 
-function Basics({ doc, setDoc }: { doc: StrategyDoc; setDoc: (d: StrategyDoc) => void }) {
+/** One settings row: a label and its dropdowns. */
+function Row({ label, tip, children }: { label: string; tip?: string; children: React.ReactNode }) {
   return (
-    <div className="grid gap-4">
-      <Field label="Description"><textarea value={doc.description} onChange={(e) => setDoc({ ...doc, description: e.target.value })} rows={3} className={`${inputCls} h-auto py-2`} placeholder="What the strategy tries to catch, and why" /></Field>
-      <div className="flex flex-wrap items-end gap-4">
-        <Field label="Market"><span className="flex h-10 items-center text-[14px]">NSE</span></Field>
-        <Field label="Instrument"><span className="flex h-10 items-center text-[14px]">Equity (cash)</span></Field>
-        <Field label="Style">
-          <Segmented label="Style" value={doc.style} onChange={(style) => setDoc({ ...doc, style })} options={[{ value: 'intraday', label: 'Intraday' }, { value: 'swing', label: 'Swing' }, { value: 'positional', label: 'Positional' }]} />
-        </Field>
-        <Field label="Direction"><span className="flex h-10 items-center text-[14px]">Long (buy)</span></Field>
-      </div>
-      <p className="text-[12.5px] text-muted">Intraday strategies run on the stored Kite minutes (about a year) and are squared off the same day. Short selling isn&apos;t in the backtest yet, so every strategy buys first.</p>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <span className="flex w-[84px] shrink-0 items-center gap-1 text-[13.5px] font-semibold text-ink">{label}{tip && <InfoTip label={label}>{tip}</InfoTip>}</span>
+      {children}
     </div>
   );
 }
 
-function Stocks({ universe, meta, watchlists, onChange }: { universe: UniverseSpec; meta: Meta | null; watchlists: Watchlist[]; onChange: (u: UniverseSpec) => void }) {
-  const key = universe.kind === 'index' ? `index:${universe.name}` : universe.kind === 'watchlist' ? `watchlist:${universe.id}` : universe.kind;
-  // Switching to "Pick" and back keeps the picked list for this visit.
-  const [picked, setPicked] = useState<string[]>(universe.kind === 'symbols' ? universe.symbols : []);
-  const choose = (list: string[]) => { setPicked(list); onChange({ kind: 'symbols', symbols: list }); };
-  const pick = (k: string) => {
-    if (k === 'all' || k === 'fno') onChange({ kind: k });
-    else if (k.startsWith('index:')) onChange({ kind: 'index', name: k.slice(6) });
-    else if (k.startsWith('watchlist:')) onChange({ kind: 'watchlist', id: k.slice(10) });
-    else onChange({ kind: 'symbols', symbols: picked });
-  };
+/** A rule in plain words when the simple lists can read it, else the formula itself. */
+const ruleText = (f: string | undefined) => { const r = parseRows(f ?? ''); return r ? rowsText(r) : (f ?? '').trim(); };
+
+/** The settings most tests leave alone: description, style, time exit, order, ranking, costs. */
+function More({ doc, setDoc, s, set }: { doc: StrategyDoc; setDoc: (d: StrategyDoc) => void; s: EquityStrategy; set: (p: Partial<EquityStrategy>) => void }) {
   return (
-    <div className="grid gap-4">
-      <Field label="Test on">
-        <select value={key} onChange={(e) => pick(e.target.value)} className={`${inputCls} w-[320px] pr-8`}>
-          <option value="symbols">Pick stocks or an index (NIFTY 50, BANK NIFTY…)</option>
-          <option value="all">All NSE stocks (delisted ones included)</option>
-          <option value="fno">F&amp;O stocks</option>
-          <optgroup label="Stocks in an index">{MAIN_INDICES.map((i) => <option key={i} value={`index:${i}`}>{i} stocks</option>)}</optgroup>
-          {meta && <optgroup label="Stocks in a sector or theme index">{meta.indices.filter((i) => !MAIN_INDICES.includes(i)).map((i) => <option key={i} value={`index:${i}`}>{i} stocks</option>)}</optgroup>}
-          {watchlists.length > 0 && <optgroup label="My watchlists">{watchlists.map((w) => <option key={w.id} value={`watchlist:${w.id}`}>{w.name} ({w.symbols.length})</option>)}</optgroup>}
-        </select>
-      </Field>
-      {universe.kind === 'symbols' && <SymbolPicker symbols={universe.symbols} onChange={choose} />}
-      <div className="grid gap-1.5 text-[12.5px] text-muted">
-        <p>Each stock is traded only on days it traded: newly listed stocks join when their history starts, and delisted ones leave on their last day.</p>
-        {universe.kind === 'index' && <p>This tests each stock in {universe.name}, one by one. To trade the index itself, choose &quot;Pick stocks or an index&quot; and add it.</p>}
-        {(universe.kind === 'index' || universe.kind === 'fno') && <p className="text-accent-deep">An index list is today&apos;s members. Stocks that left it in the past are missing, which makes results look better than they were (survivorship bias). &quot;All NSE stocks&quot; avoids this.</p>}
-        <p>Liquidity is checked on each signal day (Risk step), not from today&apos;s values, so the past is never filtered with information from the future.</p>
-        {universe.kind === 'symbols' && universe.symbols.some((x) => TEST_INDICES.some((i) => i.symbol === x)) && (
-          <p className="text-accent-deep">An index can&apos;t be bought itself, so it is tested as a stand-in for index futures or an index ETF: quantity in index units (1 unit gains ₹1 per point), futures charges, and no volume (rules using volume never signal on it).</p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Exit({ s, set, meta }: { s: EquityStrategy; set: (p: Partial<EquityStrategy>) => void; meta: Meta | null }) {
-  const stopKind = s.stop.kind, tgKind = s.target.kind, trKind = s.trail.kind;
-  return (
-    <div className="grid gap-6">
-      <div className="grid gap-3">
-        <h3 className="text-[15px] font-semibold">Stop loss</h3>
-        <div className="flex flex-wrap items-end gap-3">
-          <Field label="Type">
-            <select value={stopKind} onChange={(e) => {
-              const k = e.target.value;
-              set({ stop: k === 'none' ? { kind: 'none' } : k === 'pct' ? { kind: 'pct', value: 2 } : k === 'points' ? { kind: 'points', value: 10 } : k === 'atr' ? { kind: 'atr', mult: 2, length: 14 } : { kind: 'formula', formula: 'SUPERTREND(10, 3)' } });
-            }} className={`${inputCls} pr-8`}>
-              <option value="none">No stop loss</option><option value="pct">% below entry</option><option value="points">₹ below entry</option><option value="atr">ATR multiple below entry</option><option value="formula">Indicator level</option>
-            </select>
-          </Field>
-          {s.stop.kind === 'pct' && <Field label="%"><NumIn v={s.stop.value} on={(v) => set({ stop: { kind: 'pct', value: v ?? 0 } })} /></Field>}
-          {s.stop.kind === 'points' && <Field label="₹"><NumIn v={s.stop.value} on={(v) => set({ stop: { kind: 'points', value: v ?? 0 } })} /></Field>}
-          {s.stop.kind === 'atr' && <><Field label="× ATR"><NumIn v={s.stop.mult} on={(v) => set({ stop: { ...(s.stop as { kind: 'atr'; mult: number; length: number }), mult: v ?? 0 } })} /></Field><Field label="ATR length"><NumIn step="1" v={s.stop.length} on={(v) => set({ stop: { ...(s.stop as { kind: 'atr'; mult: number; length: number }), length: v ?? 14 } })} /></Field></>}
-          {s.stop.kind === 'formula' && (
-            <Field label="Level formula" tip="A price level, re-read at every close and used from the next bar, e.g. SUPERTREND(10, 3), LOWEST(LOW, 10)[1] or EMA(CLOSE, 20).">
-              <input value={s.stop.formula} onChange={(e) => set({ stop: { kind: 'formula', formula: e.target.value } })} spellCheck={false} className={`${inputCls} w-[280px] font-mono`} />
-            </Field>
-          )}
-        </div>
-        {s.stop.kind === 'formula' && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-[12.5px] text-muted">Quick picks:</span>
-            {STOP_PICKS.filter((x) => isIntradayTf(s.tf) || !x.intraday).map((x) => {
-              const on = s.stop.kind === 'formula' && s.stop.formula === x.formula;
-              return <button key={x.formula} type="button" aria-pressed={on} onClick={() => set({ stop: { kind: 'formula', formula: x.formula } })}
-                className={`h-7 rounded-full px-3 text-[12.5px] font-semibold ${on ? 'bg-inverse text-on-inverse' : 'border border-line-strong text-ink-2 hover:text-ink'}`}>{x.label}</button>;
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="grid gap-3">
-        <h3 className="text-[15px] font-semibold">Target</h3>
-        <div className="flex flex-wrap items-end gap-3">
-          <Field label="Type">
-            <select value={tgKind} onChange={(e) => { const k = e.target.value; set({ target: k === 'none' ? { kind: 'none' } : { kind: k as 'pct' | 'points' | 'rr', value: k === 'rr' ? 2 : k === 'pct' ? 5 : 20 } }); }} className={`${inputCls} pr-8`}>
-              <option value="none">No target</option><option value="pct">% above entry</option><option value="points">₹ above entry</option><option value="rr">Multiple of the risk (R:R)</option>
-            </select>
-          </Field>
-          {s.target.kind !== 'none' && <Field label={s.target.kind === 'pct' ? '%' : s.target.kind === 'points' ? '₹' : '× risk'}><NumIn v={s.target.value} on={(v) => set({ target: { ...(s.target as { kind: 'pct'; value: number }), value: v ?? 0 } })} /></Field>}
-        </div>
-      </div>
-
-      <div className="grid gap-3">
-        <h3 className="flex items-center gap-1.5 text-[15px] font-semibold">Trailing stop <InfoTip label="Trailing stop">Follows the highest high since entry at this distance. It moves only at a bar&apos;s close and is used from the next bar, so it never reacts to prices inside the bar that moved it.</InfoTip></h3>
-        <div className="flex flex-wrap items-end gap-3">
-          <Field label="Type">
-            <select value={trKind} onChange={(e) => { const k = e.target.value; set({ trail: k === 'none' ? { kind: 'none' } : k === 'atr' ? { kind: 'atr', mult: 3, length: 14 } : { kind: k as 'pct' | 'points', value: k === 'pct' ? 8 : 20 } }); }} className={`${inputCls} pr-8`}>
-              <option value="none">No trailing stop</option><option value="pct">% below the high</option><option value="points">₹ below the high</option><option value="atr">ATR multiple below the high</option>
-            </select>
-          </Field>
-          {(s.trail.kind === 'pct' || s.trail.kind === 'points') && <Field label={s.trail.kind === 'pct' ? '%' : '₹'}><NumIn v={s.trail.value} on={(v) => set({ trail: { ...(s.trail as { kind: 'pct'; value: number }), value: v ?? 0 } })} /></Field>}
-          {s.trail.kind === 'atr' && <><Field label="× ATR"><NumIn v={s.trail.mult} on={(v) => set({ trail: { ...(s.trail as { kind: 'atr'; mult: number; length: number }), mult: v ?? 0 } })} /></Field><Field label="ATR length"><NumIn step="1" v={s.trail.length} on={(v) => set({ trail: { ...(s.trail as { kind: 'atr'; mult: number; length: number }), length: v ?? 14 } })} /></Field></>}
-        </div>
-      </div>
-
-      <div className="grid gap-3">
-        <h3 className="text-[15px] font-semibold">Time exit</h3>
-        <Field label="Leave after (bars, empty = no limit)"><NumIn step="1" v={s.maxBars} on={(v) => set({ maxBars: v ? Math.round(v) : undefined })} /></Field>
-      </div>
-
-      <div className="grid gap-3">
-        <h3 className="text-[15px] font-semibold">Exit signal <span className="text-[13px] font-normal text-muted">(optional)</span></h3>
-        <RuleEditor value={s.exit ?? ''} onChange={(exit) => set({ exit })} meta={meta} tf={s.tf} lead="Sell when" emptyText="Without an exit signal, trades end at the stop, target, trailing stop or time exit." />
-      </div>
-    </div>
-  );
-}
-
-function Risk({ s, set }: { s: EquityStrategy; set: (p: Partial<EquityStrategy>) => void }) {
-  const sz = s.sizing;
-  return (
-    <div className="grid gap-6">
+    <div className="grid gap-4 rounded-[12px] bg-raised p-4">
+      <Field label="Description"><textarea value={doc.description} onChange={(e) => setDoc({ ...doc, description: e.target.value })} rows={2} className={`${inputCls} h-auto py-2`} placeholder="What the strategy tries to catch, and why" /></Field>
       <div className="flex flex-wrap items-end gap-3">
-        <Field label="Starting capital ₹"><NumIn v={s.capitalRupees} on={(v) => set({ capitalRupees: v ?? 0 })} w="w-[160px]" /></Field>
-        <Field label="Position size">
-          <select value={sz.mode} onChange={(e) => { const m = e.target.value; set({ sizing: m === 'qty' ? { mode: 'qty', qty: 10 } : m === 'amount' ? { mode: 'amount', rupees: 100000 } : m === 'percent' ? { mode: 'percent', pct: 10 } : { mode: 'risk', pct: 1 } }); }} className={`${inputCls} pr-8`}>
-            <option value="percent">% of capital</option><option value="amount">Fixed ₹ amount</option><option value="qty">Fixed quantity</option><option value="risk">Risk % of capital (needs a stop)</option>
-          </select>
-        </Field>
-        {sz.mode === 'percent' && <Field label="% per trade"><NumIn v={sz.pct} on={(v) => set({ sizing: { mode: 'percent', pct: v ?? 0 } })} /></Field>}
-        {sz.mode === 'amount' && <Field label="₹ per trade"><NumIn v={sz.rupees} on={(v) => set({ sizing: { mode: 'amount', rupees: v ?? 0 } })} w="w-[150px]" /></Field>}
-        {sz.mode === 'qty' && <Field label="Shares"><NumIn step="1" v={sz.qty} on={(v) => set({ sizing: { mode: 'qty', qty: Math.round(v ?? 0) } })} /></Field>}
-        {sz.mode === 'risk' && <Field label="% risked per trade" tip="Shares = capital × risk % ÷ (signal close − stop). Losing at the stop then costs about this share of capital."><NumIn v={sz.pct} on={(v) => set({ sizing: { mode: 'risk', pct: v ?? 0 } })} /></Field>}
-        <label className="flex h-10 items-center gap-2 text-[13.5px]"><input type="checkbox" checked={s.reinvest} onChange={(e) => set({ reinvest: e.target.checked })} className="accent-[var(--color-accent)]" /> Size from current equity (compounding)</label>
-      </div>
-
-      <div className="flex flex-wrap items-end gap-3">
-        <Field label="Open positions at once"><NumIn step="1" v={s.maxOpen} on={(v) => set({ maxOpen: Math.round(v ?? 1) })} /></Field>
+        <Field label="Style"><Segmented label="Style" value={doc.style} onChange={(style) => setDoc({ ...doc, style })} options={[{ value: 'intraday', label: 'Intraday' }, { value: 'swing', label: 'Swing' }, { value: 'positional', label: 'Positional' }]} /></Field>
+        <Field label="Leave after (candles)" tip="Close the trade after this many candles. Empty = no limit."><NumIn step="1" v={s.maxBars} on={(v) => set({ maxBars: v ? Math.round(v) : undefined })} /></Field>
         <Field label="Entries per stock" tip="Above 1 allows adding to a stock that is already held (pyramiding)."><NumIn step="1" v={s.pyramid} on={(v) => set({ pyramid: Math.round(v ?? 1) })} /></Field>
-        <Field label="Wait after an exit (bars)"><NumIn step="1" v={s.cooldownBars} on={(v) => set({ cooldownBars: Math.round(v ?? 0) })} /></Field>
-        <Field label="New entries per bar"><NumIn step="1" v={s.maxEntriesPerBar} on={(v) => set({ maxEntriesPerBar: Math.round(v ?? 1) })} /></Field>
-        <Field label="Min traded value ₹ cr/day" tip="The stock's 20-day average traded value on the signal day. Thinly traded stocks fill worse than any backtest assumes."><NumIn v={s.minAvgValueCr} on={(v) => set({ minAvgValueCr: v ?? 0 })} /></Field>
+        <Field label="Wait after an exit (candles)"><NumIn step="1" v={s.cooldownBars} on={(v) => set({ cooldownBars: Math.round(v ?? 0) })} /></Field>
+        <Field label="New entries per candle"><NumIn step="1" v={s.maxEntriesPerBar} on={(v) => set({ maxEntriesPerBar: Math.round(v ?? 1) })} /></Field>
       </div>
-
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Order">
           <select value={s.order.type} onChange={(e) => { const t = e.target.value; set({ order: t === 'market' ? { type: 'market' } : { type: t as 'limit' | 'stop', offsetPct: t === 'limit' ? 0.5 : 0.1 } }); }} className={`${inputCls} pr-8`}>
-            <option value="market">Market at the next open</option><option value="limit">Limit below the signal close</option><option value="stop">Stop above the signal bar&apos;s high</option>
+            <option value="market">Market at the next open</option><option value="limit">Limit below the signal close</option><option value="stop">Stop above the signal candle&apos;s high</option>
           </select>
         </Field>
         {s.order.type !== 'market' && <Field label="Offset %"><NumIn v={s.order.offsetPct} on={(v) => set({ order: { ...(s.order as { type: 'limit'; offsetPct: number }), offsetPct: v ?? 0 } })} /></Field>}
-        <Field label="When signals exceed free slots, prefer the highest" tip="Any value formula. AVG_TURNOVER(20) prefers the most traded stocks; RSI(CLOSE, 14) the strongest; -ATR_PCT(14) the calmest.">
-          <input value={s.rank} onChange={(e) => set({ rank: e.target.value })} spellCheck={false} className={`${inputCls} w-[240px] font-mono`} />
+        <Field label="Too many signals: prefer the highest" tip="Any value formula. AVG_TURNOVER(20) prefers the most traded stocks; RSI(CLOSE, 14) the strongest; -ATR_PCT(14) the calmest.">
+          <input value={s.rank} onChange={(e) => set({ rank: e.target.value })} spellCheck={false} className={`${inputCls} w-[220px] font-mono`} />
         </Field>
+        <Field label="Min traded value ₹ cr/day" tip="The stock's 20-day average traded value on the signal day. Thinly traded stocks fill worse than any backtest assumes."><NumIn v={s.minAvgValueCr} on={(v) => set({ minAvgValueCr: v ?? 0 })} /></Field>
       </div>
-
       <div className="flex flex-wrap items-end gap-3">
-        <Field label="Broker charges">
-          <select value={s.broker} onChange={(e) => set({ broker: e.target.value })} className={`${inputCls} pr-8`}>{BROKERS.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
-        </Field>
-        <label className="flex h-10 items-center gap-2 text-[13.5px]"><input type="checkbox" checked={s.charges} onChange={(e) => set({ charges: e.target.checked })} className="accent-[var(--color-accent)]" /> Include brokerage, STT, exchange fees, stamp duty, GST and DP charges</label>
         <Field label="Slippage % a side" tip="Taken off every fill, against you. 0.05% is mild for liquid large caps; use more for small caps."><NumIn v={s.slippagePct} on={(v) => set({ slippagePct: v ?? 0 })} /></Field>
+        <Field label="Risk-free % a year" tip="Used for Sharpe and Sortino: the current 91-day T-bill yield."><NumIn v={s.riskFreePct} on={(v) => set({ riskFreePct: v ?? 0 })} /></Field>
+        <label className="flex h-10 items-center gap-2 text-[13.5px]"><input type="checkbox" checked={s.charges} onChange={(e) => set({ charges: e.target.checked })} className="accent-[var(--color-accent)]" /> Include brokerage, STT and other charges</label>
+        <label className="flex h-10 items-center gap-2 text-[13.5px]"><input type="checkbox" checked={s.reinvest} onChange={(e) => set({ reinvest: e.target.checked })} className="accent-[var(--color-accent)]" /> Size from current equity (compounding)</label>
       </div>
+      <p className="text-[12px] text-muted">Every strategy buys first (short selling isn&apos;t in the backtest yet). Each stock trades only on days it traded, so new listings join late and delisted ones leave. An index list is today&apos;s members, which flatters results (survivorship bias).</p>
     </div>
   );
 }

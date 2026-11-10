@@ -22,6 +22,7 @@ export const OPTION_TOOLS: Tool[] = [
   { slug: 'gex', group: 'options', label: 'Gamma exposure', description: 'Gamma exposure by strike, the call and put walls, and the level where it changes sign.' },
   { slug: 'oi-spurts', group: 'options', label: 'OI changes & crossovers', description: 'Contracts that added or shed the most open interest, and strikes where put and call OI crossed.' },
   { slug: 'oi-clusters', group: 'options', label: 'Unusual OI', description: 'Strikes whose open interest changed far more than their own 20-day average. The rule is shown.' },
+  { slug: 'intraday-seller', group: 'options', label: 'Intraday seller', description: 'Is direction clear, which side is better to sell, which strike, and what would invalidate it. Live, checked every 5 minutes; analysis only.' },
   { slug: 'selling-report', group: 'options', label: 'Option selling report', description: 'Everything we tested on option selling, in plain words: what worked, what did not, charts, tables and comparisons.' },
   { slug: 'selling-study', group: 'options', label: 'Option selling test', description: 'Selling rules and adjustments tested on NSE’s NIFTY history: year by year, shock periods, gaps and costs.' },
   { slug: 'strategy-chart', group: 'options', label: 'Strategy chart', description: 'The combined premium of your own legs, day by day, against the underlying.' },
@@ -42,6 +43,7 @@ export const MARKET_TOOLS: Tool[] = [
 /** Utilities at /tools/<slug>. */
 export const UTILITY_TOOLS: Tool[] = [
   { slug: 'lot-size', group: 'utility', label: 'F&O lot sizes', description: 'The lot size of every NSE F&O index and stock today, and when each one last changed.' },
+  { slug: 'paper-log', group: 'utility', label: 'Paper log: 9:30 blind buy', description: 'The blind-buy scan run once at 9:30 every trading day, each pick closed at 3:00 pm on paper, with the running result.' },
   { slug: 'sip', group: 'utility', label: 'SIP calculator', description: 'What a monthly investment grows to: at a return you choose, or on the NIFTY 50’s actual closes.' },
 ];
 

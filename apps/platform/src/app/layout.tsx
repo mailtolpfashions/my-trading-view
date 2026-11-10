@@ -10,7 +10,7 @@ const outfit = localFont({ src: './fonts/Outfit-Variable.ttf', weight: '100 900'
 
 export const metadata: Metadata = {
   title: { default: 'Nandibull', template: '%s | Nandibull' },
-  description: 'Stock screener and strategy builder for NSE.',
+  description: 'Stock scanner and strategy builder for NSE.',
   robots: { index: false, follow: false },
 };
 

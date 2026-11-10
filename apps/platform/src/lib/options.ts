@@ -21,6 +21,8 @@ export type Chain = {
   forwardPaise: number | null;
   atmStrikePaise: number | null;
   rows: ChainRow[];
+  /** Futures listed that day, nearest expiry first (NSE's close; carried forward when untraded). */
+  futures?: { expiry: string; closePaise: number; settlePaise: number; traded: boolean }[];
 };
 
 /** The chain on `date` (the latest trading day on or before it; omitted = latest). */
@@ -34,7 +36,7 @@ export async function fetchChain(underlying: string, expiry?: string, date?: str
 /** Per-unit Greeks of a contract, from the chain it was added from (legs can come from different expiries). */
 export type LegGreeks = { delta: number; theta: number; vega: number };
 /** A leg in the builder. Price defaults to the official close but can be edited (what-if). */
-export type BuilderLeg = { id: string; kind: 'CE' | 'PE'; side: 'BUY' | 'SELL'; strikePaise: number; expiry: string; lots: number; pricePaise: number; iv: number | null; greeks: LegGreeks | null };
+export type BuilderLeg = { id: string; kind: 'CE' | 'PE' | 'FUT'; side: 'BUY' | 'SELL'; strikePaise: number; expiry: string; lots: number; pricePaise: number; iv: number | null; greeks: LegGreeks | null };
 
 export const legGreeks = (q: ChainSide): LegGreeks | null => (q.delta == null || q.theta == null || q.vega == null ? null : { delta: q.delta, theta: q.theta, vega: q.vega });
 
@@ -46,7 +48,7 @@ export type MarginResponse = {
   /** A past day's file (simulator): exposure and expiry-day rules are today's, not verified for that date. */
   historical?: boolean;
 };
-export async function fetchMargin(underlying: string, spotPaise: number, legs: { kind: 'CE' | 'PE'; expiry: string; strikePaise: number; qty: number; pricePaise: number }[], signal?: AbortSignal, date?: string): Promise<MarginResponse> {
+export async function fetchMargin(underlying: string, spotPaise: number, legs: { kind: 'CE' | 'PE' | 'FUT'; expiry: string; strikePaise: number; qty: number; pricePaise: number }[], signal?: AbortSignal, date?: string): Promise<MarginResponse> {
   const res = await feedFetch(`${FEED_URL}/api/margin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ underlying, spotPaise, legs, date }), signal });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.message ?? 'Margin unavailable');
@@ -110,12 +112,14 @@ export async function fetchFnoRange(): Promise<{ from: string | null; to: string
 }
 
 // ---- options simulator (feed: /api/options-sim) ----
-export type SimLegDay = { pricePaise: number | null; source: 'close' | 'settle' | 'expired' | 'missing'; iv: number | null; delta: number | null; theta: number | null; vega: number | null; gamma: number | null };
+export type SimLegDay = { pricePaise: number | null; openLots: number; source: 'close' | 'settle' | 'expired' | 'squared' | 'missing'; iv: number | null; delta: number | null; theta: number | null; vega: number | null; gamma: number | null };
 export type SimDay = { date: string; spotPaise: number | null; legs: SimLegDay[]; grossPaise: number; chargesIfExitPaise: number; netIfExitPaise: number; delta: number; theta: number; vega: number; gamma: number; greeksMissing: number; openLegs: number };
-export type SimLeg = { expiry: string; strikePaise: number; kind: 'CE' | 'PE'; side: 'BUY' | 'SELL'; lots: number; entryPaise: number; qty: number; enteredUntraded: boolean };
+export type SimLeg = { expiry: string; strikePaise: number; kind: 'CE' | 'PE' | 'FUT'; side: 'BUY' | 'SELL'; lots: number; entryPaise: number; qty: number; enteredUntraded: boolean };
 export type SimResult = { underlying: string; entryDate: string; lotSize: number; legs: SimLeg[]; entryChargesPaise: number; days: SimDay[]; end: 'expired' | 'end-of-data'; notes: string[] };
 
-export async function runSimulation(body: { underlying: string; entryDate: string; broker: string; legs: Omit<SimLeg, 'qty' | 'enteredUntraded'>[] }): Promise<SimResult> {
+/** Square off `lots` of leg `leg` (its index; all its open lots when omitted) at the close of `date`. */
+export type SimExit = { leg: number; date: string; lots?: number };
+export async function runSimulation(body: { underlying: string; entryDate: string; broker: string; legs: Omit<SimLeg, 'qty' | 'enteredUntraded'>[]; exits?: SimExit[] }): Promise<SimResult> {
   const res = await feedFetch(`${FEED_URL}/api/options-sim`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const out = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(out.message ?? 'Simulation failed');

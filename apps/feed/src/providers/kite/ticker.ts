@@ -82,13 +82,23 @@ export class KiteTicker {
 
   /** Subscribes new tokens (never more than Kite's 3,000), and upgrades already-subscribed ones to "full" when asked. */
   subscribe(tokens: number[], mode: 'quote' | 'full' = 'quote') {
-    const fresh = tokens.filter((t) => !this.tokens.has(t)).slice(0, 3000 - this.tokens.size);
+    const unseen = tokens.filter((t) => !this.tokens.has(t));
+    const fresh = unseen.slice(0, Math.max(0, 3000 - this.tokens.size));
+    if (fresh.length < unseen.length) this.log(`Kite live feed: ${unseen.length - fresh.length} instruments not subscribed (3,000 per connection limit)`);
     const upgrade = mode === 'full' ? tokens.filter((t) => this.tokens.get(t) === 'quote') : [];
     fresh.forEach((t) => this.tokens.set(t, mode));
     upgrade.forEach((t) => this.tokens.set(t, 'full'));
     if (fresh.length) this.send(fresh, mode);
     if (upgrade.length) this.setMode(upgrade, 'full');
   }
+
+  /** Sends the subscription again for tokens already in the list (for instruments that went silent). */
+  resubscribe(tokens: number[], mode: 'quote' | 'full' = 'full') {
+    this.send(tokens.filter((t) => this.tokens.has(t)), mode);
+  }
+
+  /** Instruments currently in the subscription list. */
+  get count() { return this.tokens.size; }
 
   private send(tokens: number[], mode: 'quote' | 'full') {
     if (this.ws?.readyState !== WebSocket.OPEN || !tokens.length) return;

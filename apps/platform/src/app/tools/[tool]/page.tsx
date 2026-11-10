@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { LotSizeTool } from '@/components/tools/utility/lot-size';
+import { PaperLogTool } from '@/components/tools/utility/paper-log';
 import { SipTool } from '@/components/tools/utility/sip';
 import { UTILITY_TOOLS } from '@/lib/tools';
 
@@ -17,5 +18,5 @@ export default async function UtilityToolPage({ params }: Props) {
   const slug = (await params).tool;
   const tool = UTILITY_TOOLS.find((x) => x.slug === slug);
   if (!tool) notFound();
-  return <Suspense>{slug === 'lot-size' ? <LotSizeTool tool={tool} /> : <SipTool tool={tool} />}</Suspense>;
+  return <Suspense>{slug === 'lot-size' ? <LotSizeTool tool={tool} /> : slug === 'paper-log' ? <PaperLogTool tool={tool} /> : <SipTool tool={tool} />}</Suspense>;
 }

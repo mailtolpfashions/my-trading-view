@@ -146,6 +146,11 @@ export class KiteProvider implements MarketDataProvider {
         this.symbolsByToken.set(token, c[cSym]);
       }
     }
+    // "NIFTY-FUT": the nearest unexpired NIFTY future, a traded instrument with volume (the intraday seller engine's VWAP
+    // proxy). Re-resolved at every instrument load, so it rolls to the next month after expiry.
+    const todayIst = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+    const near = (this.futures.get('NIFTY') ?? []).filter((f) => f.expiry >= todayIst).sort((a, b) => a.expiry.localeCompare(b.expiry))[0];
+    if (near) { this.tokens.set('NIFTY-FUT', near.token); this.symbolsByToken.set(near.token, 'NIFTY-FUT'); }
     const missing = INDICES.map((i) => i.symbol).filter((s) => !this.tokens.has(s));
     const opts = [...this.options].map(([u, l]) => `${u} ${l.length}`).join(', ') + `; futures: ${[...this.futures].map(([u, l]) => `${u} ${l.length}`).join(', ') || 'none'}`;
     this.log(`Kite instruments loaded: ${this.tokens.size} symbols, options: ${opts || 'none'}${missing.length ? `; indices not found: ${missing.join(', ')}` : ''}`);
@@ -268,6 +273,7 @@ export class KiteProvider implements MarketDataProvider {
     return {
       underlying, date: today, expiry: exp, expiries, lotSize: contracts[0]?.lot ?? null, isIndex: true, spotPaise: spot, prevDate: null, strikeStepPaise: null,
       forwardPaise: F == null ? null : Math.round(F), atmStrikePaise: strikes[atmIndex] != null ? Math.round(strikes[atmIndex] * 100) : null, rows,
+      futures: [], // the live chain serves the intraday seller; futures come from liveFutures()
     };
   }
 

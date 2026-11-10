@@ -1,19 +1,25 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { ArrowRight, Bell, ChevronDown, Pencil } from 'lucide-react';
+import { Check, Pencil, Plus, RotateCcw, X } from 'lucide-react';
+import { PULSE, useShell } from '@/components/app/shell-context';
 import { InfoTip } from '@/components/info-tip';
-import { Button, Card, Segmented, inputCls } from '@/components/ui';
-import { FeedError, agoText, keepAnswer, useFeed } from '@/lib/feed';
-import { MODE_LABEL, MODE_TF, todayApi, type Brief, type Dashboard, type DaySettings, type IndexLevels } from '@/lib/today';
-import { BreadthCard, FiiCard, IndexTile, MoversCard, QuickStart, RecentCharts, WatchlistCard } from '@/components/today/market-tiles';
+import { SymbolSearch } from '@/components/terminal/symbol-search';
+import { Segmented } from '@/components/ui';
+import { DayCard } from '@/components/today/day-card';
+import { MarketCard } from '@/components/today/market-card';
+import { IndexTile, type TileCard } from '@/components/today/market-tiles';
+import { MoodCard } from '@/components/today/mood-card';
+import { MovingCard } from '@/components/today/moving-card';
+import { OptionsCard } from '@/components/today/options-card';
+import { FeedError, agoText, keepAnswer, useCloses, useFeed } from '@/lib/feed';
+import { usePersisted } from '@/lib/persisted';
+import { MODE_LABEL, MODE_TF, todayApi, type Brief, type Dashboard, type DaySettings } from '@/lib/today';
 
-const fmt = (v: number | null | undefined, d = 2) => (v == null ? '–' : v.toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d }));
-const sign = (v: number | null | undefined, d = 2) => (v == null ? '–' : `${v > 0 ? '+' : ''}${v.toFixed(d)}%`);
-const tone = (v: number | null | undefined) => (v == null || v === 0 ? '' : v > 0 ? 'text-up' : 'text-down');
-const NAMES: Record<string, string> = { NIFTY: 'NIFTY 50', BANKNIFTY: 'BANK NIFTY', FINNIFTY: 'FIN NIFTY', MIDCPNIFTY: 'MIDCAP SELECT' };
-
+/**
+ * Today, as one screen: the indices, the picked index with its levels, your day, the market's mood, the stocks moving
+ * and the options picture. From lg up it fits the window and long lists scroll inside their card; below it stacks.
+ */
 export default function TodayPage() {
   // Each part shows the last picture this browser saw at once, then the fresh one (lib/feed.ts useFeed).
   const b = useFeed<Brief>('today', 60_000); // the live part moves during the session
@@ -21,7 +27,36 @@ export default function TodayPage() {
   const s = useFeed<DaySettings>('user/settings');
   const [savedSettings, setSavedSettings] = useState<DaySettings | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [pick, setPick] = usePersisted<string>('mtv.today.index', 'NIFTY');
+  // The six tiles are yours to choose: any index or stock, saved in this browser.
+  const [tiles, setTiles] = usePersisted<string[]>('mtv.today.tiles', PULSE);
+  const [editing, setEditing] = useState(false);
+  const [slot, setSlot] = useState<number | null>(null); // the tile being changed (tiles.length = a new one)
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const { notify } = useShell();
+  const { quotes } = useCloses(tiles);
   const brief = b.data, dash = d.data, settings = savedSettings ?? s.data;
+  const cardFor = (sym: string): TileCard | undefined => {
+    const c = dash?.indices?.find((i) => i.symbol === sym);
+    if (c) return c;
+    const q = quotes[sym];
+    return q ? { symbol: sym, close: q.ltp, change: q.change, changePct: q.changePct } : undefined;
+  };
+  const putInSlot = (sym: string) => {
+    if (slot == null) return;
+    if (tiles.includes(sym)) { notify(`${sym} is already a tile`); return; }
+    const next = [...tiles];
+    next[slot] = sym;
+    setTiles(next.slice(0, 6));
+    setPick(sym);
+  };
+  const moveTile = (from: number, to: number) => {
+    if (from === to) return;
+    const next = [...tiles];
+    const [x] = next.splice(from, 1);
+    next.splice(to, 0, x);
+    setTiles(next);
+  };
   const reload = b.reload;
 
   // While the volume scan is still running, look again sooner than the regular minute.
@@ -40,136 +75,102 @@ export default function TodayPage() {
   };
   const error = saveError ?? (brief ? null : b.error);
 
-  const nifty = brief?.indices.find((i) => i.symbol === 'NIFTY'), bank = brief?.indices.find((i) => i.symbol === 'BANKNIFTY');
-  const opt = brief?.options?.find((o) => o.underlying === 'NIFTY');
   const day = brief ? new Date(`${brief.today}T00:00:00Z`).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }) : '';
+  const liveFor = (sym: string) => {
+    const c = dash?.indices?.find((i) => i.symbol === sym);
+    const lv = brief?.indices.find((i) => i.symbol === sym)?.live;
+    return lv && brief && c && c.date < brief.today ? lv : null;
+  };
+  const vixNote = brief?.vix ? (brief.vix.percentile < 30 ? 'VIX is calm for the past year' : brief.vix.percentile > 70 ? 'VIX is high for the past year' : 'VIX is normal for the past year') : undefined;
+  const optPick = brief?.options?.some((o) => o.underlying === pick) ? pick : 'NIFTY';
+  const priceOf = (sym: string) => brief?.indices.find((i) => i.symbol === sym)?.live?.ltp ?? dash?.indices?.find((i) => i.symbol === sym)?.close ?? null;
 
   return (
-    <div className="mx-auto grid max-w-[1400px] gap-6">
-      {/* Greeting and the day */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-[34px] font-extrabold leading-[1.1] tracking-[-0.03em] sm:text-[40px]">
+    <div className="grid gap-4 lg:h-[calc(100dvh-6.5rem-2px)] lg:min-h-[740px] lg:grid-rows-[auto_auto_minmax(0,1fr)_minmax(0,1fr)]">
+      {/* The day, and the mode */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <h1 className="text-[26px] font-extrabold leading-tight tracking-[-0.03em]">
             {brief ? `${brief.greeting}${brief.name ? `, ${brief.name.split(' ')[0]}` : ''}.` : 'Today'}
           </h1>
-          <p className="mt-1 text-[15px] text-ink-2">{day}{brief ? ` · ${brief.market.text}` : ''}</p>
-          {brief && b.at && <Freshness at={b.at} stale={b.stale} error={b.error} />}
+          <p className="text-[13.5px] text-ink-2">
+            {day}{brief ? ` · ${brief.market.text}` : ''}
+            {brief && b.at && <Freshness at={b.at} stale={b.stale} error={b.error} />}
+          </p>
         </div>
-        {settings && (
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Choosing the tiles */}
+          {editing && <span className="hidden text-[12.5px] text-muted xl:inline">Click a tile to change it, drag to reorder, × to remove</span>}
+          {editing && (
+            <button type="button" onClick={() => { setTiles(PULSE); setPick('NIFTY'); }} title="Back to the six indices"
+              className="flex h-9 items-center gap-1.5 rounded-[10px] px-3 text-[13px] font-semibold text-ink-2 hover:bg-raised hover:text-ink"><RotateCcw size={13} /> Reset</button>
+          )}
+          <button type="button" onClick={() => setEditing((e) => !e)} aria-pressed={editing}
+            className={`flex h-9 items-center gap-1.5 rounded-[10px] px-3 text-[13px] font-semibold ${editing ? 'bg-accent text-accent-ink hover:bg-accent-hover' : 'text-ink-2 hover:bg-raised hover:text-ink'}`}>
+            {editing ? <><Check size={14} /> Done</> : <><Pencil size={13} /> Edit tiles</>}
+          </button>
+        {settings && !editing && (
           <div className="flex items-center gap-2">
-            <span className="text-[13px] text-ink-2">Today I&apos;m trading</span>
+            <span className="hidden text-[13px] text-ink-2 sm:inline">Today I&apos;m trading</span>
             <Segmented label="Mode" value={settings.mode} onChange={(m) => saveSettings({ mode: m })}
               options={[{ value: 'intraday', label: 'Intraday' }, { value: 'swing', label: 'Swing' }, { value: 'positional', label: 'Positional' }]} />
             <InfoTip label="What the mode changes">
-              <p>The Screener lists the ready-made screens for {MODE_LABEL[settings.mode].toLowerCase()} trading first, and an unsaved screen moves to {MODE_TF[settings.mode].screenWords} bars.</p>
+              <p>The Scanner lists the ready-made scans for {MODE_LABEL[settings.mode].toLowerCase()} trading first, and an unsaved scan moves to {MODE_TF[settings.mode].screenWords} bars.</p>
               <p>Charts open on {MODE_TF[settings.mode].chartWords} bars.</p>
               <p>This happens once when you switch; your own choices on those pages stay until you switch again.</p>
             </InfoTip>
           </div>
         )}
+        </div>
       </div>
-      {error && <p role="alert" className="rounded-[12px] bg-down-soft px-3 py-2 text-[13.5px] text-down">{error}</p>}
-      {/* Index tiles: the last close, or live numbers during the session */}
-      <section aria-label="Indices" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        {dash?.indices?.map((c) => {
-          const lv = brief?.indices.find((i) => i.symbol === c.symbol)?.live;
-          const live = lv && brief && c.date < brief.today ? lv : null;
-          const note = c.symbol === 'INDIAVIX' && brief?.vix ? (brief.vix.percentile < 30 ? 'Calm for the past year' : brief.vix.percentile > 70 ? 'High for the past year' : 'Normal for the past year') : undefined;
-          return <IndexTile key={c.symbol} c={c} live={live} note={note} />;
-        })}
-        {!dash?.indices && Array.from({ length: 6 }, (_, i) => <div key={i} className="panel h-[168px] animate-pulse" />)}
+
+      {/* Your six tiles: click one to see it in the Market card; Edit to choose them */}
+      <section aria-label="Tiles">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {tiles.map((sym, i) => {
+            const c = cardFor(sym);
+            return (
+              <div key={sym} className={`relative ${dragFrom === i ? 'opacity-50' : ''}`} draggable={editing}
+                onDragStart={() => setDragFrom(i)} onDragOver={(e) => { if (dragFrom != null) { e.preventDefault(); moveTile(dragFrom, i); setDragFrom(i); } }} onDragEnd={() => setDragFrom(null)}>
+                {c ? <IndexTile c={c} live={liveFor(sym)} selected={sym === pick} editing={editing} onSelect={() => (editing ? setSlot(i) : setPick(sym))} />
+                  : <button type="button" onClick={() => editing && setSlot(i)} className="panel h-full min-h-[84px] w-full animate-pulse p-3.5 text-left text-[13px] font-semibold text-muted">{sym}</button>}
+                {editing && tiles.length > 1 && (
+                  <button type="button" onClick={() => { const rest = tiles.filter((t) => t !== sym); setTiles(rest); if (pick === sym) setPick(rest[0]); }} aria-label={`Remove ${sym} tile`} title="Remove this tile"
+                    className="absolute -top-2 -right-2 grid h-6 w-6 place-items-center rounded-full bg-down text-white shadow-[var(--shadow-panel)] hover:scale-110"><X size={13} /></button>
+                )}
+              </div>
+            );
+          })}
+          {editing && tiles.length < 6 && (
+            <button type="button" onClick={() => setSlot(tiles.length)} className="grid min-h-[84px] place-items-center rounded-[var(--radius-panel)] border-2 border-dashed border-line-strong text-[13px] font-semibold text-ink-2 hover:border-accent hover:text-accent-deep">
+              <span className="flex items-center gap-1.5"><Plus size={15} /> Add a tile</span>
+            </button>
+          )}
+        </div>
       </section>
+      <SymbolSearch open={slot != null} onClose={() => setSlot(null)} title={slot != null && slot < tiles.length ? `Replace ${tiles[slot]}` : 'Add a tile'}
+        onPick={(i) => { putInSlot(i.symbol); setSlot(null); }} />
 
-      {!brief && !error && <Card><p className="text-[14px] text-muted">Getting today&apos;s market picture…</p></Card>}
+      {error && <p role="alert" className="rounded-[12px] bg-down-soft px-3 py-2 text-[13.5px] text-down lg:hidden">{error}</p>}
 
-      {brief && (
+      {!brief ? (
+        <div className="grid gap-4 lg:row-span-2 lg:grid-cols-3">
+          {error ? <p role="alert" className="panel col-span-full hidden p-5 text-[14px] text-down lg:block">{error}</p>
+            : Array.from({ length: 3 }, (_, i) => <div key={i} className="panel min-h-[220px] animate-pulse" />)}
+        </div>
+      ) : (
         <>
-          {/* Today, and what needs you */}
-          <div className="grid gap-5 lg:grid-cols-5">
-            <section className="grid content-start gap-3 rounded-[var(--radius-panel)] bg-deep p-5 text-white lg:col-span-3">
-              <p className="flex items-center gap-2 text-[15px] font-bold">
-                {brief.live && <span className="live-dot h-2 w-2 rounded-full bg-up" />}{brief.live && (nifty?.live || bank?.live) ? 'Live now' : 'The market today'}
-              </p>
-              {[nifty, bank].map((x) => x && <MarketLine key={x.symbol} x={x} />)}
-              {!brief.live && <p className="text-[12.5px] text-white/60">Connect Kite (top right) during market hours to see the session live here.</p>}
-            </section>
-            <Card title="Needs you" className="lg:col-span-2">
-              <div className="grid gap-3 text-[14px]">
-                <p className="flex items-center gap-2"><Bell size={15} className="text-accent-deep" />
-                  {brief.needsYou.alertsToday ? <>{brief.needsYou.alertsToday} alert{brief.needsYou.alertsToday === 1 ? '' : 's'} fired today. <Link href="/alerts" className="font-semibold text-accent-deep hover:underline">See them</Link></> : 'No alerts have fired today.'}
-                </p>
-                {brief.needsYou.latest.map((a) => <p key={a.at} className="pl-6 text-[13px] text-ink-2">{a.name}: {a.symbols.join(', ')}</p>)}
-                {settings && <DayRules s={settings} onSave={saveSettings} />}
-                <Link href="/screener" className="inline-flex h-11 items-center justify-center gap-2 rounded-[12px] bg-inverse px-4 text-[14px] font-semibold text-on-inverse hover:bg-inverse-hover">
-                  Find {settings ? MODE_LABEL[settings.mode].toLowerCase() : ''} trades <ArrowRight size={15} />
-                </Link>
-              </div>
-            </Card>
-          </div>
-
-          {/* The first app's dashboard tiles */}
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)]">
-            <WatchlistCard />
-            <div className="grid content-start gap-5">
-              <BreadthCard title="NIFTY 500 breadth" b={dash?.nifty500?.breadth} />
-              <div className="grid gap-5 sm:grid-cols-2">
-                <MoversCard title="NIFTY 50 gainers" rows={dash?.nifty50?.gainers} />
-                <MoversCard title="NIFTY 50 losers" rows={dash?.nifty50?.losers} />
-              </div>
+          <div className="grid min-h-0 gap-4 lg:grid-cols-3">
+            <div className="grid min-h-0 lg:col-span-2">
+              <MarketCard symbol={pick} x={brief.indices.find((i) => i.symbol === pick)} card={cardFor(pick)}
+                live={liveFor(pick)} note={pick === 'INDIAVIX' ? vixNote : undefined} sessionLive={brief.live} />
             </div>
-            <div className="grid content-start gap-5">
-              <FiiCard fii={dash?.fii ?? null} fpi={dash?.fpi ?? null} />
-              <QuickStart />
-              <RecentCharts />
-            </div>
+            <DayCard brief={brief} settings={settings} onSave={saveSettings} />
           </div>
-
-          <div className="grid gap-5 lg:grid-cols-2">
-            <Card title={<span className="flex items-center gap-1.5">Options today <InfoTip label="About these numbers">From NSE&apos;s F&amp;O close of {brief.options?.[0]?.date ?? '–'}, nearest expiry. Open interest is the number of contracts still open; the biggest piles of call and put open interest are often watched as resistance and support.</InfoTip></span>}>
-              <div className="grid gap-4">
-                {brief.options?.map((o) => (
-                  <div key={o.underlying} className="grid gap-1 text-[13.5px]">
-                    <p className="font-semibold">{NAMES[o.underlying]} <span className="font-normal text-muted">· expiry {new Date(`${o.expiry}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })} ({o.daysToExpiry === 0 ? 'today' : `${o.daysToExpiry} day${o.daysToExpiry === 1 ? '' : 's'}`})</span></p>
-                    {o.callWall != null && o.putWall != null && <p>Most call open interest at <b className="num">{fmt(o.callWall, 0)}</b>, most put open interest at <b className="num">{fmt(o.putWall, 0)}</b></p>}
-                    {o.maxPain != null && <p className="text-ink-2">Max pain {fmt(o.maxPain, 0)}{o.pcr != null && ` · put-call ratio ${o.pcr.toFixed(2)}`}</p>}
-                    {o.impliedMovePct != null && <p className="text-ink-2">The at-the-money straddle (₹{fmt(o.straddle, 0)}) prices a move of about ±{o.impliedMovePct.toFixed(1)}% by expiry</p>}
-                    {o.atmIv != null && <p className="text-ink-2">Implied volatility {(o.atmIv * 100).toFixed(1)}%{o.ivPercentile != null && `, higher than on ${Math.round(o.ivPercentile)}% of days in the past year`}</p>}
-                  </div>
-                ))}
-                {!brief.options?.length && <p className="text-[13.5px] text-muted">No F&amp;O data yet.</p>}
-              </div>
-            </Card>
-
-            <Card title={<span className="flex items-center gap-1.5">Sudden volume <InfoTip label="How this is found">NIFTY 500 stocks trading far more than usual. During the session: volume so far today against the same time on the previous 20 sessions. After it: the last session against its 20-day average.</InfoTip></span>}>
-              {brief.volumeSpikes.length ? (
-                <ul className="grid gap-1.5 text-[13.5px]">
-                  {brief.volumeSpikes.map((v) => (
-                    <li key={v.symbol}>
-                      <Link href={`/chart/${encodeURIComponent(v.symbol)}`} className="flex items-center justify-between rounded-[8px] px-2 py-1 hover:bg-raised">
-                        <span className="font-semibold">{v.symbol}</span>
-                        <span className="num text-ink-2">{v.rvol.toFixed(1)}× usual volume · <span className={tone(v.changePct)}>{sign(v.changePct, 1)}</span></span>
-                      </Link>
-                    </li>
-                  ))}
-                  <li className="px-2 text-[12px] text-muted">{brief.volumeSpikes[0].basis === 'today so far' ? 'Today so far, live' : 'Last session'}</li>
-                </ul>
-              ) : <p className="text-[13.5px] text-muted">{brief.volumeUpdating ? 'Checking volumes across NIFTY 500… this takes a minute.' : 'No stock is trading far above its usual volume.'}</p>}
-            </Card>
-
-            <Card title="Sectors">
-              <div className="grid grid-cols-2 gap-4 text-[13.5px]">
-                {([['Strongest today', brief.sectors.slice(0, 5)], ['Weakest today', brief.sectors.slice(-5).reverse()]] as const).map(([t, list]) => (
-                  <div key={t}><p className="eyebrow mb-1">{t}</p>
-                    {list.map((s) => <p key={s.name} className="flex justify-between py-0.5"><span>{s.name.replace('NIFTY ', '')}</span><span className={`num ${tone(s.d1)}`}>{sign(s.d1, 1)}</span></p>)}
-                  </div>
-                ))}
-              </div>
-            </Card>
-
-            {/* Levels: one simple line each, details on request */}
-            <Card title="Key levels for today">
-              <div className="grid gap-4 sm:grid-cols-2">{brief.indices.filter((i) => i.symbol === 'NIFTY' || i.symbol === 'BANKNIFTY').map((x) => <Levels key={x.symbol} x={x} />)}</div>
-            </Card>
+          <div className="grid min-h-0 gap-4 lg:grid-cols-3">
+            <MoodCard breadth={dash?.nifty500?.breadth} sectors={brief.sectors} fii={dash?.fii ?? null} fpi={dash?.fpi ?? null} />
+            <MovingCard gainers={dash?.nifty50?.gainers} losers={dash?.nifty50?.losers} spikes={brief.volumeSpikes} scanning={brief.volumeUpdating} />
+            <OptionsCard options={brief.options} pick={optPick} onPick={setPick} price={priceOf} />
           </div>
         </>
       )}
@@ -177,64 +178,9 @@ export default function TodayPage() {
   );
 }
 
-/** One index in plain sentences: live facts in the session, otherwise where it closed against its levels. */
-function MarketLine({ x }: { x: IndexLevels }) {
-  const lv = x.live;
-  const above = (v: number | null) => v != null && (lv?.ltp ?? x.close) >= v;
-  const trend = [above(x.trend.ema20) ? 'above' : 'below', 'its 20-day average', ...(x.trend.ema200 != null ? [`and ${above(x.trend.ema200) ? 'above' : 'below'} its 200-day average`] : [])].join(' ');
-  return (
-    <div className="text-[14px]">
-      <p className="font-semibold">{NAMES[x.symbol]} <span className="num font-normal text-white/70">{fmt(lv?.ltp ?? x.close)} <span className={(lv?.changePct ?? x.changePct ?? 0) >= 0 ? 'text-[#5fe0b8]' : 'text-[#ff9aa0]'}>{sign(lv?.changePct ?? x.changePct)}</span></span></p>
-      <ul className="mt-0.5 grid gap-0.5 text-white/80">
-        {lv ? lv.facts.map((f) => <li key={f}>{f}</li>) : <li>Closed {sign(x.changePct)} on {x.session}, between {fmt(x.low, 0)} and {fmt(x.high, 0)}</li>}
-        <li>Trading {trend}</li>
-      </ul>
-    </div>
-  );
-}
-
-function Levels({ x }: { x: IndexLevels }) {
-  const [more, setMore] = useState(false);
-  const rows: [string, number][] = more
-    ? [['R3', x.pivots.R3], ['R2', x.pivots.R2], ['R1', x.pivots.R1], ['Yesterday high', x.high], ['CPR top', x.cpr.top], ['Pivot', x.pivots.P], ['CPR bottom', x.cpr.bottom], ['Yesterday low', x.low], ['S1', x.pivots.S1], ['S2', x.pivots.S2], ['S3', x.pivots.S3]]
-    : [['Yesterday high', x.high], ['Pivot', x.pivots.P], ['Yesterday low', x.low]];
-  const price = x.live?.ltp ?? x.close;
-  return (
-    <div className="text-[13.5px]">
-      <p className="mb-1 font-semibold">{NAMES[x.symbol]} <span className="num font-normal text-muted">now {fmt(price)}</span></p>
-      {rows.map(([l, v]) => <p key={l} className="flex justify-between border-t border-line py-1"><span className="text-ink-2">{l}</span><span className={`num ${price >= v ? 'text-up' : 'text-down'}`}>{fmt(v)}</span></p>)}
-      <button type="button" onClick={() => setMore((m) => !m)} className="mt-1 inline-flex items-center gap-1 text-[12.5px] font-semibold text-accent-deep">{more ? 'Fewer levels' : 'All levels (pivots, CPR)'}<ChevronDown size={13} className={more ? 'rotate-180' : ''} /></button>
-    </div>
-  );
-}
-
-function DayRules({ s, onSave }: { s: DaySettings; onSave: (p: Partial<DaySettings>) => void }) {
-  const [edit, setEdit] = useState(false);
-  const [d, setD] = useState(s);
-  useEffect(() => setD(s), [s]);
-  return (
-    <div className="rounded-[12px] bg-raised px-3 py-2.5 text-[13px]">
-      <p className="flex items-center justify-between gap-2">
-        <span>Risk ₹{((s.capitalRupees * s.riskPerTradePct) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })} a trade · stop after −₹{s.maxDailyLossRupees.toLocaleString('en-IN')} or {s.maxTradesPerDay} trades</span>
-        <Button variant="ghost" className="h-7 px-2" onClick={() => setEdit((v) => !v)} aria-label="Edit day rules" title="Edit day rules"><Pencil size={13} /></Button>
-      </p>
-      {edit && (
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          {([['Capital ₹', 'capitalRupees'], ['Risk a trade %', 'riskPerTradePct'], ['Max loss a day ₹', 'maxDailyLossRupees'], ['Max trades a day', 'maxTradesPerDay']] as const).map(([label, k]) => (
-            <label key={k} className="grid gap-1"><span className="text-[11.5px] text-muted">{label}</span>
-              <input type="number" min={0} step="any" value={d[k]} onChange={(e) => setD({ ...d, [k]: Number(e.target.value) })} className={`${inputCls} num h-9`} />
-            </label>
-          ))}
-          <Button variant="primary" className="col-span-2 h-9" onClick={() => { onSave(d); setEdit(false); }}>Save</Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** How fresh the shown picture is: a quiet line, never a blocker. */
+/** How fresh the shown picture is: a quiet note, never a blocker. */
 function Freshness({ at, stale, error }: { at: number; stale: boolean; error: string | null }) {
   const ago = agoText(at);
-  const text = !stale ? `Updated ${ago}` : error ? `Showing the picture from ${ago}. ${error}` : `Showing the picture from ${ago}, updating…`;
-  return <p className={`mt-0.5 text-[12.5px] ${error ? 'text-down' : 'text-muted'}`}>{text}</p>;
+  const text = !stale ? ` · updated ${ago}` : error ? ` · showing the picture from ${ago}. ${error}` : ` · showing the picture from ${ago}, updating…`;
+  return <span className={error ? 'text-down' : 'text-muted'}>{text}</span>;
 }

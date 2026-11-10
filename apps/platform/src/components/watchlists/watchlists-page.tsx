@@ -36,7 +36,7 @@ export function WatchlistsPage() {
       <Card title="Watchlists" actions={<Button variant="ghost" className="h-8 px-2" onClick={create} aria-label="New watchlist"><Plus size={16} /> New</Button>} className="h-fit">
         <ul className="grid gap-1">
           {!lists && <li className="text-[13px] text-muted">Loading…</li>}
-          {lists?.length === 0 && <li className="text-[13px] text-muted">No watchlists yet. Create one, or add stocks from screen results.</li>}
+          {lists?.length === 0 && <li className="text-[13px] text-muted">No watchlists yet. Create one, or add stocks from scan results.</li>}
           {lists?.map((w) => (
             <li key={w.id}>
               <button type="button" onClick={() => setActiveId(w.id)} aria-current={w.id === activeId}
@@ -50,7 +50,7 @@ export function WatchlistsPage() {
       <div className="grid min-w-0 gap-4">
         {error && <p role="alert" className="rounded-[12px] bg-down-soft px-3 py-2 text-[13.5px] text-down">{error}</p>}
         {active ? <ListView key={active.id} w={active} act={act} /> : lists?.length ? null : (
-          <Card><p className="text-[14px] text-ink-2">Create a watchlist to keep stocks you are tracking, then screen just those stocks from the screener.</p></Card>
+          <Card><p className="text-[14px] text-ink-2">Create a watchlist to keep stocks you are tracking, then scan just those stocks with the Scanner.</p></Card>
         )}
       </div>
     </div>
@@ -78,7 +78,7 @@ function ListView({ w, act }: { w: Watchlist; act: (fn: () => Promise<unknown>) 
   return (
     <Card title={w.name} actions={
       <>
-        <Link href={`/screener?watchlist=${w.id}`} className="inline-flex h-9 items-center gap-1.5 rounded-[12px] bg-inverse px-3 text-[13.5px] font-semibold text-on-inverse hover:bg-inverse-hover"><Filter size={15} /> Screen this list</Link>
+        <Link href={`/scanner?watchlist=${w.id}`} className="inline-flex h-9 items-center gap-1.5 rounded-[12px] bg-inverse px-3 text-[13.5px] font-semibold text-on-inverse hover:bg-inverse-hover"><Filter size={15} /> Scan this list</Link>
         <Button variant="ghost" className="h-9 px-2.5" aria-label="Rename" title="Rename" onClick={async () => { const name = await promptDialog({ title: 'Rename watchlist', label: 'Name', initial: w.name, confirmLabel: 'Rename' }); if (name) act(() => userApi.saveWatchlist({ id: w.id, name, symbols: w.symbols })); }}><Pencil size={15} /></Button>
         <Button variant="ghost" className="h-9 px-2.5" aria-label="Delete watchlist" title="Delete" onClick={async () => { if (await confirmDialog({ title: `Delete the watchlist "${w.name}"?`, message: 'The stocks in it are not affected.', confirmLabel: 'Delete', danger: true })) act(() => userApi.deleteWatchlist(w.id)); }}><Trash2 size={15} /></Button>
       </>
@@ -114,7 +114,7 @@ function ListView({ w, act }: { w: Watchlist; act: (fn: () => Promise<unknown>) 
                 </tr>
               );
             })}
-            {!w.symbols.length && <tr><td colSpan={4} className="px-3 py-8 text-center text-ink-2">This list is empty. Add symbols above, or from screen results.</td></tr>}
+            {!w.symbols.length && <tr><td colSpan={4} className="px-3 py-8 text-center text-ink-2">This list is empty. Add symbols above, or from scan results.</td></tr>}
           </tbody>
         </table>
       </div>

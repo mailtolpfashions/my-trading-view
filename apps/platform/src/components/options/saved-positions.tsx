@@ -9,7 +9,7 @@ export type SavedPosition = { id: string; name: string; underlying: string; date
 const KEY = 'mtv.savedPositions';
 const MAX = 40;
 
-const describe = (legs: BuilderLeg[]) => legs.map((l) => `${l.side === 'BUY' ? 'B' : 'S'} ${l.lots > 1 ? `${l.lots}× ` : ''}${fmtStrike(l.strikePaise)} ${l.kind}`).join(', ');
+const describe = (legs: BuilderLeg[]) => legs.map((l) => `${l.side === 'BUY' ? 'B' : 'S'} ${l.lots > 1 ? `${l.lots}× ` : ''}${l.kind === 'FUT' ? `${fmtDate(l.expiry).slice(0, 6)} FUT` : `${fmtStrike(l.strikePaise)} ${l.kind}`}`).join(', ');
 
 /**
  * Save the builder's position (underlying, day and legs at that day's prices) and load it again later. Kept in this

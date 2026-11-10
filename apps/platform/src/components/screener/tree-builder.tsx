@@ -118,7 +118,7 @@ function LeafView({ l, ctx, first, last }: { l: Leaf; ctx: Ctx; first: boolean; 
           title={mixed ? 'This condition compares two timeframes; edit them in the text' : 'Timeframe for this condition'}
           onChange={(e) => set({ tf: (e.target.value || null) as Tf | null })}
           className={`${inputCls} w-[160px] shrink-0 pr-7 ${l.tf && !mixed ? 'border-accent font-semibold text-accent-deep' : ''}`}>
-          <option value="">Screen ({TF_LABEL[ctx.screenTf]})</option>
+          <option value="">Scan ({TF_LABEL[ctx.screenTf]})</option>
           <TimeframeOptions />
           {mixed && <option value="mixed">Mixed</option>}
         </select>

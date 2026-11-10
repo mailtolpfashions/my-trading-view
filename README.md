@@ -131,10 +131,9 @@ npm workspaces monorepo:
 
 ```
 apps/
-  platform/     The app: Next.js pages and UI (Today, Screener, Strategies, Options, Charts, Tools)
+  platform/     The app: Next.js pages and UI (Today, Scanner, Strategies, Options, Charts, Tools)
   feed/         Data service: NSE downloads, history in memory, Kite login, live ticks and minutes, screener,
                 backtests, alerts, the owner's saved data
-  web/          The earlier public site (kept for reference; to be removed)
 packages/
   rules/        Condition language: parser, evaluator, 90+ functions, candlestick patterns, presets
   backtest/     Portfolio backtest engine, options backtest and simulator, condition study

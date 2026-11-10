@@ -17,8 +17,8 @@ const RESEARCH_ABOUT: Record<string, string> = {
 /** Every tool in plain groups, one card each. */
 const GROUPS: { title: string; tools: Tool[] }[] = [
   { title: 'My workspace', tools: [
-    { href: '/watchlists', label: 'Watchlists', about: 'Lists of stocks you follow, with their last price. Screen a whole list in one click.' },
-    { href: '/alerts', label: 'Alerts', about: 'Get told when a saved screen or strategy finds a new stock.' },
+    { href: '/watchlists', label: 'Watchlists', about: 'Lists of stocks you follow, with their last price. Scan a whole list in one click.' },
+    { href: '/alerts', label: 'Alerts', about: 'Get told when a saved scan or strategy finds a new stock.' },
     { href: '/connect', label: 'Kite connection', about: 'Connect your Zerodha account for live prices (once a day).' },
   ] },
   { title: 'Options', tools: [

@@ -62,14 +62,41 @@ export const PATTERNS: PatternDef[] = [
   { name: 'THREE_INSIDE_DOWN', bars: 3, side: 'bearish', rule: 'A bearish harami, then a black candle closing below the first candle\'s open.', test: (x, i) => i >= 2 && haramiDown(x, i - 1) && black(x, i) && x.c[i].close < x.c[i - 2].open },
 ];
 
-/** 1 where the pattern completes on that bar, 0 where it does not, null before the average body exists. */
-export function patternSeries(c: Candle[], test: Rule): Series {
+function context(c: Candle[]): Ctx {
   const body = c.map((b) => Math.abs(b.close - b.open));
-  const x: Ctx = {
+  return {
     c, body, avg: ema(body, 14),
     range: c.map((b) => b.high - b.low),
     upper: c.map((b) => b.high - Math.max(b.open, b.close)),
     lower: c.map((b) => Math.min(b.open, b.close) - b.low),
   };
+}
+
+/** 1 where the pattern completes on that bar, 0 where it does not, null before the average body exists. */
+export function patternSeries(c: Candle[], test: Rule): Series {
+  const x = context(c);
   return c.map((_, i) => (x.avg[i] == null ? null : test(x, i) ? 1 : 0));
+}
+
+/** A plain name for a pattern: BULLISH_ENGULFING → Bullish engulfing. */
+export const patternLabel = (name: string) => name.charAt(0) + name.slice(1).toLowerCase().replace(/_/g, ' ');
+
+/** One pattern found on a chart: it completes on bar `index` (the pattern's first bar is `index - bars + 1`). */
+export type PatternHit = { index: number; time: number; name: string; label: string; side: PatternDef['side']; bars: number; rule: string };
+
+/**
+ * The pattern engine: every bar where a candlestick pattern completed, oldest first, using the same rules as the
+ * screener's pattern functions (so a chart and a scan always agree). `names` limits it to some patterns. A bar still
+ * forming can show a pattern that disappears by its close; the caller decides whether to pass that bar.
+ */
+export function findPatterns(c: Candle[], names?: readonly string[]): PatternHit[] {
+  const defs = names ? PATTERNS.filter((p) => names.includes(p.name)) : PATTERNS;
+  if (!defs.length || !c.length) return [];
+  const x = context(c);
+  const out: PatternHit[] = [];
+  for (let i = 0; i < c.length; i++) {
+    if (x.avg[i] == null) continue;
+    for (const p of defs) if (p.test(x, i)) out.push({ index: i, time: c[i].time, name: p.name, label: patternLabel(p.name), side: p.side, bars: p.bars, rule: p.rule });
+  }
+  return out;
 }

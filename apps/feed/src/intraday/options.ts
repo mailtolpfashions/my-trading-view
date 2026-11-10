@@ -88,9 +88,18 @@ export class OptionRecorder {
 
   get size() { return this.contracts.size; }
 
+  /** When each recorded contract last ticked (epoch seconds), for the coverage check. */
+  readonly lastTickAt = new Map<number, number>();
+
+  /** Recorded contracts of an underlying. */
+  contractsOf(underlying: string): OptionContract[] {
+    return [...this.contracts.values()].filter((x) => x.underlying === underlying).map((x) => x.c);
+  }
+
   tick(t: Tick, now: number) {
     const meta = this.contracts.get(t.token);
     if (!meta || !(t.ltpPaise > 0)) return;
+    this.lastTickAt.set(t.token, now);
     const time = t.time || now;
     const start = minuteStart(time);
     if (start == null) return;

@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Minus, Plus, Trash2 } from 'lucide-react';
 import { legValue, pnlAt, summarise, summariseCurve, summariseNet, yearsToExpiry, type Leg, type ModelLeg } from '@mtv/options';
-import { BROKERS, brokerById, computeOptionCharges, expirySettlementCharges, formatRupees, toPaise, type Charges } from '@mtv/paper';
+import { BROKERS, brokerById, computeFuturesCharges, computeOptionCharges, expirySettlementCharges, formatRupees, toPaise, type Charges } from '@mtv/paper';
 import { fmt } from '@/lib/format';
 import { TEMPLATES, TEMPLATE_GROUPS, buildSmile, fetchChain, fetchFnoRange, fetchMargin, fmtDate, fmtStrike, legGreeks, type BuilderLeg, type Chain, type ChainSide, type MarginResponse } from '@/lib/options';
 import { PayoffChart } from './payoff-chart';
@@ -17,6 +17,9 @@ import { UnderlyingPicker } from '@/components/tools/controls';
 import { TradingDatePicker } from '@/components/tools/trading-date-picker';
 
 const RATE = 0.065; // matches the feed's model rate; affects estimates only
+/** Charges for one trade of a leg: futures rates for a future, option rates (on the premium) for an option. */
+const legCharges = (l: { kind: BuilderLeg['kind']; side: 'BUY' | 'SELL' }, side: 'BUY' | 'SELL', qty: number, pricePaise: number, broker: ReturnType<typeof brokerById>) =>
+  l.kind === 'FUT' ? computeFuturesCharges({ side, qty, pricePaise, broker }) : computeOptionCharges({ side, qty, premiumPaise: pricePaise, broker });
 const VISIBLE_STEPS = 14;
 let seq = 0;
 
@@ -37,6 +40,8 @@ export function OptionsView() {
   // The template that produced the current legs; shown as selected until the legs change.
   const [template, setTemplate] = useState<{ id: string; legs: BuilderLeg[] } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** The right-hand panel: the strategy builder, or the simulator (a position built on a past day, followed to expiry). */
+  const [panel, setPanel] = useState<'builder' | 'simulator'>('builder');
   const chainCache = useRef(new Map<string, Chain>());
   /** Restores a saved position: its underlying, its day (prices are per day) and its legs. */
   function loadSaved(p: SavedPosition) {
@@ -86,6 +91,16 @@ export function OptionsView() {
     if (!q.traded) setNotice(`${fmtStrike(strike)} ${kind} did not trade that day: its price is NSE's carried-forward close.`);
   }
 
+  /** Buys or sells one lot of a future (an expiry listed that day) at NSE's close; more lots go on the same leg. */
+  function addFuture(s: 'BUY' | 'SELL', expiry: string) {
+    const f = chain?.futures?.find((x) => x.expiry === expiry);
+    if (!f) return;
+    const same = legs.find((l) => l.kind === 'FUT' && l.side === s && l.expiry === expiry);
+    if (same) setLegs(legs.map((l) => (l.id === same.id ? { ...l, lots: l.lots + 1 } : l)));
+    else setLegs([...legs, { id: `l${++seq}`, kind: 'FUT', side: s, strikePaise: 0, expiry, lots: 1, pricePaise: f.closePaise, iv: null, greeks: { delta: 1, theta: 0, vega: 0 } }]);
+    if (!f.traded) setNotice(`The ${fmtDate(expiry)} future did not trade that day: its price is NSE's carried-forward close.`);
+  }
+
   /** Undo from the chain: one lot less on the most recently added leg of this contract; the leg goes at zero lots. */
   function removeLot(kind: 'CE' | 'PE', strike: number) {
     const leg = [...legs].reverse().find((l) => l.kind === kind && l.strikePaise === strike && l.expiry === chain?.expiry);
@@ -96,7 +111,7 @@ export function OptionsView() {
   /** Moves a leg one strike step up or down within its own expiry, repricing it from that expiry's chain. */
   async function shiftStrike(id: string, dir: 1 | -1) {
     const l = legs.find((x) => x.id === id);
-    if (!l) return;
+    if (!l || l.kind === 'FUT') return;
     const key = `${underlying}|${l.expiry}`;
     let c = chainCache.current.get(key);
     if (!c) {
@@ -104,8 +119,9 @@ export function OptionsView() {
     }
     if (!step) return;
     const strike = l.strikePaise + dir * step;
-    const q = c.rows.find((r) => r.strikePaise === strike)?.[l.kind];
-    if (!q) return setNotice(`${fmtStrike(strike)} ${l.kind} is not listed for ${fmtDate(l.expiry)}.`);
+    const kind = l.kind;
+    const q = c.rows.find((r) => r.strikePaise === strike)?.[kind];
+    if (!q) return setNotice(`${fmtStrike(strike)} ${kind} is not listed for ${fmtDate(l.expiry)}.`);
     setLegs((list) => list.map((x) => (x.id === id ? { ...x, strikePaise: strike, pricePaise: q.closePaise, iv: q.iv, greeks: legGreeks(q) } : x)));
     if (!q.traded) setNotice(`${fmtStrike(strike)} ${l.kind} did not trade that day: its price is NSE's carried-forward close.`);
   }
@@ -154,8 +170,8 @@ export function OptionsView() {
     const add = (a: Charges, b: Charges): Charges => ({ brokerage: a.brokerage + b.brokerage, stt: a.stt + b.stt, exchangeTxn: a.exchangeTxn + b.exchangeTxn, ipft: (a.ipft ?? 0) + (b.ipft ?? 0), sebiFee: a.sebiFee + b.sebiFee, stampDuty: a.stampDuty + b.stampDuty, gst: a.gst + b.gst, dpCharge: 0, total: a.total + b.total });
     let entry = zero, exit = zero;
     if (lot) for (const l of legs) {
-      entry = add(entry, computeOptionCharges({ side: l.side, qty: l.lots * lot, premiumPaise: l.pricePaise, broker }));
-      exit = add(exit, computeOptionCharges({ side: l.side === 'BUY' ? 'SELL' : 'BUY', qty: l.lots * lot, premiumPaise: l.pricePaise, broker }));
+      entry = add(entry, legCharges(l, l.side, l.lots * lot, l.pricePaise, broker));
+      exit = add(exit, legCharges(l, l.side === 'BUY' ? 'SELL' : 'BUY', l.lots * lot, l.pricePaise, broker));
     }
     return { entry, exit };
   }, [legs, lot, broker]);
@@ -196,8 +212,8 @@ export function OptionsView() {
     const gross = (S: number) => pnlAt(modelLegs, S, tFirst, RATE, carry)!;
     // Charges: entry, settlement of the first-expiry legs, then squaring off later legs at their model value.
     const later = (S: number) => modelLegs.reduce((sum, l, i) => sum + (legs[i].expiry === expiries[0]
-      ? expirySettlementCharges({ side: l.side, qty: l.qty, intrinsicPaise: Math.max(0, l.kind === 'CE' ? S - l.strikePaise : l.strikePaise - S), broker })
-      : computeOptionCharges({ side: l.side === 'BUY' ? 'SELL' : 'BUY', qty: l.qty, premiumPaise: Math.round(legValue(l, S, tFirst, RATE, carry)!), broker }).total), 0);
+      ? (l.kind === 'FUT' ? 0 : expirySettlementCharges({ side: l.side, qty: l.qty, intrinsicPaise: Math.max(0, l.kind === 'CE' ? S - l.strikePaise : l.strikePaise - S), broker }))
+      : legCharges(l, l.side === 'BUY' ? 'SELL' : 'BUY', l.qty, Math.round(legValue(l, S, tFirst, RATE, carry)!), broker).total), 0);
     const lo = Math.round(S0 * 0.75), hi = Math.round(S0 * 1.25);
     return { missingIv: false as const, gross: summariseCurve(gross, lo, hi, 100), net: summariseCurve((S) => gross(S) - entryCharges - later(S), lo, hi, 100) };
   }, [multi, chain, modelLegs, tFirst, carry, legs, expiries, entryCharges, broker]);
@@ -290,43 +306,47 @@ export function OptionsView() {
   ) : null;
 
   return (
-    <div className="grid grid-cols-1 content-start gap-2 lg:min-h-0 lg:auto-rows-max lg:overflow-y-auto xl:auto-rows-auto xl:content-stretch xl:overflow-visible xl:grid-cols-[minmax(400px,1fr)_minmax(500px,1.15fr)]">
+    <div className="grid grid-cols-1 content-start gap-3 xl:h-[calc(100dvh-104px)] xl:min-h-[620px] xl:grid-cols-[minmax(420px,1fr)_minmax(560px,1.25fr)]">
       {/* chain */}
       <section className="panel flex h-[78dvh] min-h-[420px] flex-col overflow-hidden xl:h-auto xl:min-h-0">
-        <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
-          <UnderlyingPicker value={underlying} onChange={(u) => { if (u !== underlying) { setUnderlying(u); setExpiry(undefined); if (legs.length) setNotice(`Legs cleared: switched to ${u}.`); setLegs([]); } }} />
-          <div className="flex rounded-full bg-raised p-[3px]" role="tablist" aria-label="Open interest column">
-            {([['oi', 'OI'], ['change', 'OI chg'], ['greeks', 'Greeks']] as const).map(([k, label]) => (
-              <button key={k} type="button" role="tab" aria-selected={oiView === k} onClick={() => setOiView(k)}
-                className={`rounded-full px-2.5 py-1 text-[12px] font-bold ${oiView === k ? 'bg-inverse text-on-inverse' : 'text-ink-2'}`}>{label}</button>
-            ))}
-          </div>
-          <div className="flex rounded-full bg-raised p-[3px]" role="radiogroup" aria-label="Strikes shown">
-            {([[false, 'Near the index'], [true, 'All strikes']] as const).map(([k, label]) => (
-              <button key={label} type="button" role="radio" aria-checked={allStrikes === k} onClick={() => setAllStrikes(k)}
-                className={`rounded-full px-2.5 py-1 text-[12px] font-bold ${allStrikes === k ? 'bg-inverse text-on-inverse' : 'text-ink-2'}`}>{label}</button>
-            ))}
-          </div>
-          {chain && (
-            <select className="h-8 rounded-full bg-raised px-3 text-[12.5px] font-semibold" value={chain.expiry} aria-label="Expiry"
-              onChange={(e) => { setExpiry(e.target.value); if (legs.length) setNotice('Expiry changed: existing legs keep their own expiry.'); }}>
-              {chain.expiries.map((x) => <option key={x} value={x}>{fmtDate(x)}</option>)}
-            </select>
-          )}
-          {chain && (
-            <span className="ml-auto flex items-center gap-1.5 text-[11.5px] text-muted" title="Build on a past day's NSE close, then simulate it day by day to expiry">
-              As of
-              <TradingDatePicker underlying={underlying} value={chain.date} onChange={(d) => pickDate(d ?? undefined)} min={range.from ?? undefined} max={range.to ?? undefined} className="h-8 bg-raised shadow-none" />
-            </span>
-          )}
-          {past && <button type="button" onClick={() => pickDate(undefined)} className="rounded-full px-2.5 py-1 text-[12px] font-semibold text-ink-2 hover:bg-raised">Latest</button>}
-          <InfoTip label="How to use the option chain">
+        <div className="grid gap-2 border-b border-line px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <UnderlyingPicker value={underlying} onChange={(u) => { if (u !== underlying) { setUnderlying(u); setExpiry(undefined); if (legs.length) setNotice(`Legs cleared: switched to ${u}.`); setLegs([]); } }} />
+            {chain && (
+              <select className="h-8 rounded-full bg-raised px-3 text-[12.5px] font-semibold" value={chain.expiry} aria-label="Expiry"
+                onChange={(e) => { setExpiry(e.target.value); if (legs.length) setNotice('Expiry changed: existing legs keep their own expiry.'); }}>
+                {chain.expiries.map((x) => <option key={x} value={x}>{fmtDate(x)}</option>)}
+              </select>
+            )}
+            {chain && (
+              <span className="flex items-center gap-1.5 text-[12px] font-semibold text-muted" title="Build on a past day's NSE close, then simulate it day by day to expiry">
+                As of
+                <TradingDatePicker underlying={underlying} value={chain.date} onChange={(d) => pickDate(d ?? undefined)} min={range.from ?? undefined} max={range.to ?? undefined} className="h-8 bg-raised shadow-none" />
+                {past && <button type="button" onClick={() => pickDate(undefined)} className="h-8 rounded-full px-2.5 text-[12px] font-semibold text-ink-2 hover:bg-raised">Latest</button>}
+              </span>
+            )}
+            <span className="ml-auto"><InfoTip label="How to use the option chain">
             <p>Hover over a premium and click <b>B</b> to buy or <b>S</b> to sell; the leg goes into the strategy builder.</p>
             <p><b>Near the index</b> shows 14 strikes each side of the at-the-money strike. <b>All strikes</b> shows every strike NSE lists for this expiry.</p>
             <p>* means the contract had no trades that day: NSE carried the previous close forward. IV and Greeks are Black-76 estimates from traded premiums only.</p>
             <p><b>Greeks</b> are per unit of the underlying (multiply by lot size × lots for a position): delta is the premium change for a 1-point move, gamma the change in delta for a 1-point move, theta the premium change for one calendar day, and vega the premium change for a 1-point change in IV.</p>
             <p>Pick an earlier <b>As of</b> date to build a position on a past day and then simulate it day by day to expiry.</p>
-          </InfoTip>
+          </InfoTip></span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-full bg-raised p-[3px]" role="tablist" aria-label="Open interest column">
+            {([['oi', 'OI'], ['change', 'OI chg'], ['greeks', 'Greeks']] as const).map(([k, label]) => (
+              <button key={k} type="button" role="tab" aria-selected={oiView === k} onClick={() => setOiView(k)}
+                className={`rounded-full px-2.5 py-1 text-[12px] font-bold ${oiView === k ? 'bg-inverse text-on-inverse' : 'text-ink-2'}`}>{label}</button>
+            ))}
+          </div>
+            <div className="flex rounded-full bg-raised p-[3px]" role="radiogroup" aria-label="Strikes shown">
+            {([[false, 'Near the index'], [true, 'All strikes']] as const).map(([k, label]) => (
+              <button key={label} type="button" role="radio" aria-checked={allStrikes === k} onClick={() => setAllStrikes(k)}
+                className={`rounded-full px-2.5 py-1 text-[12px] font-bold ${allStrikes === k ? 'bg-inverse text-on-inverse' : 'text-ink-2'}`}>{label}</button>
+            ))}
+          </div>
+          </div>
         </div>
         {chain && (
           <div className="grid grid-cols-2 gap-1.5 px-3 py-2 text-[11px] sm:grid-cols-4">
@@ -377,10 +397,17 @@ export function OptionsView() {
         </div>
       </section>
 
-      {/* builder */}
+      {/* builder and simulator, one tab each */}
       <section className="panel flex flex-col overflow-hidden xl:min-h-0">
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
-          <h2 className="flex items-center gap-1.5 text-[14px] font-extrabold tracking-[-0.02em]">Strategy builder
+          <div role="tablist" aria-label="Panel" className="flex rounded-full bg-raised p-[3px]">
+            {([['builder', 'Strategy builder'], ['simulator', 'Simulator']] as const).map(([k, label]) => (
+              <button key={k} type="button" role="tab" aria-selected={panel === k} onClick={() => setPanel(k)}
+                className={`rounded-full px-3.5 py-1.5 text-[13px] font-bold ${panel === k ? 'bg-inverse text-on-inverse' : 'text-ink-2 hover:text-ink'}`}>{label}</button>
+            ))}
+          </div>
+          <h2 className="sr-only">{panel === 'builder' ? 'Strategy builder' : 'Simulator'}</h2>
+          <span className="flex items-center">
             <InfoTip label="About these numbers">
               {legs.length > 0 && multi
                 ? <p>Legs span more than one expiry: max profit/loss and breakevens are estimates at the first expiry, with later legs valued by Black-76 on their own IV, after charges (later legs squared off).</p>
@@ -390,7 +417,7 @@ export function OptionsView() {
               {margin.data?.historical && <p><b>Past day:</b> SPAN is from that day&rsquo;s NSE file; the exposure margin and expiry-day rules are today&rsquo;s, and have not yet been checked against the rates NSE applied then.</p>}
               <p>Templates illustrate option structures; they are not recommendations. A calculator for your own analysis, not investment advice.</p>
             </InfoTip>
-          </h2>
+          </span>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {/* Empty builder: the template cards below replace this menu. */}
             {legs.length > 0 && (
@@ -407,9 +434,47 @@ export function OptionsView() {
           </div>
         </div>
 
+        {panel === 'simulator' && (
+          <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
+            {!past ? (
+              <div className="grid gap-3 rounded-[12px] bg-raised p-4 text-[13px] text-ink-2">
+                <p><b className="text-ink">The simulator follows a position from a past day to its expiry</b>, on NSE&rsquo;s official closes, one trading day at a time. You can square off any leg on any day.</p>
+                <p>1. Pick a past date in <b>As of</b> above the option chain (or a quick one below). 2. Build the position in the Strategy builder. 3. Come back here and run it.</p>
+                <div className="flex flex-wrap gap-2">
+                  {([['1 month ago', 30], ['3 months ago', 91], ['6 months ago', 182], ['1 year ago', 365]] as const).map(([label, days]) => (
+                    <button key={label} type="button" onClick={() => { const d = new Date(Date.now() + 5.5 * 3600_000 - days * 86400_000).toISOString().slice(0, 10); pickDate(d); setPanel('builder'); }}
+                      className="h-8 rounded-full border border-line-strong bg-panel px-3 text-[12.5px] font-semibold text-ink hover:border-accent">{label}</button>
+                  ))}
+                </div>
+                <p className="text-[12px] text-muted">The simulator covers NIFTY and BANKNIFTY.</p>
+              </div>
+            ) : !legs.length ? (
+              <p className="rounded-[12px] bg-raised p-4 text-[13px] text-ink-2">Build a position on {chain ? fmtDate(chain.date) : 'the chosen day'} in the <button type="button" onClick={() => setPanel('builder')} className="font-semibold text-accent-deep hover:underline">Strategy builder</button>, then run it here.</p>
+            ) : chain && (
+              <Simulator underlying={underlying} entryDate={chain.date} legs={legs} brokerId={broker.id} brokerName={broker.name} onDay={followSimDay} payoff={payoffChart} />
+            )}
+          </div>
+        )}
+        {panel === 'builder' && (
         <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
-          {/* On a past day the simulator comes first: it is what the position is built for. */}
-          {past && chain && legs.length > 0 && <Simulator underlying={underlying} entryDate={chain.date} legs={legs} brokerId={broker.id} brokerName={broker.name} onDay={followSimDay} payoff={payoffChart} />}
+          {past && legs.length > 0 && (
+            <button type="button" onClick={() => setPanel('simulator')} className="flex w-full items-center gap-2 rounded-[10px] bg-accent-soft px-3 py-2 text-left text-[12.5px] text-ink-2 hover:bg-accent hover:text-accent-ink">
+              Built on {chain ? fmtDate(chain.date) : 'a past day'}: <b>open the Simulator</b> to follow it day by day to expiry.
+            </button>
+          )}
+          {chain?.futures && chain.futures.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-[10px] border border-line px-2.5 py-1.5 text-[12.5px]">
+              <span className="font-semibold">Futures</span>
+              {chain.futures.slice(0, 3).map((f) => (
+                <span key={f.expiry} className="inline-flex items-center gap-1 rounded-full bg-raised py-0.5 pr-0.5 pl-2.5">
+                  <span className="num">{fmtDate(f.expiry).slice(0, 6)} · {fmt(f.closePaise / 100)}{f.traded ? '' : '*'}</span>
+                  <button type="button" onClick={() => addFuture('BUY', f.expiry)} className="rounded-full bg-blue px-2 py-0.5 text-[11px] font-bold text-white" aria-label={`Buy the ${fmtDate(f.expiry)} future`}>B</button>
+                  <button type="button" onClick={() => addFuture('SELL', f.expiry)} className="rounded-full bg-down px-2 py-0.5 text-[11px] font-bold text-white" aria-label={`Sell the ${fmtDate(f.expiry)} future`}>S</button>
+                </span>
+              ))}
+              <InfoTip label="About futures">A future moves one for one with the index (delta 1 a unit). Price is NSE&rsquo;s close that day; on expiry it settles at the index&rsquo;s official close. Charges use futures rates.</InfoTip>
+            </div>
+          )}
           {!legs.length && (chain ? <TemplateGallery chain={chain} onPick={(id) => void applyTemplate(id)} /> : <p className="py-10 text-center text-[13px] text-muted">Add legs from the option chain, or choose a template.</p>)}
           {legs.length > 0 && (
             <table className="num w-full text-[12.5px]">
@@ -424,11 +489,11 @@ export function OptionsView() {
                     <td className="font-sans font-semibold">
                       <span className="inline-flex items-center gap-1">
                         {underlying} {fmtDate(l.expiry).slice(0, 6)}
-                        <span className="inline-flex items-center rounded-md border border-line">
+                        {l.kind === 'FUT' ? null : <span className="inline-flex items-center rounded-md border border-line">
                           <button type="button" aria-label="Lower strike" title={step ? `Strike − ${fmtStrike(step)}` : undefined} onClick={() => void shiftStrike(l.id, -1)} className="rounded-l-md px-1 py-0.5 hover:bg-raised"><Minus size={11} /></button>
                           <span className="num min-w-[46px] px-0.5 text-center">{fmtStrike(l.strikePaise)}</span>
                           <button type="button" aria-label="Higher strike" title={step ? `Strike + ${fmtStrike(step)}` : undefined} onClick={() => void shiftStrike(l.id, 1)} className="rounded-r-md px-1 py-0.5 hover:bg-raised"><Plus size={11} /></button>
-                        </span>
+                        </span>}
                         {l.kind}
                       </span>
                     </td>
@@ -552,6 +617,7 @@ export function OptionsView() {
             </>
           )}
         </div>
+        )}
       </section>
       {notice && <div role="status" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-inverse px-5 py-2.5 text-[13px] font-semibold text-on-inverse shadow-[var(--shadow-pop)]">{notice}</div>}
     </div>

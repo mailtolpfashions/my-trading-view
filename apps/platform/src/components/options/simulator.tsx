@@ -4,13 +4,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Pause, Play } from 'lucide-react';
 import { formatRupees } from '@mtv/paper';
 import { fmt } from '@/lib/format';
-import { fmtDate, fmtStrike, runSimulation, type BuilderLeg, type SimResult } from '@/lib/options';
+import { fmtDate, fmtStrike, runSimulation, type BuilderLeg, type SimExit, type SimResult } from '@/lib/options';
 import { niceTicks } from './payoff-chart';
 import { firstExit, type Exit, type ExitRules } from '@/lib/sim-exit';
 import { InfoTip } from '@/components/info-tip';
 
 const W = 760, H = 220, PAD = { l: 64, r: 16, t: 12, b: 26 };
-const SOURCE: Record<string, string> = { close: '', settle: '*', expired: ' (settled)', missing: ' (no data)' };
+const SOURCE: Record<string, string> = { close: '', settle: '*', expired: ' (settled)', squared: ' (closed)', missing: ' (no data)' };
+/** A leg's name: strike and type for an option, FUT for a future. */
+const legName = (l: { kind: string; strikePaise: number }) => (l.kind === 'FUT' ? 'FUT' : `${fmtStrike(l.strikePaise)} ${l.kind}`);
 
 /** The simulated day shown, for the payoff chart: that day's close and the P&L before charges at it. */
 export type SimDayLink = { date: string; daysSinceEntry: number; spotPaise: number; grossPaise: number };
@@ -21,7 +23,12 @@ export type SimDayLink = { date: string; daysSinceEntry: number; spotPaise: numb
  * the index's official close.
  */
 export function Simulator({ underlying, entryDate, legs, brokerId, brokerName, onDay, payoff }: { underlying: string; entryDate: string; legs: BuilderLeg[]; brokerId: string; brokerName: string; onDay?: (d: SimDayLink | null) => void; payoff?: React.ReactNode }) {
-  const inputKey = JSON.stringify([underlying, entryDate, brokerId, legs.map((l) => [l.kind, l.side, l.strikePaise, l.expiry, l.lots, l.pricePaise])]);
+  const legsKey = JSON.stringify([underlying, entryDate, brokerId, legs.map((l) => [l.kind, l.side, l.strikePaise, l.expiry, l.lots, l.pricePaise])]);
+  /** Legs the owner squared off early: closed at the close of the chosen day. Cleared when the position changes. */
+  const [exits, setExits] = useState<SimExit[]>([]);
+  const [exitsFor, setExitsFor] = useState(legsKey);
+  if (exitsFor !== legsKey) { setExitsFor(legsKey); setExits([]); }
+  const inputKey = JSON.stringify([legsKey, exits]);
   const [run, setRun] = useState<{ key: string; result: SimResult } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,12 +46,12 @@ export function Simulator({ underlying, entryDate, legs, brokerId, brokerName, o
   }, [shown, entryDate, onDay]);
   useEffect(() => () => onDay?.(null), [onDay]);
 
-  async function start() {
+  async function start(withExits = exits, keepDay = false) {
     setBusy(true); setError(null);
     try {
-      const r = await runSimulation({ underlying, entryDate, broker: brokerId, legs: legs.map((l) => ({ kind: l.kind, side: l.side, strikePaise: l.strikePaise, expiry: l.expiry, lots: l.lots, entryPaise: l.pricePaise })) });
-      setRun({ key: inputKey, result: r });
-      setDayIdx(r.days.length - 1);
+      const r = await runSimulation({ underlying, entryDate, broker: brokerId, exits: withExits, legs: legs.map((l) => ({ kind: l.kind, side: l.side, strikePaise: l.strikePaise, expiry: l.expiry, lots: l.lots, entryPaise: l.pricePaise })) });
+      setRun({ key: JSON.stringify([legsKey, withExits]), result: r });
+      if (!keepDay) setDayIdx(r.days.length - 1);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -70,14 +77,20 @@ export function Simulator({ underlying, entryDate, legs, brokerId, brokerName, o
         </button>
       </div>
       {error && <p role="alert" className="mt-2 rounded-[10px] bg-down-soft px-2.5 py-1.5 text-[12px] font-semibold text-down">{error}</p>}
-      {result && <SimView r={result} dayIdx={Math.min(dayIdx, result.days.length - 1)} setDayIdx={setDayIdx} underlying={underlying} brokerName={brokerName} rules={rules} setRules={setRules} payoff={payoff} />}
+      {result && <SimView r={result} dayIdx={Math.min(dayIdx, result.days.length - 1)} setDayIdx={setDayIdx} underlying={underlying} brokerName={brokerName} rules={rules} setRules={setRules} payoff={payoff}
+        exits={exits} busy={busy}
+        onSquare={(leg, date, lots) => { const next = [...exits, { leg, date, lots }]; setExits(next); void start(next, true); }}
+        onUndo={(k) => { const next = exits.filter((_, j) => j !== k); setExits(next); void start(next, true); }} />}
     </section>
   );
 }
 
 const SPEEDS = [{ ms: 400, label: 'Fast' }, { ms: 900, label: 'Normal' }, { ms: 1800, label: 'Slow' }];
 
-function SimView({ r, dayIdx, setDayIdx, underlying, brokerName, rules, setRules, payoff }: { r: SimResult; dayIdx: number; setDayIdx: (i: number) => void; underlying: string; brokerName: string; rules: ExitRules; setRules: (x: ExitRules) => void; payoff?: React.ReactNode }) {
+function SimView({ r, dayIdx, setDayIdx, underlying, brokerName, rules, setRules, payoff, exits, busy, onSquare, onUndo }: {
+  r: SimResult; dayIdx: number; setDayIdx: (i: number) => void; underlying: string; brokerName: string; rules: ExitRules; setRules: (x: ExitRules) => void; payoff?: React.ReactNode;
+  exits: SimExit[]; busy: boolean; onSquare: (leg: number, date: string, lots: number) => void; onUndo: (exitIndex: number) => void;
+}) {
   const days = r.days;
   const [chart, setChart] = useState<'payoff' | 'days'>(payoff ? 'payoff' : 'days');
   const [playing, setPlaying] = useState(false);
@@ -179,7 +192,9 @@ function SimView({ r, dayIdx, setDayIdx, underlying, brokerName, rules, setRules
 
       <table className="num w-full text-[12px]">
         <thead className="text-[10.5px] font-bold tracking-[0.05em] text-muted">
-          <tr><th className="py-1 text-left">LEG</th><th className="text-right">ENTRY</th><th className="text-right">{fmtDate(d.date).slice(0, 6).toUpperCase()}</th><th className="text-right">P&amp;L</th><th className="text-right">IV</th></tr>
+          <tr><th className="py-1 text-left">LEG</th><th className="text-right">ENTRY</th><th className="text-right">{fmtDate(d.date).slice(0, 6).toUpperCase()}</th><th className="text-right">P&amp;L</th><th className="text-right">IV</th><th className="text-right">
+            <span className="inline-flex items-center gap-1">SQUARE OFF <InfoTip label="Squaring off a leg">Closes the lots you choose at the close of the day shown, as one order with that day&rsquo;s charges; their P&amp;L stays fixed while the rest runs on. Move to another day to square off more there. Undo puts a square-off back.</InfoTip></span>
+          </th></tr>
         </thead>
         <tbody>
           {r.legs.map((l, i) => {
@@ -189,12 +204,27 @@ function SimView({ r, dayIdx, setDayIdx, underlying, brokerName, rules, setRules
               <tr key={i} className="border-t border-line">
                 <td className="py-1 font-sans font-semibold">
                   <span className={`mr-1.5 rounded px-1.5 py-0.5 text-[10.5px] font-bold text-white ${l.side === 'BUY' ? 'bg-blue' : 'bg-down'}`}>{l.side === 'BUY' ? 'B' : 'S'}</span>
-                  {l.lots}× {fmtStrike(l.strikePaise)} {l.kind} {fmtDate(l.expiry).slice(0, 6)}
+                  {l.lots}× {legName(l)} {fmtDate(l.expiry).slice(0, 6)}
+                  {ld.openLots > 0 && ld.openLots < l.lots && <span className="ml-1.5 text-[11px] font-normal text-muted">{ld.openLots} of {l.lots} open</span>}
                 </td>
                 <td className="text-right">{fmt(l.entryPaise / 100)}{l.enteredUntraded ? '*' : ''}</td>
                 <td className="text-right">{ld.pricePaise == null ? '—' : fmt(ld.pricePaise / 100)}<span className="text-muted">{SOURCE[ld.source]}</span></td>
                 <td className={`text-right font-semibold ${tone(pnl ?? 0)}`}>{pnl == null ? '—' : formatRupees(pnl)}</td>
                 <td className="text-right text-muted">{ld.iv == null ? '—' : (ld.iv * 100).toFixed(1)}</td>
+                <td className="text-right font-sans">
+                  <div className="flex flex-col items-end gap-1">
+                    {exits.map((x, k) => x.leg === i && (
+                      <span key={k} className="inline-flex items-center gap-1 text-[11.5px] text-ink-2">
+                        Closed {x.lots ?? 'all'} lot{(x.lots ?? 2) > 1 ? 's' : ''} {fmtDate(x.date).slice(0, 6)}
+                        <button type="button" disabled={busy} onClick={() => onUndo(k)} className="rounded-full px-1.5 py-0.5 font-semibold text-accent-deep hover:bg-accent-soft disabled:opacity-50">Undo</button>
+                      </span>
+                    ))}
+                    {(ld.source === 'close' || ld.source === 'settle' || ld.source === 'missing') && ld.openLots > 0 && (
+                      dayIdx === 0 ? <span className="text-[11.5px] text-muted">from day 2</span>
+                        : <SquareOff open={ld.openLots} busy={busy} date={d.date} onSquare={(lots) => onSquare(i, d.date, lots)} />
+                    )}
+                  </div>
+                </td>
               </tr>
             );
           })}
@@ -305,5 +335,22 @@ function SimChart({ r, dayIdx, onPick, exit }: { r: SimResult; dayIdx: number; o
         </div>
       )}
     </div>
+  );
+}
+
+/** Square off some or all open lots of a leg on the day shown. */
+function SquareOff({ open, busy, date, onSquare }: { open: number; busy: boolean; date: string; onSquare: (lots: number) => void }) {
+  const [lots, setLots] = useState(open);
+  const n = Math.min(lots, open);
+  return (
+    <span className="inline-flex items-center gap-1">
+      {open > 1 && (
+        <select value={n} onChange={(e) => setLots(Number(e.target.value))} aria-label="Lots to square off" className="num h-6 rounded-full bg-raised px-1.5 text-[11.5px] font-semibold">
+          {Array.from({ length: open }, (_, k) => k + 1).map((k) => <option key={k} value={k}>{k === open ? `all ${k}` : k}</option>)}
+        </select>
+      )}
+      <button type="button" disabled={busy} onClick={() => onSquare(n)} title={`Close ${n} lot${n > 1 ? 's' : ''} at the ${fmtDate(date)} close`}
+        className="rounded-full border border-line-strong px-2.5 py-0.5 text-[11.5px] font-semibold text-ink-2 hover:border-down hover:text-down disabled:opacity-50">Square off</button>
+    </span>
   );
 }

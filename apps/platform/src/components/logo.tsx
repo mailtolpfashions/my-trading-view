@@ -15,7 +15,7 @@ export function Logo() {
   return (
     <span className="flex items-center gap-2.5">
       <LogoMark />
-      <span className="text-[18px] font-bold tracking-[-0.03em]">Nandibull</span>
+      <span className="hidden text-[18px] font-bold tracking-[-0.03em] sm:inline">Nandibull</span>
     </span>
   );
 }

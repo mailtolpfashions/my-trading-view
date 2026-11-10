@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { X } from 'lucide-react';
-import type { LibIndicator, LibInput } from '@/lib/chart/library';
+import { LEVEL, levelLines, type LibIndicator, type LibInput } from '@/lib/chart/library';
 
 const SOURCES = ['open', 'high', 'low', 'close', 'hl2', 'hlc3', 'ohlc4', 'hlcc4'];
 const field = 'h-9 w-full rounded-[10px] border border-line bg-panel px-2.5 text-[13px] outline-none focus:border-ink';
@@ -11,7 +11,9 @@ const editable = (i: LibInput) => ['int', 'float', 'bool', 'string', 'source', '
 
 /** Settings for one library indicator, laid out by its Pine `group`s, like TradingView's Inputs tab. */
 export function LibSettings({ ind, inputs, onSave, onClose }: { ind: LibIndicator; inputs: Record<string, unknown>; onSave: (inputs: Record<string, unknown>) => void; onClose: () => void }) {
-  const [vals, setVals] = useState<Record<string, unknown>>(() => Object.fromEntries(ind.inputConfig.map((i) => [i.id, inputs[i.id] ?? i.defval])));
+  const levels = levelLines(ind);
+  const defaults = () => ({ ...Object.fromEntries(ind.inputConfig.map((i) => [i.id, i.defval])), ...Object.fromEntries(levels.map((h) => [LEVEL + h.id, h.price])) });
+  const [vals, setVals] = useState<Record<string, unknown>>(() => ({ ...defaults(), ...Object.fromEntries(Object.entries(inputs).filter(([, v]) => v !== undefined)) }));
   const set = (id: string, v: unknown) => setVals((s) => ({ ...s, [id]: v }));
   const groups = [...new Set(ind.inputConfig.filter(editable).map((i) => i.group ?? ''))];
 
@@ -24,7 +26,7 @@ export function LibSettings({ ind, inputs, onSave, onClose }: { ind: LibIndicato
           <button type="button" onClick={onClose} className="rounded-full p-1.5 text-muted hover:bg-raised" aria-label="Close"><X size={16} /></button>
         </div>
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          {!groups.length && <p className="text-[13px] text-muted">This indicator has no settings.</p>}
+          {!groups.length && !levels.length && <p className="text-[13px] text-muted">This indicator has no settings.</p>}
           {groups.map((g) => (
             <div key={g || 'main'} className="space-y-2.5">
               {g && <p className="eyebrow">{g}</p>}
@@ -57,9 +59,21 @@ export function LibSettings({ ind, inputs, onSave, onClose }: { ind: LibIndicato
               })}
             </div>
           ))}
+          {levels.length > 0 && (
+            <div className="space-y-2.5">
+              <p className="eyebrow">Levels</p>
+              {levels.map((h) => (
+                <label key={h.id} className="grid grid-cols-[1fr_160px] items-center gap-3 text-[13px]">
+                  <span className="text-ink-2">{h.title || 'Level'}</span>
+                  <input className={`${field} num`} type="number" step="any" value={Number(vals[LEVEL + h.id])}
+                    onChange={(e) => set(LEVEL + h.id, e.target.value === '' ? h.price : Number(e.target.value))} />
+                </label>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex justify-between gap-2 border-t border-line px-5 py-3">
-          <button type="button" onClick={() => setVals(Object.fromEntries(ind.inputConfig.map((i) => [i.id, i.defval])))} className="rounded-full px-4 py-2 text-[13px] font-semibold text-ink-2 hover:bg-raised">Reset to defaults</button>
+          <button type="button" onClick={() => setVals(defaults())} className="rounded-full px-4 py-2 text-[13px] font-semibold text-ink-2 hover:bg-raised">Reset to defaults</button>
           <button type="submit" className="rounded-full bg-inverse px-5 py-2 text-[13px] font-bold text-on-inverse hover:bg-inverse-hover">Apply</button>
         </div>
       </form>

@@ -7,6 +7,7 @@ import { MaxPainTool } from './options/max-pain';
 import { OpenInterestTool } from './options/open-interest';
 import { PcrTool } from './options/pcr';
 import { PeCeTool, PriceVsOiTool } from './options/oi-series';
+import { IntradaySellerTool } from './options/intraday-seller';
 import { SellingReportTool } from './options/selling-report';
 import { SellingStudyTool } from './options/selling-study';
 import { DecayTool, StraddleTool } from './options/straddle';
@@ -32,6 +33,7 @@ const TOOLS: Record<string, (p: { tool: Tool }) => React.ReactNode> = {
   'oi-clusters': OiClustersTool,
   'strategy-chart': StrategyChartTool,
   'selling-study': SellingStudyTool,
+  'intraday-seller': IntradaySellerTool,
   'selling-report': SellingReportTool,
 };
 

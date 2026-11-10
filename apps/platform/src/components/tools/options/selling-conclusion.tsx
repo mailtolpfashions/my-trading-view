@@ -72,9 +72,9 @@ export function SellingConclusion() {
         </Card>
         <Card title="Ideas from outside, as written">
           <Table head={['Idea', 'Result']} rows={[
-            ['Volatile + range-bound (Bank Nifty, 1 month)', <span key="a"><Money v={data.ideas.combo.total} />, lost {data.ideas.combo.losingYears} of {data.ideas.combo.yearCount} years; {data.ideas.combo.doubleLoss} months both parts lost, {data.ideas.combo.doubleWin} both won</span>],
-            ['Weekly future + put ("195% in 12 weeks")', <span key="b"><Money v={data.ideas.weekly.total} /> since 2019, <Money v={data.ideas.weekly.since2023} /> since 2023</span>],
-            ['Yearly ITM call ratio (first screenshot)', <span key="c"><Money v={data.ideas.yearly.total} /> over {data.ideas.yearly.years} years on traded prices</span>],
+            ['Volatile + range-bound (Bank Nifty, 1 month)', <span key="a" className="whitespace-normal"><Money v={data.ideas.combo.total} />, lost {data.ideas.combo.losingYears} of {data.ideas.combo.yearCount} years; {data.ideas.combo.doubleLoss} months both parts lost, {data.ideas.combo.doubleWin} both won</span>],
+            ['Weekly future + put ("195% in 12 weeks")', <span key="b" className="whitespace-normal"><Money v={data.ideas.weekly.total} /> since 2019, <Money v={data.ideas.weekly.since2023} /> since 2023</span>],
+            ['Yearly ITM call ratio (first screenshot)', <span key="c" className="whitespace-normal"><Money v={data.ideas.yearly.total} /> over {data.ideas.yearly.years} years on traded prices</span>],
           ]} />
         </Card>
       </div>

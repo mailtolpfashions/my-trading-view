@@ -69,7 +69,7 @@ function Alerts() {
         {notice && <p role="status" className="rounded-[12px] bg-up-soft px-3 py-2 text-[13.5px] font-semibold text-up">{notice}</p>}
         <Card title="My alerts">
           {!alerts && <p className="text-[13px] text-muted">Loading…</p>}
-          {alerts?.length === 0 && <p className="text-[13.5px] text-ink-2">No alerts yet. Save a screen (or a strategy), then create an alert for it here.</p>}
+          {alerts?.length === 0 && <p className="text-[13.5px] text-ink-2">No alerts yet. Save a scan (or a strategy), then create an alert for it here.</p>}
           <ul className="grid gap-2">
             {alerts?.map((a) => (
               <li key={a.id} className="flex flex-wrap items-center gap-3 rounded-[12px] border border-line px-3 py-2.5">
@@ -77,7 +77,7 @@ function Alerts() {
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold">{a.name}</p>
                   <p className="text-[12.5px] text-muted">
-                    {a.source.kind === 'screen' ? 'Screen' : 'Strategy entry'}: {sourceName(a)} · {a.trigger === 'first' ? 'new matches' : 'every check'} · {a.channels.map((c) => CHANNEL_LABEL[c].split(' (')[0]).join(', ')}{a.until ? ` · until ${a.until}` : ''}
+                    {a.source.kind === 'screen' ? 'Scan' : 'Strategy entry'}: {sourceName(a)} · {a.trigger === 'first' ? 'new matches' : 'every check'} · {a.channels.map((c) => CHANNEL_LABEL[c].split(' (')[0]).join(', ')}{a.until ? ` · until ${a.until}` : ''}
                   </p>
                   <p className="text-[12.5px] text-muted">{!a.enabled ? 'Paused' : a.lastCheckAt ? `Checked ${ago(a.lastCheckAt)}${a.matching ? `, ${a.matching.length.toLocaleString('en-IN')} matching` : ''}` : 'Waiting for its first check'}</p>
                   {a.lastError && <p className="text-[12.5px] text-down">{a.lastError}</p>}
@@ -132,15 +132,15 @@ function NewAlert({ screens, strategies, channels, initial, onSave }: {
       <div className="grid gap-3">
         <label className="grid gap-1"><span className="eyebrow">Watch</span>
           <select value={source} onChange={(e) => setSource(e.target.value)} className={`${inputCls} pr-8`}>
-            <option value="">Pick a saved screen or strategy…</option>
-            {screens.length > 0 && <optgroup label="Saved screens">{screens.map((s) => <option key={s.id} value={`screen:${s.id}`}>{s.name}</option>)}</optgroup>}
+            <option value="">Pick a saved scan or strategy…</option>
+            {screens.length > 0 && <optgroup label="Saved scans">{screens.map((s) => <option key={s.id} value={`screen:${s.id}`}>{s.name}</option>)}</optgroup>}
             {strategies.length > 0 && <optgroup label="Strategy entry signals">{strategies.map((s) => <option key={s.id} value={`strategy:${s.id}`}>{s.name}</option>)}</optgroup>}
           </select>
         </label>
         <label className="grid gap-1"><span className="eyebrow">Name</span>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder={label ? `${label} alert` : 'Alert name'} className={inputCls} />
         </label>
-        <div className="grid gap-1"><span className="eyebrow flex items-center gap-1">Tell me <InfoTip label="When to tell">New matches: a stock is reported when it starts matching, and again only after it has stopped matching. Every check: all matching stocks each time the screen is checked.</InfoTip></span>
+        <div className="grid gap-1"><span className="eyebrow flex items-center gap-1">Tell me <InfoTip label="When to tell">New matches: a stock is reported when it starts matching, and again only after it has stopped matching. Every check: all matching stocks each time the scan is checked.</InfoTip></span>
           <Segmented label="Trigger" value={trigger} onChange={setTrigger} options={[{ value: 'first', label: 'About new matches' }, { value: 'every', label: 'On every check' }]} />
         </div>
         <div className="grid gap-1.5"><span className="eyebrow">How</span>
@@ -154,8 +154,8 @@ function NewAlert({ screens, strategies, channels, initial, onSave }: {
         <label className="grid gap-1"><span className="eyebrow">Stop after (optional)</span>
           <input type="date" value={until} onChange={(e) => setUntil(e.target.value)} className={`${inputCls} num w-[180px]`} />
         </label>
-        <p className="text-[12.5px] text-muted">Intraday screens are checked as each bar closes while Kite is live; daily screens when NSE&apos;s evening file arrives (and every 5 minutes in the session if they use the live candle).</p>
-        <Button variant="primary" disabled={!source || !chosen.length} onClick={() => { onSave({ name: name.trim() || `${label ?? 'Screen'} alert`, source: { kind, id }, trigger, session: 'market', channels: chosen, until: until || null }); setName(''); }}>
+        <p className="text-[12.5px] text-muted">Intraday scans are checked as each bar closes while Kite is live; daily scans when NSE&apos;s evening file arrives (and every 5 minutes in the session if they use the live candle).</p>
+        <Button variant="primary" disabled={!source || !chosen.length} onClick={() => { onSave({ name: name.trim() || `${label ?? 'Scan'} alert`, source: { kind, id }, trigger, session: 'market', channels: chosen, until: until || null }); setName(''); }}>
           <Bell size={15} /> Create alert
         </Button>
       </div>

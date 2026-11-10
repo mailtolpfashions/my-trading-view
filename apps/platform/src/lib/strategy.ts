@@ -15,7 +15,8 @@ export type StrategyTf = 'D' | 'W' | 'M' | '1m' | '3m' | '5m' | '15m' | '30m' | 
 export const isIntradayTf = (tf: string) => !['D', 'W', 'M'].includes(tf);
 /** Intraday session rules (HH:MM, IST): entries from firstEntry, none from lastEntry, everything out at squareOff. */
 export type IntradayRules = { firstEntry?: string; lastEntry: string; squareOff: string };
-export const DEFAULT_INTRADAY: IntradayRules = { firstEntry: '09:15', lastEntry: '15:00', squareOff: '15:15' };
+/** The owner's trading window: no entries before 9:30 (the opening is too volatile), last entry 14:45, all closed at 3 pm. */
+export const DEFAULT_INTRADAY: IntradayRules = { firstEntry: '09:30', lastEntry: '14:45', squareOff: '15:00' };
 
 export type EquityStrategy = {
   tf: StrategyTf; intraday?: IntradayRules; side: 'LONG'; entry: string; exit?: string; order: OrderSpec;

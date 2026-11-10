@@ -24,6 +24,8 @@ const OPTION_UNDERLYINGS = ['NIFTY', 'BANKNIFTY'];
 const IST = 5.5 * 3600;
 const DAY = 86400;
 const LIVE_INDICES = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
+/** Traded NIFTY instruments with volume, for the intraday seller engine's VWAP proxy (NIFTY-FUT = nearest future). */
+const VWAP_PROXIES = ['NIFTYBEES', 'NIFTY-FUT'];
 /** Trading days of one-minute history each timeframe needs for its indicators. */
 const DAYS_FOR: Partial<Record<Tf, number>> = { '1m': 5, '3m': 10, '5m': 15, '15m': 40, '30m': 60, '1h': 120, '2h': 250, '4h': 250 };
 const nowSec = () => Math.floor(Date.now() / 1000);
@@ -45,9 +47,18 @@ export type LiveStatus = {
   today: { running: boolean; done: number; total: number };
   history: { running: boolean; done: number; total: number; failed: number; days: number; finishedAt: number | null };
   correctedOn: string | null;
-  options: { contracts: number; minutesToday: number };
+  options: { contracts: number; minutesToday: number; coverage: Record<string, OptionCoverage> };
   /** The last after-close check of live-built minutes against Kite's official ones. */
   liveCheck: LiveCheck | null;
+};
+
+/** What the option recorder holds against the live price, checked every minute (see recordOptions). */
+export type OptionCoverage = {
+  checkedAt: number; spot: number; spotSource: 'live tick' | 'last daily close'; expiry: string | null;
+  /** Lowest and highest strike recorded for the nearest expiry */
+  strikes: [number, number] | null;
+  /** Contracts of the nearest expiry within spot ±500, and how many of them had no tick in the last 3 minutes */
+  nearSpot: number; silent: number; resubscribed: number;
 };
 
 export type LiveCheck = {
@@ -71,12 +82,13 @@ export class LiveService {
   status: LiveStatus = {
     state: 'off', message: null, userName: null, expiresAt: null, stocks: 0, lastTickAt: null,
     today: { running: false, done: 0, total: 0 }, history: { running: false, done: 0, total: 0, failed: 0, days: 0, finishedAt: null }, correctedOn: null,
-    options: { contracts: 0, minutesToday: 0 },
+    options: { contracts: 0, minutesToday: 0, coverage: {} },
     liveCheck: null,
   };
   readonly optionStore = new OptionStore();
   readonly options = new OptionRecorder((u, rows) => { void this.optionStore.append(u, rows).catch((e) => this.log(`Could not store ${u} option minutes: ${e.message}`)); });
   private optionsCheckedAt = 0;
+  private coverageLoggedAt = new Map<string, number>();
   private optionsDay = '';
 
   constructor(private log: (m: string) => void, private historyDays = Number(process.env.INTRADAY_HISTORY_DAYS ?? 365)) {
@@ -142,7 +154,7 @@ export class LiveService {
   }
 
   private async chooseUniverse(p: KiteProvider): Promise<string[]> {
-    const set = new Set<string>(LIVE_INDICES);
+    const set = new Set<string>([...LIVE_INDICES, ...VWAP_PROXIES]);
     for (const r of await indexMemberRows('NIFTY 500').catch(() => [])) set.add(r.symbol);
     for (const u of (await fnoUnderlyings().catch(() => ({ underlyings: [] }))).underlyings) if (!u.isIndex) set.add(u.symbol);
     return [...set].filter((x) => p.tokenFor(x) != null).sort();
@@ -164,13 +176,39 @@ export class LiveService {
     if (!p) return;
     const now = nowSec(), today = dateOfIst(now);
     for (const u of OPTION_UNDERLYINGS) {
-      const spot = (p.lastTick(u)?.ltpPaise ?? 0) / 100 || dailyHistory(u)?.candles.at(-1)?.close;
+      const liveSpot = (p.lastTick(u)?.ltpPaise ?? 0) / 100;
+      const spot = liveSpot || dailyHistory(u)?.candles.at(-1)?.close;
       if (!spot) continue;
       const fresh = this.options.add(u, pickContracts(p.optionContracts(u), spot, today));
       if (fresh.length) p.ticker.subscribe(fresh, 'full');
+      this.checkCoverage(u, spot, liveSpot ? 'live tick' : 'last daily close', today, now);
     }
     this.status.options.contracts = this.options.size;
     this.optionsCheckedAt = now;
+  }
+
+  /**
+   * Coverage check, every minute: which strikes the recorder holds for the nearest expiry against the live price, and
+   * whether the contracts near the price are actually ticking. Contracts within ±500 of the price with no tick for 3
+   * minutes during the session are subscribed again (once a minute at most) and the gap is logged (every 10 minutes).
+   */
+  private checkCoverage(u: string, spot: number, spotSource: OptionCoverage['spotSource'], today: string, now: number) {
+    const p = this.provider;
+    if (!p) return;
+    const mine = this.options.contractsOf(u).filter((c) => c.expiry >= today);
+    const expiry = [...new Set(mine.map((c) => c.expiry))].sort()[0] ?? null;
+    const ofExpiry = mine.filter((c) => c.expiry === expiry);
+    const strikes = ofExpiry.map((c) => c.strike);
+    const near = ofExpiry.filter((c) => Math.abs(c.strike - spot) <= 500);
+    const clock = istClock(now);
+    const inSession = clock >= 9 + 18 / 60 && clock < 15.5 && spotSource === 'live tick';
+    const silent = inSession ? near.filter((c) => now - (this.options.lastTickAt.get(c.token) ?? 0) > 180) : [];
+    if (silent.length) p.ticker.resubscribe(silent.map((c) => c.token), 'full');
+    this.status.options.coverage[u] = { checkedAt: now, spot, spotSource, expiry, strikes: strikes.length ? [Math.min(...strikes), Math.max(...strikes)] : null, nearSpot: near.length, silent: silent.length, resubscribed: silent.length };
+    if ((silent.length || spotSource !== 'live tick') && now - (this.coverageLoggedAt.get(u) ?? 0) >= 600) {
+      this.coverageLoggedAt.set(u, now);
+      this.log(`Option recorder ${u}: spot ${spot} (${spotSource}), expiry ${expiry}, strikes ${strikes.length ? `${Math.min(...strikes)}–${Math.max(...strikes)}` : 'none'}, ${near.length} near spot, ${silent.length} silent → subscribed again; ticker holds ${p.ticker.count}`);
+    }
   }
 
   private everySecond() {

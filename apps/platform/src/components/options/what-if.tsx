@@ -1,7 +1,7 @@
 'use client';
 
 import { black76, legValue, scenarioIv, SPOT_VOL_FIT, type IvModel, type ModelLeg, type Scenario } from '@mtv/options';
-import { computeOptionCharges, formatRupees, type BrokerProfile } from '@mtv/paper';
+import { computeFuturesCharges, computeOptionCharges, formatRupees, type BrokerProfile } from '@mtv/paper';
 import { fmt } from '@/lib/format';
 import { fmtDate, fmtStrike, type BuilderLeg } from '@/lib/options';
 import { InfoTip } from '@/components/info-tip';
@@ -51,16 +51,19 @@ export function WhatIf({ state, onChange, legs, modelLegs, spotPaise, carry, max
   const rows = modelLegs.map((l, i) => {
     const value = legValue(l, S, t, RATE, carry, sc);
     const expired = l.years - t <= 1e-9;
-    const iv = expired ? null : scenarioIv(l, S, t, carry, sc);
+    const fut = l.kind === 'FUT';
+    const iv = expired || fut ? null : scenarioIv(l, S, t, carry, sc);
     const sign = l.side === 'BUY' ? 1 : -1;
-    const g = !expired && iv != null ? black76(l.kind as 'CE' | 'PE', (S * Math.exp(carry * (l.years - t))) / 100, l.strikePaise / 100, l.years - t, RATE, iv) : null;
+    // A future moves one for one: delta 1 a unit, no time decay or vega.
+    const g = fut ? { delta: 1, theta: 0, vega: 0 } : !expired && iv != null ? black76(l.kind as 'CE' | 'PE', (S * Math.exp(carry * (l.years - t))) / 100, l.strikePaise / 100, l.years - t, RATE, iv) : null;
     return { leg: legs[i], l, value, expired, iv, pnl: value == null ? null : sign * l.qty * (value - l.pricePaise), g, sign };
   });
   const missing = rows.some((r) => r.value == null);
   const pnl = missing ? null : rows.reduce((s, r) => s + r.pnl!, 0);
-  const charges = missing ? null : rows.reduce((s, r) => s
-    + computeOptionCharges({ side: r.l.side, qty: r.l.qty, premiumPaise: r.l.pricePaise, broker }).total
-    + computeOptionCharges({ side: r.l.side === 'BUY' ? 'SELL' : 'BUY', qty: r.l.qty, premiumPaise: Math.round(r.value!), broker }).total, 0);
+  const trade = (l: (typeof rows)[number]['l'], side: 'BUY' | 'SELL', price: number) => (l.kind === 'FUT'
+    ? computeFuturesCharges({ side, qty: l.qty, pricePaise: price, broker }).total
+    : computeOptionCharges({ side, qty: l.qty, premiumPaise: price, broker }).total);
+  const charges = missing ? null : rows.reduce((s, r) => s + trade(r.l, r.l.side, r.l.pricePaise) + trade(r.l, r.l.side === 'BUY' ? 'SELL' : 'BUY', Math.round(r.value!)), 0);
   const greeks = rows.reduce((a, r) => (r.g ? { delta: a.delta + r.sign * r.l.qty * r.g.delta, theta: a.theta + r.sign * r.l.qty * r.g.theta, vega: a.vega + r.sign * r.l.qty * r.g.vega } : a), { delta: 0, theta: 0, vega: 0 });
   const acc = ACCURACY[state.model];
   const step = Math.round(spotPaise / 100) >= 30000 ? 100 : 50; // nudge size in points
@@ -122,7 +125,7 @@ export function WhatIf({ state, onChange, legs, modelLegs, spotPaise, carry, max
         <tbody>
           {rows.map((r) => (
             <tr key={r.leg.id} className="border-t border-line">
-              <td className="py-1 font-sans font-semibold"><span className={r.l.side === 'BUY' ? 'text-blue' : 'text-down'}>{r.l.side === 'BUY' ? 'B' : 'S'}</span> {fmtDate(r.leg.expiry).slice(0, 6)} {fmtStrike(r.l.strikePaise)} {r.l.kind}</td>
+              <td className="py-1 font-sans font-semibold"><span className={r.l.side === 'BUY' ? 'text-blue' : 'text-down'}>{r.l.side === 'BUY' ? 'B' : 'S'}</span> {fmtDate(r.leg.expiry).slice(0, 6)} {r.l.kind === 'FUT' ? 'FUT' : `${fmtStrike(r.l.strikePaise)} ${r.l.kind}`}</td>
               <td className="text-right">{fmt(r.l.pricePaise / 100)}</td>
               <td className="text-right font-semibold">{r.value == null ? '—' : fmt(r.value / 100)}{r.expired && <span className="ml-1 text-[10px] text-muted">expired</span>}</td>
               <td className={`text-right ${r.value != null && r.value >= r.l.pricePaise ? 'text-up' : 'text-down'}`}>{r.value == null ? '—' : `${r.value >= r.l.pricePaise ? '+' : '−'}${fmt(Math.abs(r.value - r.l.pricePaise) / 100)}`}</td>

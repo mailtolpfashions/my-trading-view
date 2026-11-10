@@ -51,6 +51,10 @@ export const PRESETS: Preset[] = [
   { id: 'rsi-bull-div', name: 'RSI bullish divergence', category: 'technical', tf: 'D', formula: 'BULL_DIV(RSI(CLOSE, 14), 5, 5, 5, 60)', about: 'Price made a lower low while RSI(14) made a higher low (confirmed 5 sessions after the low).', horizon: 'swing' },
   { id: 'weekly-trend-daily-dip', name: 'Weekly uptrend, daily pullback', category: 'technical', tf: 'D', formula: '[W] (CLOSE > EMA(CLOSE, 20)) AND RSI(CLOSE, 14) < 40', about: 'Above the 20-week EMA on the weekly chart while daily RSI(14) has dipped below 40.', horizon: 'swing' },
   { id: 'higher-highs-lows', name: 'Higher highs and higher lows', category: 'technical', tf: 'D', formula: 'RISING(HIGH, 3) AND RISING(LOW, 3)', about: 'Each of the last 3 sessions made a higher high and a higher low.', horizon: 'swing' },
+  // From the day-trader scanner skill (daily closes only), same rules
+  { id: 'bull-flag', name: 'Bull flag', category: 'technical', tf: 'D', formula: 'CLOSE[5] > CLOSE[15] * 1.1 AND (HIGHEST(CLOSE, 5) - LOWEST(CLOSE, 5)) / CLOSE < 0.05', about: 'Up more than 10% over the 10 sessions before the last 5, then the last 5 closes held inside a 5% range.', horizon: 'swing' },
+  { id: 'reclaim-ma20', name: 'Reclaims the 20-day average', category: 'technical', tf: 'D', formula: 'CLOSE[1] < SMA(CLOSE, 20)[1] AND CLOSE > SMA(CLOSE, 20)', about: 'Closed under its 20-day average yesterday and back above it today.', horizon: 'swing' },
+  { id: 'oversold-bounce', name: 'Oversold bounce', category: 'technical', tf: 'D', formula: 'RSI(CLOSE, 14)[1] < 30 AND CLOSE > CLOSE[1]', about: 'RSI(14) was under 30 yesterday and today closed higher.', horizon: 'swing' },
 ];
 
 export type ConditionTemplate = { label: string; formula: string };

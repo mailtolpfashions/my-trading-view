@@ -26,7 +26,7 @@ const siblingsOf = (tool: Tool) => tool.group === 'options'
  * Frame of an analysis tool: title and switcher, a row of controls, the content, and a plain note on how the
  * numbers are calculated and where they come from. Scrolls as one column.
  */
-export function ToolShell({ tool, controls, children, about }: { tool: Tool; controls?: React.ReactNode; children: React.ReactNode; about?: React.ReactNode }) {
+export function ToolShell({ tool, controls, children, about, dataNote }: { tool: Tool; controls?: React.ReactNode; children: React.ReactNode; about?: React.ReactNode; dataNote?: string }) {
   const params = useSearchParams();
   const u = params.get('u');
   const siblings = siblingsOf(tool);
@@ -40,7 +40,7 @@ export function ToolShell({ tool, controls, children, about }: { tool: Tool; con
           <InfoTip label={`About ${tool.label}`}>
             <p className="font-semibold text-ink">{tool.description}</p>
             {about}
-            <p className="text-muted">{DATA_NOTE[tool.group]}</p>
+            <p className="text-muted">{dataNote ?? DATA_NOTE[tool.group]}</p>
             {learn && <p><Link href={`/learn/${learn.slug}`} className="font-semibold text-accent-deep hover:underline">Learn: {learn.title} →</Link></p>}
           </InfoTip>
         </h1>

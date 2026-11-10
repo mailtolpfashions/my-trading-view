@@ -1,23 +1,24 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { AreaChart, BarChart3, Camera, CandlestickChart, Check, ChevronDown, History, LineChart, Maximize2, Minimize2, Pause, Play, Plus, Search, Settings2, SkipForward, TrendingUp, X } from 'lucide-react';
+import { AreaChart, BarChart3, Camera, Shapes, CandlestickChart, Check, ChevronDown, History, LineChart, Maximize2, Minimize2, Pause, Play, Plus, Search, Settings2, SkipForward, TrendingUp, X } from 'lucide-react';
 import { EOD_TIMEFRAMES, type Candle, type DataQuality, type Timeframe } from '@mtv/shared';
-import { PULSE_NAMES, chartHref, useShell } from '@/components/app/shell-context';
-import { ScannerView } from '@/components/signals/scanner-view';
+import { PULSE_NAMES, useShell } from '@/components/app/shell-context';
 import { fetchCatalog, newUid, type LibIndicator, type LibStudy } from '@/lib/chart/library';
 import { fetchCandles } from '@/lib/feed';
 import { fmt, tfLabel } from '@/lib/format';
 import { rememberChart, usePersisted, useSymbolPersisted } from '@/lib/persisted';
 import { MODE_TF, modeIsNew, useTradingMode } from '@/lib/today';
+import { useChartPatterns, usePatternMeta } from '@/lib/patterns';
+import { PatternPicker } from './pattern-picker';
 import { ChartView, DEFAULT_CHART_SETTINGS, type ChartSettings, type ChartType, type CompareLine, type ScaleMode } from './chart-view';
 import { SymbolSearch } from './symbol-search';
 import { position, type Fill } from '@/lib/practice';
 import { DataCheck } from './data-check';
 import { IndicatorPicker } from './indicator-picker';
 import { LibSettings } from './lib-settings';
-import { Watchlist } from './watchlist';
+import { StudySettings } from './study-settings';
+import type { StudyValues } from '@/lib/chart/studies';
 
 /** Minute bars come from the owner's Kite data (NIFTY 500 and F&O stocks, about a year); D/W/M from NSE's end-of-day files. */
 const INTRADAY_TFS: Timeframe[] = ['1', '5', '15', '60'];
@@ -39,13 +40,10 @@ const CHART_TYPES: [ChartType, string, typeof CandlestickChart][] = [
   ['candles', 'Candles', CandlestickChart], ['ha', 'Heikin Ashi', CandlestickChart], ['bars', 'Bars', BarChart3], ['line', 'Line', LineChart], ['area', 'Area', AreaChart],
 ];
 
-/** The side panel tab survives moving between symbols (each symbol is its own page), for this browser session. */
-let lastSide: 'watch' | 'scanner' = 'watch';
 
-/** TradingView-style chart page for one symbol (from the address), with the watchlist and scanner beside it. */
+/** TradingView-style chart page for one symbol (from the address); the watchlist and scanner are the app's right-hand panel. */
 export function ChartWorkspace({ symbol }: { symbol: string }) {
-  const router = useRouter();
-  const { quotes, watch, setWatch, openSearch, openChart, notify } = useShell();
+  const { openSearch, notify } = useShell();
   const [savedTf, setTf] = usePersisted<Timeframe>('mtv.tf', 'D');
   const tf: Timeframe = TFS.includes(savedTf) ? savedTf : 'D';
   const intraday = INTRADAY_TFS.includes(tf);
@@ -59,6 +57,9 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
   const [libStudies, setLibStudies] = useSymbolPersisted<LibStudy[]>(symbol, 'mtv.libStudies', []);
   const [picker, setPicker] = useState(false);
   const [editLib, setEditLib] = useState<string | null>(null);
+  /** Quick-indicator settings (RSI length, pivot type…), kept per symbol like the indicator list itself. */
+  const [studySettings, setStudySettings] = useSymbolPersisted<Record<string, StudyValues>>(symbol, 'mtv.studySettings', {});
+  const [editStudy, setEditStudy] = useState<string | null>(null);
   const [libCatalog, setLibCatalog] = useState<LibIndicator[]>([]);
   useEffect(() => { if (picker || editLib) fetchCatalog().then(setLibCatalog, () => {}); }, [picker, editLib]);
   const [data, setData] = useState<{ candles: Candle[]; key: string; quality: DataQuality | null; name: string; exchange: string }>({ candles: [], key: '', quality: null, name: PULSE_NAMES[symbol] ?? symbol, exchange: 'NSE' });
@@ -66,10 +67,11 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
   const [range, setRange] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [menu, setMenu] = useState<null | 'type' | 'settings' | 'replay'>(null);
+  const [menu, setMenu] = useState<null | 'type' | 'settings' | 'replay' | 'patterns'>(null);
+  /** Candlestick patterns marked on the chart (the same rules as the Scanner); shared by every chart. */
+  const [pickedPatterns, setPickedPatterns] = usePersisted<string[]>('mtv.patternPick', []);
+  const patternMeta = usePatternMeta();
   const [chartSettings, setChartSettings] = usePersisted<ChartSettings>('mtv.chartSettings', DEFAULT_CHART_SETTINGS);
-  const [side, setSideState] = useState<'watch' | 'scanner'>(() => lastSide);
-  const setSide = (s: 'watch' | 'scanner') => { lastSide = s; setSideState(s); };
   const shownSymbol = useRef(symbol);
   const [scale, setScale] = useSymbolPersisted<ScaleMode>(symbol, 'mtv.scale', 'normal');
 
@@ -215,6 +217,10 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [!!replay]); // eslint-disable-line react-hooks/exhaustive-deps
   const shownCandles = replay ? data.candles.slice(0, replay.idx + 1) : data.candles;
+  // Patterns on the bars shown (a replay only sees bars up to its current one, so nothing from the future).
+  const patterns = useChartPatterns(shownCandles, pickedPatterns, patternMeta);
+  const patternCount = new Map<string, number>();
+  for (const x of patterns) patternCount.set(x.name, (patternCount.get(x.name) ?? 0) + 1);
   const replayBar = replay ? data.candles[replay.idx] : null;
   const book = replay ? position(replay.fills, replayBar?.close ?? 0) : null;
   const trade = (side: 1 | -1) => setReplay((r) => r && replayBar ? { ...r, fills: [...r.fills, { qty: side * r.qty, price: replayBar.close, time: replayBar.time }] } : r);
@@ -223,7 +229,7 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
   const TypeIcon = CHART_TYPES.find(([k]) => k === chartType)?.[2] ?? CandlestickChart;
 
   return (
-    <div className="grid grid-cols-1 gap-2 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_360px]" onClick={() => setMenu(null)}>
+    <div className="grid grid-cols-1 lg:h-[calc(100dvh-104px)] lg:min-h-[560px]" onClick={() => setMenu(null)}>
       <section ref={chartPanel} className={`panel grid min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden ${full ? 'fixed inset-0 z-[60] h-dvh rounded-none' : 'h-[72dvh] min-h-[420px] lg:h-auto lg:min-h-0'}`}>
         {/* chart toolbar */}
         <div className="flex min-h-[44px] flex-wrap items-center gap-0.5 border-b border-line px-2 py-1 whitespace-nowrap">
@@ -259,6 +265,14 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
           <button type="button" onClick={() => setPicker(true)} className="flex h-[30px] items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-semibold hover:bg-raised">
             <TrendingUp size={16} /> <span className="hidden sm:inline">Indicators</span>
           </button>
+          <div className="relative" onClick={(e) => e.stopPropagation()}>
+            <button type="button" onClick={() => setMenu(menu === 'patterns' ? null : 'patterns')} aria-expanded={menu === 'patterns'} title="Candlestick patterns"
+              className={`flex h-[30px] items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-semibold ${pickedPatterns.length ? 'text-accent-deep' : ''} hover:bg-raised`}>
+              <Shapes size={16} /> <span className="hidden sm:inline">Patterns</span>
+              {pickedPatterns.length > 0 && <span className="num rounded-full bg-accent-soft px-1.5 text-[11px]" title={`${pickedPatterns.length} picked, ${patterns.length} on this chart`}>{pickedPatterns.length}</span>}
+            </button>
+            {menu === 'patterns' && <PatternPicker picked={pickedPatterns} onChange={setPickedPatterns} meta={patternMeta?.patterns ?? null} found={patternCount} />}
+          </div>
           {loading && <span className="ml-3 text-[12px] text-muted">Loading…</span>}
           <span className="flex-1" />
           {!loading && <span className="hidden sm:block"><DataCheck quality={data.quality} delayed={false} /></span>}
@@ -317,7 +331,9 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
             studies={studies}
             visibleSeconds={visibleSeconds}
             onRemoveStudy={(id) => setStudies(studies.filter((s) => s !== id))}
-            libStudies={replay || intraday ? [] : libStudies} // library indicators are computed by the feed on D/W/M only
+            studySettings={studySettings}
+            onEditStudy={setEditStudy}
+            libStudies={replay ? [] : libStudies} // hidden in replay: they are computed on the full data, so they would show the future
             positions={book && book.qty ? [{ product: 'Practice', qty: book.qty, avgPricePaise: Math.round(book.avg * 100) }] : undefined}
             onRemoveLib={(uid) => setLibStudies(libStudies.filter((s) => s.uid !== uid))}
             onEditLib={setEditLib}
@@ -326,6 +342,7 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
             settings={chartSettings}
             onRemoveCompare={(c) => setCompares(compares.filter((x) => x !== c))}
             shotRef={shot}
+            patterns={patterns}
           />
           {error && (
             <div className="absolute inset-0 z-20 grid place-items-center bg-panel/80">
@@ -380,6 +397,10 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
           <IndicatorPicker quick={studies} onToggleQuick={toggleStudy} onClose={() => setPicker(false)}
             onAdd={(ind) => { setLibStudies([...libStudies, { uid: newUid(), id: ind.id, inputs: {} }]); setPicker(false); notify(`${ind.name} added`); }} />
         )}
+        {editStudy && (
+          <StudySettings id={editStudy} saved={studySettings[editStudy]} onClose={() => setEditStudy(null)}
+            onSave={(v) => setStudySettings({ ...studySettings, [editStudy]: v })} />
+        )}
         {(() => {
           const s = editLib ? libStudies.find((x) => x.uid === editLib) : undefined;
           const ind = s && libCatalog.find((c) => c.id === s.id);
@@ -390,25 +411,6 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
         })()}
         <SymbolSearch open={comparePick} title="Compare with" onClose={() => setComparePick(false)}
           onPick={(i) => { if (i.symbol !== symbol && !compares.includes(i.symbol)) setCompares([...compares.filter((c) => c !== symbol), i.symbol].slice(-4)); }} />
-      </section>
-
-      {/* side panel */}
-      <section className="panel flex h-[70dvh] flex-col overflow-hidden lg:h-auto lg:min-h-0">
-        <div className="m-2.5 mb-1.5 flex gap-0.5 rounded-full bg-raised p-[3px]" role="tablist">
-          {([['watch', 'Watchlist'], ['scanner', 'Scanner']] as const).map(([k, label]) => (
-            <button key={k} type="button" role="tab" aria-selected={side === k} onClick={() => setSide(k)}
-              className={`flex-1 rounded-full py-1.5 text-[12px] font-semibold ${side === k ? 'bg-panel text-ink shadow-[var(--shadow-panel)]' : 'text-ink-2'}`}>
-              {label}
-            </button>
-          ))}
-        </div>
-        {side === 'watch' && (
-          <Watchlist symbols={watch} quotes={quotes} active={symbol}
-            onSelect={(s) => s !== symbol && router.push(chartHref(s))}
-            onAdd={() => openSearch('watch')}
-            onRemove={(s) => setWatch(watch.filter((w) => w !== s))} />
-        )}
-        {side === 'scanner' && <ScannerView compact active={symbol} onOpenChart={openChart} />}
       </section>
 
     </div>

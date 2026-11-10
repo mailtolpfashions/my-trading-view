@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { black76, yearsToExpiry } from '@mtv/options';
-import { brokerById, computeOptionCharges, expirySettlementCharges } from '@mtv/paper';
+import { brokerById, computeFuturesCharges, computeOptionCharges, expirySettlementCharges } from '@mtv/paper';
 import { SimError, parityForward, simulatePosition, type ContractQuote, type OptionsData, type SimInput } from './index';
 
 /** In-memory F&O data: rupee prices, converted to paise. Rows: [expiry, strike, kind, close, traded?, settle?]. */
-function memory(days: Record<string, { spot: number | null; lot?: number; c: [string, number, 'CE' | 'PE', number, boolean?, number?][] }>): OptionsData {
+function memory(days: Record<string, { spot: number | null; lot?: number; c: [string, number, 'CE' | 'PE' | 'FUT', number, boolean?, number?][] }>): OptionsData {
   const d: Record<string, { spot: number | null; lot: number; contracts: Record<string, ContractQuote> }> = {};
   for (const [date, v] of Object.entries(days)) {
     d[date] = { spot: v.spot == null ? null : Math.round(v.spot * 100), lot: v.lot ?? 75, contracts: {} };
@@ -129,5 +129,73 @@ describe('options simulator', () => {
     await expect(simulatePosition({ ...straddle, legs: [] }, data)).rejects.toThrow(SimError);
     await expect(simulatePosition({ ...straddle, entryDate: '2026-10-24' }, data)).rejects.toThrow(/No NSE F&O data/);
     await expect(simulatePosition({ ...straddle, legs: [{ ...straddle.legs[0], strikePaise: 22650_00 }] }, data)).rejects.toThrow(/not in NSE's file/);
+  });
+});
+
+describe('options simulator: square-off and futures', () => {
+  const data = memory({
+    '2026-10-22': { spot: 22600, c: [[W1, 22600, 'CE', 120], [W1, 22600, 'PE', 100], [W1, 0, 'FUT', 22650]] }, // entry
+    '2026-10-23': { spot: 22700, c: [[W1, 22600, 'CE', 160], [W1, 22600, 'PE', 40], [W1, 0, 'FUT', 22740]] },
+    '2026-10-26': { spot: 22650, c: [[W1, 22600, 'CE', 90], [W1, 22600, 'PE', 10], [W1, 0, 'FUT', 22660]] },
+    '2026-10-27': { spot: 22680.5, c: [[W1, 22600, 'CE', 81], [W1, 22600, 'PE', 0.05], [W1, 0, 'FUT', 22681]] }, // expiry
+  });
+
+  it('squares off one leg at the chosen day\'s close and keeps it fixed after', async () => {
+    const r = await simulatePosition({
+      underlying: 'NIFTY', entryDate: '2026-10-22', broker: zerodha, exits: [{ leg: 1, date: '2026-10-23' }],
+      legs: [
+        { expiry: W1, strikePaise: 22600_00, kind: 'CE', side: 'SELL', lots: 2, entryPaise: 120_00 },
+        { expiry: W1, strikePaise: 22600_00, kind: 'PE', side: 'SELL', lots: 2, entryPaise: 100_00 },
+      ],
+    }, data);
+    expect(r.days[1].legs[1]).toMatchObject({ pricePaise: 40_00, source: 'squared' });
+    expect(r.days[2].legs[1]).toMatchObject({ pricePaise: 40_00, source: 'squared' }); // fixed, not 10
+    expect(r.days[2].openLegs).toBe(1);
+    const entry = computeOptionCharges({ side: 'SELL', qty: 150, premiumPaise: 120_00, date: '2026-10-22', broker: zerodha }).total
+      + computeOptionCharges({ side: 'SELL', qty: 150, premiumPaise: 100_00, date: '2026-10-22', broker: zerodha }).total;
+    const putExit = computeOptionCharges({ side: 'BUY', qty: 150, premiumPaise: 40_00, date: '2026-10-23', broker: zerodha }).total;
+    const callExitDay3 = computeOptionCharges({ side: 'BUY', qty: 150, premiumPaise: 90_00, date: '2026-10-26', broker: zerodha }).total;
+    expect(r.days[2].grossPaise).toBe(-150 * (90_00 - 120_00) - 150 * (40_00 - 100_00));
+    expect(r.days[2].chargesIfExitPaise).toBe(entry + putExit + callExitDay3);
+  });
+
+  it('values a future at its close, settles it at the index close on expiry, with futures charges', async () => {
+    const r = await simulatePosition({
+      underlying: 'NIFTY', entryDate: '2026-10-22', broker: zerodha,
+      legs: [{ expiry: W1, strikePaise: 0, kind: 'FUT', side: 'BUY', lots: 1, entryPaise: 22650_00 }],
+    }, data);
+    expect(r.days[1].grossPaise).toBe(75 * (22740_00 - 22650_00));
+    expect(r.days[1].delta).toBe(75);
+    expect(r.days[3].legs[0]).toMatchObject({ pricePaise: 22680_50, source: 'expired' }); // the index close, not the 22,681 futures close
+    expect(r.entryChargesPaise).toBe(computeFuturesCharges({ side: 'BUY', qty: 75, pricePaise: 22650_00, date: '2026-10-22', broker: zerodha }).total);
+    expect(r.days[3].chargesIfExitPaise).toBe(r.entryChargesPaise); // no exercise STT on a future's settlement
+  });
+
+  it('squares off some lots of a leg: those lots are fixed with one exit order, the rest run on', async () => {
+    const r = await simulatePosition({
+      underlying: 'NIFTY', entryDate: '2026-10-22', broker: zerodha, exits: [{ leg: 0, date: '2026-10-23', lots: 1 }],
+      legs: [{ expiry: W1, strikePaise: 22600_00, kind: 'CE', side: 'BUY', lots: 3, entryPaise: 120_00 }],
+    }, data);
+    expect(r.days[1].legs[0]).toMatchObject({ pricePaise: 160_00, openLots: 2, source: 'close' });
+    // day 3: 1 lot closed at 160 (fixed), 2 lots marked at 90
+    expect(r.days[2].grossPaise).toBe(75 * (160_00 - 120_00) + 150 * (90_00 - 120_00));
+    const entry = computeOptionCharges({ side: 'BUY', qty: 225, premiumPaise: 120_00, date: '2026-10-22', broker: zerodha }).total;
+    const partExit = computeOptionCharges({ side: 'SELL', qty: 75, premiumPaise: 160_00, date: '2026-10-23', broker: zerodha }).total;
+    const restExit = computeOptionCharges({ side: 'SELL', qty: 150, premiumPaise: 90_00, date: '2026-10-26', broker: zerodha }).total;
+    expect(r.days[2].chargesIfExitPaise).toBe(entry + partExit + restExit);
+    // expiry: the 2 open lots settle at intrinsic 80.50; the closed lot stays at its 160 exit
+    expect(r.days[3].grossPaise).toBe(75 * (160_00 - 120_00) + 150 * (80_50 - 120_00));
+    expect(r.days[3].legs[0]).toMatchObject({ openLots: 0, source: 'expired' });
+  });
+
+  it('refuses squaring off more lots than a leg has', async () => {
+    const legs = [{ expiry: W1, strikePaise: 22600_00, kind: 'CE' as const, side: 'BUY' as const, lots: 2, entryPaise: 120_00 }];
+    await expect(simulatePosition({ underlying: 'NIFTY', entryDate: '2026-10-22', legs, exits: [{ leg: 0, date: '2026-10-23', lots: 1 }, { leg: 0, date: '2026-10-26', lots: 2 }] }, data)).rejects.toThrow(SimError);
+  });
+
+  it('refuses a square-off on or before the entry day, or for a leg that does not exist', async () => {
+    const legs = [{ expiry: W1, strikePaise: 22600_00, kind: 'CE' as const, side: 'SELL' as const, lots: 1, entryPaise: 120_00 }];
+    await expect(simulatePosition({ underlying: 'NIFTY', entryDate: '2026-10-22', legs, exits: [{ leg: 0, date: '2026-10-22' }] }, data)).rejects.toThrow(SimError);
+    await expect(simulatePosition({ underlying: 'NIFTY', entryDate: '2026-10-22', legs, exits: [{ leg: 3, date: '2026-10-23' }] }, data)).rejects.toThrow(SimError);
   });
 });

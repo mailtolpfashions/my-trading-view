@@ -42,5 +42,18 @@ export async function computeLib(symbol: string, tf: Timeframe, id: string, inpu
   return body.result as { plots: Record<string, { time: number; value: number; color?: string }[]> } & Record<string, unknown>;
 }
 
+/** Level lines (RSI 70 / 30, stochastic 80 / 20…) are kept with the inputs under this prefix, by the line's id. */
+export const LEVEL = '__level:';
+type HLine = { id: string; price: number; title?: string };
+/** The indicator's level lines (hlineConfig), for its settings form. */
+export const levelLines = (ind: LibIndicator) => ((ind.hlineConfig ?? []) as HLine[]).filter((h) => h && typeof h.price === 'number' && typeof h.id === 'string');
+/** The indicator with the owner's level prices in place of its defaults, for drawing. */
+export function withLevels(ind: LibIndicator, inputs: Record<string, unknown>): LibIndicator {
+  if (!ind.hlineConfig?.length) return ind;
+  return { ...ind, hlineConfig: (ind.hlineConfig as HLine[]).map((h) => (typeof inputs[LEVEL + h.id] === 'number' ? { ...h, price: inputs[LEVEL + h.id] as number } : h)) };
+}
+/** The inputs the calculation needs (level prices only change the drawing). */
+export const calcInputs = (inputs: Record<string, unknown>) => Object.fromEntries(Object.entries(inputs).filter(([k]) => !k.startsWith(LEVEL)));
+
 export const CATEGORY_ORDER = ['Moving Averages', 'Trend', 'Oscillators', 'Momentum', 'Volatility', 'Channels & Bands', 'Volume', 'Candlestick Patterns'];
 export const newUid = () => Math.random().toString(36).slice(2, 10);

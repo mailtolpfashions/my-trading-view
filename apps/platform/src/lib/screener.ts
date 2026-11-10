@@ -36,11 +36,22 @@ export type ScreenResult = {
 };
 
 export type Param = { name: string; kind: 'series' | 'bool' | 'int' | 'number' | { oneOf: string[] }; def?: number | string };
+/** A preset's test on our NSE history (apps/feed/src/screener/evidence.ts). */
+export type PresetEvidence = {
+  horizon: string; signals: number; stock: number; crowd: number; excess: number; t: number;
+  better: number; periods: number; period: 'years' | 'months'; from: string; to: string; bearish: boolean;
+  /** The typical match against the typical stock day (candlestick patterns); an edge needs it on the same side. */
+  median?: number;
+  /** A pattern with no direction (Doji, Spinning top): nothing to test. */
+  neutral?: boolean;
+};
+
 export type Meta = {
   timeframes: Tf[];
   fields: { name: string; summary: string }[];
   functions: { name: string; group: string; returns: 'num' | 'bool'; params: Param[]; summary: string }[];
-  presets: { id: string; name: string; category: string; tf: Tf; formula: string; about: string; horizon?: 'intraday' | 'swing' | 'positional' }[];
+  presets: { id: string; name: string; category: string; tf: Tf; formula: string; about: string; horizon?: 'intraday' | 'swing' | 'positional'; evidence?: PresetEvidence | null }[];
+  evidenceBuilt?: string | null;
   library: { group: string; items: { label: string; formula: string }[] }[];
   indices: string[];
   industries: string[];
@@ -52,9 +63,15 @@ export const INTRADAY_OPTIONS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h
 /** Default result columns (spec 8.2): relative volume, RSI and the 20 / 50 EMAs; the rest are fixed columns. */
 export const DEFAULT_COLUMNS = ['RVOL(20)', 'RSI(CLOSE, 14)', 'EMA(CLOSE, 20)', 'EMA(CLOSE, 50)'];
 
+/** Every new scan starts on the NIFTY 50 stocks (the owner picks another index or sector list from the sentence). */
+export const DEFAULT_UNIVERSE: UniverseSpec = { kind: 'index', name: 'NIFTY 50' };
+
+/** Where the Scanner page keeps the scan being edited (the side panel's Scanner tab offers it as "current scan"). */
+export const SCAN_DRAFT_KEY = 'platform.screener.draft';
+
 export const NEW_SCREEN: Screen = {
-  name: 'Untitled screen', category: 'technical', formula: 'CLOSE > EMA(CLOSE, 50) AND RSI(CLOSE, 14) > 55', tf: 'D', candle: 'closed',
-  universe: { kind: 'all' }, filters: { minAvgValueCr: 1 }, columns: DEFAULT_COLUMNS,
+  name: 'Untitled scan', category: 'technical', formula: 'CLOSE > EMA(CLOSE, 50) AND RSI(CLOSE, 14) > 55', tf: 'D', candle: 'closed',
+  universe: DEFAULT_UNIVERSE, filters: {}, columns: DEFAULT_COLUMNS,
 };
 
 /** A short readable name for a column formula: RSI(CLOSE, 14) → RSI 14, EMA(CLOSE, 20) → EMA 20. */

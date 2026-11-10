@@ -30,6 +30,8 @@ export type Chain = {
   strikeStepPaise: number | null;
   /** Market-implied forward from put-call parity at the ATM strike (both legs traded), or null. */
   forwardPaise: number | null;
+  /** Futures listed that day, nearest expiry first: NSE's close (carried forward when untraded) and settlement price. */
+  futures: { expiry: string; closePaise: number; settlePaise: number; traded: boolean }[];
   atmStrikePaise: number | null;
   rows: ChainRow[];
 };
@@ -94,6 +96,9 @@ export async function getChain(underlying: FnoUnderlying, date: string, expiry?:
   }
   const rows = [...byStrike.values()];
   const spot = meta?.spotPaise ?? null;
+  // Futures listed that day (one per monthly expiry), for buying or selling a future in the strategy builder.
+  const futures = (await prisma.fnoEod.findMany({ where: { underlying, date, kind: 'FUT', expiry: { gte: date } }, select: { expiry: true, closePaise: true, settlePaise: true, traded: true }, orderBy: { expiry: 'asc' } }))
+    .map((f) => ({ expiry: f.expiry, closePaise: f.closePaise, settlePaise: f.settlePaise, traded: f.traded }));
   // Model estimates are "as of" the close of `date` (15:30 IST).
   const asOf = Date.parse(`${date}T15:30:00Z`) / 1000 - 5.5 * 3600;
   const F = applyGreeks(rows, spot, yearsToExpiry(asOf, exp));
@@ -101,6 +106,6 @@ export async function getChain(underlying: FnoUnderlying, date: string, expiry?:
   const atm = spot != null ? nearestStrike(strikes, spot) : null;
   return {
     underlying, date, expiry: exp, expiries, lotSize: expiryLot ?? meta?.lotSize ?? null, isIndex: meta?.isIndex ?? true, spotPaise: spot, prevDate,
-    strikeStepPaise: spot != null ? strikeStep(strikes, spot) : null, forwardPaise: F == null ? null : Math.round(F), atmStrikePaise: atm, rows,
+    strikeStepPaise: spot != null ? strikeStep(strikes, spot) : null, forwardPaise: F == null ? null : Math.round(F), atmStrikePaise: atm, rows, futures,
   };
 }
