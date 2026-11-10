@@ -5,3 +5,4 @@ export * from './study';
 export * from './simulate';
 export * from './portfolio';
 export * from './selling';
+export * from './lab';

@@ -35,6 +35,9 @@ export type Watchlist = { id: string; owner: string; name: string; symbols: stri
 export type RecentRun = RunRecord & { screenId: string | null; name: string; formula: string; tf: Tf };
 
 export type BacktestRecord = { at: string; from: string; to: string; trades: number; returnPct: number; cagrPct: number; maxDrawdownPct: number; winRatePct: number | null };
+/** An option strategy from the strategy lab (packages/backtest LabStrategy), stored as given. */
+export type SavedOptionStrategy = { id: string; name: string; strategy: Record<string, unknown>; createdAt: string; updatedAt: string };
+
 export type SavedStrategy = {
   id: string;
   owner: string;
@@ -114,7 +117,7 @@ export type DaySettings = {
 };
 export const DEFAULT_SETTINGS: DaySettings = { mode: 'intraday', capitalRupees: 500000, riskPerTradePct: 1, maxDailyLossRupees: 10000, maxTradesPerDay: 5 };
 
-type Data = { version: 1; sellingPaper?: SellingPaperTrade[]; settings?: DaySettings; screens: SavedScreen[]; watchlists: Watchlist[]; recent: RecentRun[]; strategies?: SavedStrategy[]; alerts?: Alert[]; alertEvents?: AlertEvent[] };
+type Data = { version: 1; sellingPaper?: SellingPaperTrade[]; settings?: DaySettings; screens: SavedScreen[]; watchlists: Watchlist[]; recent: RecentRun[]; strategies?: SavedStrategy[]; optionStrategies?: SavedOptionStrategy[]; alerts?: Alert[]; alertEvents?: AlertEvent[] };
 
 export class UserStoreError extends Error {}
 
@@ -232,6 +235,31 @@ export class UserStore {
 
   deleteStrategy(id: string): Promise<void> {
     return this.change((d) => { d.strategies = (d.strategies ?? []).filter((x) => x.id !== id); });
+  }
+
+  async optionStrategies(): Promise<SavedOptionStrategy[]> {
+    return [...((await this.load()).optionStrategies ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  /** Creates an option strategy, or updates the one with this id. */
+  async saveOptionStrategy(input: { id?: string; name: string; strategy: Record<string, unknown> }): Promise<SavedOptionStrategy> {
+    const name = input.name?.trim();
+    if (!name) throw new UserStoreError('Give the strategy a name');
+    if (!input.strategy || typeof input.strategy !== 'object') throw new UserStoreError('The strategy settings are missing');
+    return this.change((d) => {
+      d.optionStrategies ??= [];
+      const now = new Date().toISOString();
+      const existing = input.id ? d.optionStrategies.find((x) => x.id === input.id) : undefined;
+      if (input.id && !existing) throw new UserStoreError('That strategy no longer exists');
+      if (existing) { Object.assign(existing, { name: name.slice(0, 120), strategy: input.strategy, updatedAt: now }); return existing; }
+      const st: SavedOptionStrategy = { id: randomUUID(), name: name.slice(0, 120), strategy: input.strategy, createdAt: now, updatedAt: now };
+      d.optionStrategies.push(st);
+      return st;
+    });
+  }
+
+  deleteOptionStrategy(id: string): Promise<void> {
+    return this.change((d) => { d.optionStrategies = (d.optionStrategies ?? []).filter((x) => x.id !== id); });
   }
 
   recordBacktest(id: string, r: BacktestRecord): Promise<void> {

@@ -4,7 +4,7 @@
 
 import cors from '@fastify/cors';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
-import { BacktestError, OptionsBacktestError, STUDY_HORIZONS, SimError, StudyTally, breakIndices, findEvents, runBacktest, runOptionsBacktest, simulatePosition, type OptionsStrategy, type SimInput, type RuleSet, type Strategy, type StudyEvent } from '@mtv/backtest';
+import { BacktestError, LabError, OptionsBacktestError, previewLab, runLab, type LabStrategy, STUDY_HORIZONS, SimError, StudyTally, breakIndices, findEvents, runBacktest, runOptionsBacktest, simulatePosition, type OptionsStrategy, type SimInput, type RuleSet, type Strategy, type StudyEvent } from '@mtv/backtest';
 import { prisma } from '@mtv/db';
 import { positionMargin } from '@mtv/options';
 import { EOD_TIMEFRAMES, type Candle, type DataStatus, type EodTimeframe, type Quote } from '@mtv/shared';
@@ -20,6 +20,7 @@ import { startParticipantSync } from './fno/participants';
 import { startFiiStatsSync } from './fno/fii-stats';
 import { startNsdlDaily } from './fno/fpi-flows';
 import { SPAN_UNDERLYINGS, spanOn, spanToday } from './fno/span';
+import { labData } from './options-lab/data';
 import { brokerById } from '@mtv/paper';
 import { fnoStatus, startFnoSync } from './fno/store';
 import { allEquityShareSymbols, dailyHistory, eodLoaded, eodStatus, loadEod, startEodSync } from './eod/store';
@@ -211,6 +212,36 @@ app.get('/api/selling-report', async (_req, reply) => (await sellingReport()) ??
 app.get('/api/selling-decay', async (_req, reply) => (await decayStudy()) ?? reply.code(404).send({ error: 'not_run', message: 'The premium decay study has not been run yet' }));
 app.get('/api/selling-study', async (_req, reply) => (await studyOverview()) ?? reply.code(404).send({ error: 'not_run', message: 'The option-selling study has not been run yet' }));
 app.get<{ Params: { id: string } }>('/api/selling-study/:id', async (req, reply) => (await studyDetail(req.params.id)) ?? reply.code(404).send({ error: 'not_found', message: 'No such rule set' }));
+
+// Option strategy lab (packages/backtest/src/lab.ts): the selling studies' rules, built and run by the owner. Also
+// returns the position the strategy would open today and its margin from NSE's latest SPAN file.
+app.post<{ Body: { strategy?: LabStrategy } }>('/api/options-lab/run', async (req, reply) => {
+  const s = req.body?.strategy;
+  if (!s || typeof s !== 'object' || !(BACKTEST_UNDERLYINGS as readonly string[]).includes(s.underlying)) return reply.code(400).send({ error: 'bad_strategy', message: 'Option tests cover NIFTY and BANKNIFTY' });
+  try {
+    const started = performance.now();
+    const data = await labData(s.underlying);
+    const result = await runLab(s, data);
+    const preview = await previewLab(s, data);
+    let margin: { rupees: number; tradeDate: string } | null = null;
+    if (typeof preview !== 'string') {
+      try {
+        const span = await spanToday(), d = span?.data[s.underlying];
+        if (span && d) {
+          const legs = preview.legs.map((l) => ({ kind: l.kind, expiry: l.expiry, strike: l.strike, qty: (l.side === 'BUY' ? 1 : -1) * l.lots * preview.lot, pricePaise: Math.round(l.price * 100) }));
+          const m = positionMargin(d, legs, Math.round(preview.spot * 100), span.tradeDate);
+          if (!m.missing.length) margin = { rupees: Math.round(m.marginPaise / 100), tradeDate: span.tradeDate };
+        }
+      } catch (e) { req.log.warn(e, 'option lab margin'); }
+    }
+    req.log.info({ name: s.name, trades: result.trades.length, ms: Math.round(performance.now() - started) }, 'option lab');
+    return { result, preview, margin };
+  } catch (e) {
+    if (e instanceof LabError) return reply.code(400).send({ error: 'bad_strategy', message: e.message });
+    req.log.error(e);
+    return reply.code(502).send({ error: 'failed', message: 'The option test failed' });
+  }
+});
 
 app.post<{ Body: { strategy?: OptionsStrategy } }>('/api/options-backtest', async (req, reply) => {
   const s = req.body?.strategy;
@@ -631,6 +662,9 @@ app.post('/api/user/watchlists/delete', userRoute((b: { id: string }) => userSto
 
 app.get('/api/user/strategies', userRoute(() => userStore.strategies()));
 app.post('/api/user/strategies', userRoute((b: Parameters<typeof userStore.saveStrategy>[0]) => userStore.saveStrategy(b)));
+app.get('/api/user/option-strategies', userRoute(() => userStore.optionStrategies()));
+app.post('/api/user/option-strategies', userRoute((b: Parameters<typeof userStore.saveOptionStrategy>[0]) => userStore.saveOptionStrategy(b)));
+app.post('/api/user/option-strategies/delete', userRoute((b: { id: string }) => userStore.deleteOptionStrategy(b.id).then(() => ({ ok: true }))));
 app.post('/api/user/strategies/delete', userRoute((b: { id: string }) => userStore.deleteStrategy(b.id).then(() => ({ ok: true }))));
 
 // ---- The Today page: the day's mode and limits, and the brief ----

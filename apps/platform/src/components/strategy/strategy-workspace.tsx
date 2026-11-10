@@ -20,6 +20,7 @@ import { FormulaEditor } from '../screener/formula-editor';
 import { formulaToRows, rowsWords } from '@/lib/rows';
 import { useShell } from '../app/shell-context';
 import { UniverseSelect, isMyWatchlist } from '../screener/universe-picker';
+import { BacktestTypeNav } from '../backtest/backtest-module';
 
 const DRAFT_KEY = 'platform.strategy.draft';
 const BASE_KEY = 'platform.strategy.draftBase';
@@ -124,6 +125,7 @@ export function StrategyWorkspace() {
 
   return (
     <div className="grid min-w-0 content-start gap-5">
+        <BacktestTypeNav mode="stocks" />
         <section className="panel grid gap-4 p-5">
           {/* name and saving */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">

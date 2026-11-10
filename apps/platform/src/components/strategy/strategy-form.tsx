@@ -19,12 +19,15 @@ function Pick<T>({ label, value, choices, onChange, same, custom, makeCustom }: 
   label: string; value: T; choices: Choice<T>[]; onChange: (v: T) => void; same: (a: T, b: T) => boolean;
   custom: () => React.ReactNode; makeCustom: () => T;
 }) {
-  const hit = choices.find((c) => same(c.value, value));
+  // Once Custom… is picked it stays, even when the custom value happens to equal a preset (custom "% below entry" starts
+  // at 2%, which is also the "2% below entry" choice): otherwise the dropdown would jump back to that preset.
+  const [customMode, setCustomMode] = useState(false);
+  const hit = customMode ? undefined : choices.find((c) => same(c.value, value));
   return (
     <label className="flex flex-wrap items-center gap-1.5 text-[13px] text-ink-2">
       <span>{label}</span>
       <select value={hit?.key ?? 'custom'} aria-label={label} className={SMALL}
-        onChange={(e) => { const c = choices.find((x) => x.key === e.target.value); onChange(c ? c.value : makeCustom()); }}>
+        onChange={(e) => { const c = choices.find((x) => x.key === e.target.value); setCustomMode(!c); onChange(c ? c.value : makeCustom()); }}>
         {choices.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
         <option value="custom">Custom…</option>
       </select>
