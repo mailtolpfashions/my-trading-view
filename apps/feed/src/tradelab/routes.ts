@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { toPaise, type OrderType, type Product, type Side } from '@mtv/paper';
 import { live } from '../intraday/instance';
 import { AutoError, autoTick, baskets, deleteBasket, deleteRule, events, executeBasket, ruleResults, rules, saveBasket, saveRule, type AutoRule, type Basket } from './auto';
+import { PremiumError, premiumEvents, premiumReport, premiumTick, savePremiumRule, type PremiumRule } from './premium';
 import { TradeLab } from './engine';
 import { kiteMarket, liveMargin, nseCloses, prismaRepo } from './live';
 import { DEFAULT_SETTINGS, LabError } from './types';
@@ -18,7 +19,7 @@ export function tradeLabRoutes(app: FastifyInstance) {
     try {
       return await fn((req.body ?? {}) as B, req);
     } catch (e) {
-      if (e instanceof LabError || e instanceof AutoError || (e instanceof Error && /paise|decimal|number/i.test(e.message))) return reply.code(400).send({ error: 'rejected', message: e.message });
+      if (e instanceof LabError || e instanceof AutoError || e instanceof PremiumError || (e instanceof Error && /paise|decimal|number/i.test(e.message))) return reply.code(400).send({ error: 'rejected', message: e.message });
       req.log.error(e);
       return reply.code(500).send({ error: 'failed', message: 'Trade lab could not do that' });
     }
@@ -93,6 +94,11 @@ export function tradeLabRoutes(app: FastifyInstance) {
   app.post('/api/tradelab/margin', owner(async (b: { orders: MarginItem[] }) => tradeLab.previewMargin((b.orders ?? []).slice(0, 40).map((o) => ({
     symbol: String(o.symbol).toUpperCase(), side: o.side, product: o.product, qty: Number(o.qty), pricePaise: money(o.price),
   })))));
+
+  // The weekly premium paper trade (the research lead): its rule, its fills against NSE's close, and its log.
+  app.get('/api/tradelab/premium', owner(async () => ({ ...(await premiumReport()), events: await premiumEvents(200) })));
+  app.post('/api/tradelab/premium', owner(async (b: Partial<PremiumRule>) => savePremiumRule(b)));
+  setInterval(() => { premiumTick(tradeLab).catch((e) => app.log.warn({ err: e }, 'weekly premium rule failed')); }, 15_000);
 
   // The engine's clock: fills, square-off, expiry of day orders and F&O settlement.
   setInterval(() => { tradeLab.step().catch((e) => app.log.warn({ err: e }, 'trade lab step failed')); }, 2000);

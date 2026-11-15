@@ -104,6 +104,8 @@ export type LabTrade = {
   credit: number; net: number; charges: number; worstMtm: number; worstMtmOn: string;
   /** Legs priced from NSE's settlement price at entry or in an adjustment. */
   model: number;
+  /** ₹ P&L (after charges so far) at each close while open, the exit day last. Lets a run build a daily equity curve. */
+  daily: { date: string; mtm: number }[];
 };
 export type LabYear = { year: string; trades: number; won: number; net: number; worst: number };
 export type LabSummary = {
@@ -267,6 +269,7 @@ export async function runLab(s: LabStrategy, data: LabData): Promise<LabResult> 
     let model = open.filter((l) => l.model).length, worst = 0, worstOn = d, exit = end, reason: LabExit = end === e && !s.exit.daysLeft ? 'expiry' : 'days-left';
     const done = new Set<number>();
     const value = () => open.reduce((a, l) => a + l.q * lot * l.mark, 0);
+    const daily: LabTrade['daily'] = [];
 
     // ---- every close while open
     for (let j = idx.get(d)! + 1; j <= idx.get(end)!; j++) {
@@ -310,6 +313,7 @@ export async function runLab(s: LabStrategy, data: LabData): Promise<LabResult> 
       }
       const mtm = money(cash - charges + value());
       if (mtm < worst) { worst = mtm; worstOn = t; }
+      daily.push({ date: t, mtm: R(mtm) });
       if (last) break;
       const pnlRaw = cashRaw + value(); // the studies' booking sum: closes, no slippage, no charges
       if (s.exit.bookPct && credit > 0 && pnlRaw >= (credit * s.exit.bookPct) / 100) { exit = t; reason = 'booked'; break; }
@@ -333,10 +337,12 @@ export async function runLab(s: LabStrategy, data: LabData): Promise<LabResult> 
       }
     }
     const net = money(cash - charges);
+    // The exit day's point is the final result (the loop's mark was before the exit fills and slippage).
+    if (daily.length && daily[daily.length - 1].date === exit) daily[daily.length - 1] = { date: exit, mtm: R(net) }; else daily.push({ date: exit, mtm: R(net) });
     return {
       entry: d, exit, expiry: e, reason, spotIn: spot / 100, spotOut: (spotOut ?? spot) / 100, ivHigh: hi, ivRank: rank,
       legs: open.map((l) => ({ side: l.spec.side, kind: l.kind, strike: l.strike / 100, expiry: l.expiry, lots: l.spec.lots, entry: l.entryPx / 100, exit: (l.lastExit ?? l.mark) / 100, model: l.model, ...(l.added ? { added: l.added } : {}), ...(l.closed ? { closed: l.closed } : {}) })),
-      events, credit: R(money(credit)), net: R(net), charges: R(money(charges)), worstMtm: R(Math.min(worst, net)), worstMtmOn: worst < net ? worstOn : exit, model,
+      events, credit: R(money(credit)), net: R(net), charges: R(money(charges)), worstMtm: R(Math.min(worst, net)), worstMtmOn: worst < net ? worstOn : exit, model, daily,
     };
   }
 }

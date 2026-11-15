@@ -40,6 +40,9 @@ import { channelInfo, send } from './alerts/channels';
 import { StrategyError, runStrategyBacktest, type BacktestRequest } from './strategy/backtest';
 import { planAndPaper, startPaperTrade } from './selling/plan';
 import { decayStudy, sellingReport, sellingResearch, sellingThree, studyDetail, studyOverview } from './selling/study';
+import { quantDetail, quantExperiments } from './research/quant';
+import { quantLeads } from './research/quant-leads';
+import { quantStrategies, quantStrategy } from './research/quant-strategies';
 import { intraday } from '@mtv/options';
 import { patternEvidence, presetEvidence } from './screener/evidence';
 import { paperLog, takeTodayIfDue } from './paperlog/blind-buy';
@@ -72,6 +75,9 @@ declare module 'fastify' {
 
 // A failed background job (database restarting, NSE unreachable) must never take the service down: log it loudly.
 process.on('unhandledRejection', (e) => app.log.error({ err: e }, 'Unhandled background error'));
+// Leave no live-data lock behind on a normal shutdown (Ctrl+C, a dev-server restart).
+process.on('exit', () => live.releaseLockSync());
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => process.exit(0));
 await app.register(cors, { origin: [WEB_ORIGIN, ...EXTRA_ORIGINS], methods: ['GET', 'HEAD', 'POST'], exposedHeaders: ['X-Visitor-Remaining'] });
 // An empty body sent as JSON means "no body", not an error.
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
@@ -209,6 +215,16 @@ app.get('/api/seller/days', async () => sellerDays());
 app.get('/api/selling-three', async (_req, reply) => (await sellingThree()) ?? reply.code(404).send({ error: 'not_run', message: 'The comparison has not been built yet' }));
 app.get<{ Params: { name: string } }>('/api/selling-research/:name', async (req, reply) => (await sellingResearch(req.params.name)) ?? reply.code(404).send({ error: 'not_run', message: 'This test has not been run yet' }));
 app.get('/api/selling-report', async (_req, reply) => (await sellingReport()) ?? reply.code(404).send({ error: 'not_run', message: 'The report has not been built yet' }));
+// Quant research programme (docs/quant): the experiment registry and each experiment's settings, trades and curves.
+app.get('/api/quant/experiments', async () => ({ experiments: quantExperiments() }));
+app.get('/api/quant/strategies', async () => quantStrategies());
+app.get<{ Querystring: { key?: string } }>('/api/quant/strategy', async (req, reply) => quantStrategy(String(req.query.key ?? '')) ?? reply.code(404).send({ error: 'not_found', message: 'No such strategy' }));
+app.get('/api/quant/leads', async (_req, reply) => quantLeads() ?? reply.code(404).send({ error: 'not_run', message: 'The research files are not here yet' }));
+app.get<{ Params: { id: string; name: string }; Querystring: { setting?: string } }>('/api/quant/detail/:id/:name', async (req, reply) => {
+  const s = req.query.setting;
+  const d = quantDetail(req.params.id, req.params.name, s != null && s !== '' ? Number(s) : undefined);
+  return d ?? reply.code(404).send({ error: 'not_found', message: 'No such experiment detail' });
+});
 app.get('/api/selling-decay', async (_req, reply) => (await decayStudy()) ?? reply.code(404).send({ error: 'not_run', message: 'The premium decay study has not been run yet' }));
 app.get('/api/selling-study', async (_req, reply) => (await studyOverview()) ?? reply.code(404).send({ error: 'not_run', message: 'The option-selling study has not been run yet' }));
 app.get<{ Params: { id: string } }>('/api/selling-study/:id', async (req, reply) => (await studyDetail(req.params.id)) ?? reply.code(404).send({ error: 'not_found', message: 'No such rule set' }));

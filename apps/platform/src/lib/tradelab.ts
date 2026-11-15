@@ -66,6 +66,22 @@ export type AutoRule = {
 export type RuleResult = { trades: number; tradesToday: number; open: number; realisedPaise: number; unrealisedPaise: number; chargesPaise: number; netPaise: number };
 export type AutoEvent = { at: number; ruleId: string; ruleName: string; symbol: string | null; action: 'placed' | 'skipped' | 'error' | 'checked'; text: string };
 
+// ---------------------------------------------------------------- the weekly premium paper trade (research lead)
+
+export type PremiumRule = { id: string; name: string; enabled: boolean; underlying: 'NIFTY'; weekday: number; time: string; delta: number; lots: number; iv: 'high' | 'any'; updatedAt: string };
+export type PremiumLeg = { symbol: string; label?: string; kind: 'CE' | 'PE'; strikePaise: number; delta: number; bidPaise: number; askPaise: number; ltpPaise: number; orderId: string | null; fillPaise: number | null; closePaise: number | null; slipPaise: number | null; settlePaise: number | null };
+export type PremiumEntry = { date: string; expiry: string; at: number; ivHigh: boolean | null; ivAsOf: string | null; spotPaise: number; forwardPaise: number; legs: PremiumLeg[]; netPaise: number | null; done: boolean };
+export type PremiumEvent = { at: number; action: 'placed' | 'skipped' | 'error' | 'checked'; text: string };
+export type PremiumReport = {
+  rule: PremiumRule; entries: PremiumEntry[]; events: PremiumEvent[];
+  slippage: { legs: number; avgPaise: number | null; worstPaise: number | null; medianPaise: number | null };
+  totals: { weeks: number; traded: number; skippedIv: number; realisedPaise: number; chargesPaise: number };
+};
+export const premiumApi = {
+  report: () => feed<PremiumReport>('tradelab/premium'),
+  save: (r: Partial<PremiumRule>) => feed<PremiumRule>('tradelab/premium', r),
+};
+
 export const autoApi = {
   rules: () => feed<{ rules: AutoRule[]; results: Record<string, RuleResult> }>('tradelab/rules'),
   save: (r: Partial<AutoRule>) => feed<AutoRule>('tradelab/rules', r),

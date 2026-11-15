@@ -28,7 +28,10 @@ const GROUPS: { title: string; tools: Tool[] }[] = [
   ] },
   { title: 'Futures', tools: [{ href: '/futures', label: 'Futures overview', about: 'Every F&O future: price, open interest and what they say together.' }, ...FUTURES_TOOLS.map((t) => ({ href: `/futures/${t.slug}`, label: t.label, about: t.description }))] },
   { title: 'Market', tools: MARKET_TOOLS.map((t) => ({ href: `/market/${t.slug}`, label: t.label, about: t.description })) },
-  { title: 'Research', tools: RESEARCH_VIEWS.map((v) => ({ href: `/research/${v.slug}`, label: v.label, about: RESEARCH_ABOUT[v.slug] ?? '' })) },
+  { title: 'Research', tools: [
+    { href: '/research/quant', label: 'Quant research report', about: 'Every experiment of the strategy research: the verdict, each setting tested, its trades year by year and its curve, with filters.' },
+    ...RESEARCH_VIEWS.map((v) => ({ href: `/research/${v.slug}`, label: v.label, about: RESEARCH_ABOUT[v.slug] ?? '' })),
+  ] },
   { title: 'Practice and learning', tools: [
     { href: '/practice', label: 'Practice', about: 'Replay past bars one at a time and practise your trades. No real money.' },
     { href: '/learn', label: 'Learn', about: 'Short, plain guides: option chains, Greeks, open interest and more.' },

@@ -13,6 +13,7 @@ import { confirmDialog } from '../dialog';
 import { InfoTip } from '../info-tip';
 import { Button, Card } from '../ui';
 import { BasketsPanel } from './baskets-panel';
+import { PremiumPanel } from './premium-panel';
 import { RulesPanel } from './rules-panel';
 
 const tone = (v: number) => (v > 0 ? 'text-up' : v < 0 ? 'text-down' : 'text-ink-2');
@@ -117,6 +118,9 @@ export function TradeLabPage() {
 
       {/* baskets: orders placed together */}
       <BasketsPanel />
+
+      {/* the weekly premium paper trade kept by the research programme */}
+      <PremiumPanel />
 
       {/* automatic rules and their decision log */}
       <RulesPanel />
