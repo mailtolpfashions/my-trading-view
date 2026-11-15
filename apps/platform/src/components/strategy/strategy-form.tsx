@@ -45,8 +45,11 @@ export function StopPick({ s, set }: { s: EquityStrategy; set: (p: Partial<Equit
     { key: 'none', label: 'No stop', value: { kind: 'none' } },
     ...[0.5, 1, 2, 3, 5].map((v) => ({ key: `pct${v}`, label: `${v}% below entry`, value: { kind: 'pct' as const, value: v } })),
     { key: 'atr2', label: '2 × ATR (14)', value: { kind: 'atr', mult: 2, length: 14 } },
+    { key: 'siglow', label: 'Low of the signal candle', value: { kind: 'signal-low' } },
     { key: 'st', label: 'Supertrend (10, 3) line', value: { kind: 'formula', formula: 'SUPERTREND(10, 3)' } },
-    { key: 'low5', label: 'Low of last 5 candles', value: { kind: 'formula', formula: 'LOWEST(LOW, 5)[1]' } },
+    // A level stop is read at the previous candle's close, so these already mean "the last N finished candles".
+    { key: 'low3', label: 'Low of last 3 candles', value: { kind: 'formula', formula: 'LOWEST(LOW, 3)' } },
+    { key: 'low5', label: 'Low of last 5 candles', value: { kind: 'formula', formula: 'LOWEST(LOW, 5)' } },
     ...(intraday ? [
       { key: 'vwap', label: 'VWAP', value: { kind: 'formula' as const, formula: 'VWAP' } },
       { key: 'orl', label: 'Opening range low (15 min)', value: { kind: 'formula' as const, formula: 'OR_LOW(15)' } },
@@ -66,6 +69,27 @@ export function StopPick({ s, set }: { s: EquityStrategy; set: (p: Partial<Equit
           {(st.kind === 'pct' || st.kind === 'points') && <input type="number" step="any" min={0} value={st.value} onChange={(e) => set({ stop: { kind: st.kind, value: num(e.target.value) } })} className={NUM} aria-label="Stop size" />}
           {st.kind === 'atr' && <input type="number" step="any" min={0} value={st.mult} onChange={(e) => set({ stop: { ...st, mult: num(e.target.value) } })} className={NUM} aria-label="ATR multiple" />}
           {st.kind === 'formula' && <input value={st.formula} onChange={(e) => set({ stop: { kind: 'formula', formula: e.target.value } })} spellCheck={false} className={`${inputCls} h-9 w-[200px] font-mono text-[12.5px]`} aria-label="Stop level formula" title="A price level, read at every close, e.g. EMA(CLOSE, 20)" />}
+        </>
+      )} />
+  );
+}
+
+/** How the buy is filled after a signal: the next open, a break of the signal candle's high, or a dip below its close. */
+export function BuyAtPick({ s, set }: { s: EquityStrategy; set: (p: Partial<EquityStrategy>) => void }) {
+  const choices: Choice<EquityStrategy['order']>[] = [
+    { key: 'open', label: 'Next candle’s open', value: { type: 'market' } },
+    { key: 'high', label: 'When price breaks the signal candle’s high', value: { type: 'stop', offsetPct: 0 } },
+    { key: 'dip', label: '0.5% below the signal close', value: { type: 'limit', offsetPct: 0.5 } },
+  ];
+  const o = s.order;
+  return (
+    <Pick label="Buy at" value={o} choices={choices} same={eq} onChange={(order) => set({ order })} makeCustom={() => ({ type: 'stop', offsetPct: 0.5 }) as EquityStrategy['order']}
+      custom={() => o.type === 'market' ? null : (
+        <>
+          <select value={o.type} aria-label="Order type" className={SMALL} onChange={(e) => set({ order: { type: e.target.value as 'stop' | 'limit', offsetPct: o.offsetPct } })}>
+            <option value="stop">% above the signal candle’s high</option><option value="limit">% below the signal close</option>
+          </select>
+          <input type="number" step="any" min={0} value={o.offsetPct} onChange={(e) => set({ order: { type: o.type, offsetPct: num(e.target.value) } })} className={NUM} aria-label="Order offset %" />
         </>
       )} />
   );

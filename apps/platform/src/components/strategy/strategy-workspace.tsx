@@ -11,7 +11,7 @@ import { userApi, type SavedScreen, type Watchlist } from '@/lib/user';
 import { confirmDialog } from '../dialog';
 import { InfoTip } from '../info-tip';
 import { Button, Card, Segmented, inputCls } from '../ui';
-import { CapitalPick, MaxOpenPick, PeriodPick, SessionPicks, SizePick, StopPick, TargetPick, TrailPick, WORD } from './strategy-form';
+import { BuyAtPick, CapitalPick, MaxOpenPick, PeriodPick, SessionPicks, SizePick, StopPick, TargetPick, TrailPick, WORD } from './strategy-form';
 import { BacktestResults } from './backtest-results';
 import { StrategyGallery } from './strategy-gallery';
 import { SymbolPicker, TEST_INDICES } from './symbol-picker';
@@ -24,6 +24,9 @@ import { BacktestTypeNav } from '../backtest/backtest-module';
 
 const DRAFT_KEY = 'platform.strategy.draft';
 const BASE_KEY = 'platform.strategy.draftBase';
+/** The last backtest and where the page was scrolled, kept for this tab so opening a chart and coming back keeps them. */
+const LAST_RUN_KEY = 'platform.strategy.lastRun';
+const SCROLL_KEY = 'platform.strategy.scroll';
 const BROKERS = [['zerodha', 'Zerodha'], ['upstox', 'Upstox'], ['fyers', 'FYERS'], ['angelone', 'Angel One'], ['dhan', 'Dhan']] as const;
 
 export function StrategyWorkspace() {
@@ -34,6 +37,7 @@ export function StrategyWorkspace() {
   const [screens, setScreens] = useState<SavedScreen[]>([]);
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [result, setResult] = useState<BacktestResult | null>(null);
+  const [resultKey, setResultKey] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -64,6 +68,17 @@ export function StrategyWorkspace() {
     userApi.screens().then(setScreens, () => {});
     userApi.watchlists().then(setWatchlists, () => {});
     refresh();
+    try {
+      const last = JSON.parse(sessionStorage.getItem(LAST_RUN_KEY) ?? 'null') as { result: BacktestResult; key: string } | null;
+      if (last?.result) {
+        setResult(last.result); setResultKey(last.key); setGalleryOpen(false);
+        const y = Number(sessionStorage.getItem(SCROLL_KEY) ?? 0);
+        if (y > 0) requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo({ top: y })));
+      }
+    } catch { /* nothing kept */ }
+    const keepScroll = () => { try { sessionStorage.setItem(SCROLL_KEY, String(window.scrollY)); } catch { /* storage blocked */ } };
+    window.addEventListener('scroll', keepScroll, { passive: true });
+    return () => window.removeEventListener('scroll', keepScroll);
   }, [refresh]);
   useEffect(() => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(doc)); } catch { /* storage blocked */ } }, [doc]);
   useEffect(() => {
@@ -80,6 +95,7 @@ export function StrategyWorkspace() {
   };
   const open = (d: StrategyDoc, savedVersion: string | null) => {
     setDoc(d); setSaved(savedVersion); setResult(null); setError(null); setEdit(null);
+    try { sessionStorage.removeItem(LAST_RUN_KEY); } catch { /* storage blocked */ }
     const b = JSON.stringify(d);
     setBase(b);
     try { localStorage.setItem(BASE_KEY, b); } catch { /* storage blocked */ }
@@ -109,14 +125,15 @@ export function StrategyWorkspace() {
     } catch (e) { setError(e instanceof FeedError ? e.message : 'Could not save'); }
   };
   const runKey = JSON.stringify({ strategy: doc.strategy, universe: doc.universe });
-  const [resultKey, setResultKey] = useState<string | null>(null);
   const run = async () => {
     setRunning(true);
     setError(null);
     try {
       const key = runKey;
-      setResult(await strategyApi.backtest(doc));
+      const r = await strategyApi.backtest(doc);
+      setResult(r);
       setResultKey(key);
+      try { sessionStorage.setItem(LAST_RUN_KEY, JSON.stringify({ result: r, key })); } catch { /* too big or blocked: only this visit keeps it */ }
       setGalleryOpen(false);
       if (doc.id) refresh();
     } catch (e) { setError(e instanceof FeedError ? e.message : 'The backtest could not run. Is the data service running?'); }
@@ -175,6 +192,9 @@ export function StrategyWorkspace() {
               <RuleEditor value={s.entry} onChange={(entry) => set({ entry })} meta={meta} tf={s.tf} lead="Buy when" starters emptyText="Pick a quick start above, or add the conditions that open a trade." />
             </section>
 
+            <Row label="Entry">
+              <BuyAtPick s={s} set={set} />
+            </Row>
             {/* exit */}
             <Row label="Exit">
               <StopPick s={s} set={set} />
@@ -246,7 +266,9 @@ function NumIn({ v, on, step = 'any', w = 'w-[120px]' }: { v: number | undefined
 
 const STOP_PICKS: { label: string; formula: string; text: string; intraday?: boolean }[] = [
   { label: 'Supertrend (10, 3) line', formula: 'SUPERTREND(10, 3)', text: 'the Supertrend (10, 3) line' },
-  { label: 'Lowest low of the last 5 candles', formula: 'LOWEST(LOW, 5)[1]', text: 'the lowest low of the previous 5 candles' },
+  { label: 'Lowest low of the last 3 candles', formula: 'LOWEST(LOW, 3)', text: 'the lowest low of the last 3 finished candles' },
+  { label: 'Lowest low of the last 5 candles', formula: 'LOWEST(LOW, 5)', text: 'the lowest low of the last 5 finished candles' },
+  { label: 'Lowest low of the last 5 candles (older version: skips the latest)', formula: 'LOWEST(LOW, 5)[1]', text: 'the lowest low of the 5 candles before the latest one' },
   { label: 'EMA 20', formula: 'EMA(CLOSE, 20)', text: 'EMA 20' },
   { label: 'VWAP', formula: 'VWAP', text: 'VWAP', intraday: true },
   { label: 'Opening range low (15 min)', formula: 'OR_LOW(15)', text: 'the low of the first 15 minutes', intraday: true },
@@ -262,6 +284,7 @@ function StrategySentence({ doc }: { doc: StrategyDoc }) {
   const rule = (f: string | undefined) => { const r = formulaToRows(f ?? ''); return r ? rowsWords(r) : (f ?? '').trim(); };
   const entry = rule(s.entry), exit = rule(s.exit);
   const stop = s.stop.kind === 'pct' ? `${s.stop.value}% below the entry` : s.stop.kind === 'points' ? `₹${s.stop.value} below the entry` : s.stop.kind === 'atr' ? `${s.stop.mult} × ATR (${s.stop.length}) below the entry`
+    : s.stop.kind === 'signal-low' ? 'the low of the signal candle (fixed)'
     : s.stop.kind === 'formula' ? (STOP_PICKS.find((x) => x.formula === (s.stop as { formula: string }).formula)?.text ?? (s.stop as { formula: string }).formula) + ', moving with it' : null;
   const target = s.target.kind === 'pct' ? `${s.target.value}% above the entry` : s.target.kind === 'points' ? `₹${s.target.value} above the entry` : s.target.kind === 'rr' ? `${s.target.value} × the risk` : null;
   const day = isIntradayTf(s.tf) ? s.intraday ?? DEFAULT_INTRADAY : null;
@@ -269,6 +292,9 @@ function StrategySentence({ doc }: { doc: StrategyDoc }) {
     <p className="mb-2 rounded-[12px] bg-accent-soft px-4 py-2.5 text-[13.5px] leading-relaxed text-ink-2">
       <b className="text-ink">Reads as: </b>
       On {on}, {TF_WORDS[s.tf]} candles: {entry ? <>buy when {entry}</> : 'no entry rule yet'}.
+      {entry && (s.order.type === 'market' ? <> Buy at the next candle&apos;s open.</>
+        : s.order.type === 'stop' ? <> Then buy when the price goes {s.order.offsetPct ? `${s.order.offsetPct}% ` : ''}above that candle&apos;s high, during the next candle only.</>
+        : <> Then buy if the price dips {s.order.offsetPct}% below that candle&apos;s close, during the next candle only.</>)}
       {stop && <> Stop at {stop}.</>}
       {target && <> Target {target}.</>}
       {exit && <> Sell when {exit}.</>}
@@ -329,12 +355,6 @@ function More({ doc, setDoc, s, set }: { doc: StrategyDoc; setDoc: (d: StrategyD
         <Field label="New entries per candle"><NumIn step="1" v={s.maxEntriesPerBar} on={(v) => set({ maxEntriesPerBar: Math.round(v ?? 1) })} /></Field>
       </div>
       <div className="flex flex-wrap items-end gap-3">
-        <Field label="Order">
-          <select value={s.order.type} onChange={(e) => { const t = e.target.value; set({ order: t === 'market' ? { type: 'market' } : { type: t as 'limit' | 'stop', offsetPct: t === 'limit' ? 0.5 : 0.1 } }); }} className={`${inputCls} pr-8`}>
-            <option value="market">Market at the next open</option><option value="limit">Limit below the signal close</option><option value="stop">Stop above the signal candle&apos;s high</option>
-          </select>
-        </Field>
-        {s.order.type !== 'market' && <Field label="Offset %"><NumIn v={s.order.offsetPct} on={(v) => set({ order: { ...(s.order as { type: 'limit'; offsetPct: number }), offsetPct: v ?? 0 } })} /></Field>}
         <Field label="Too many signals: prefer the highest" tip="Any value formula. AVG_TURNOVER(20) prefers the most traded stocks; RSI(CLOSE, 14) the strongest; -ATR_PCT(14) the calmest.">
           <input value={s.rank} onChange={(e) => set({ rank: e.target.value })} spellCheck={false} className={`${inputCls} w-[220px] font-mono`} />
         </Field>

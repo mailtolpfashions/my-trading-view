@@ -4,6 +4,22 @@ import { INDICATORS, ROW_EXAMPLES, formulaToRows, rowsToFormula, rowsWords, type
 
 const row = (p: Partial<CondRow>): CondRow => ({ id: 'x', left: { tf: '', ind: 'close', p: [] }, op: '>', right: { tf: '', ind: 'num', p: [], num: 1 }, join: 'AND', on: true, ...p });
 
+describe('Bollinger width (std dev) in rows', () => {
+  it("reads Chartink's Upper Bollinger band(20,1) and writes it back unchanged", () => {
+    const f = 'CROSSOVER([M] RSI(CLOSE, 14), 60) AND CROSSOVER([M] CLOSE, [M] BB_UPPER(CLOSE, 20, 1))';
+    const rows = formulaToRows(f)!;
+    expect(rows[1].right).toMatchObject({ tf: 'M', ind: 'bbu', p: [20, 1] });
+    expect(rows[1].right.ago).toBeUndefined();
+    expect(rowsToFormula(rows)).toBe(parseFormula(f).ok && (parseFormula(f) as { formula: string }).formula);
+  });
+  it('an older saved row without the std dev keeps 2', () => {
+    expect(rowsToFormula([row({ right: { tf: '', ind: 'bbu', p: [20] }, op: 'xup' })])).toContain('BB_UPPER(CLOSE, 20, 2)');
+  });
+  it('a value N candles ago stays separate from the band settings', () => {
+    expect(rowsToFormula([row({ right: { tf: '', ind: 'bbu', p: [20, 1], ago: 20 }, op: 'xup' })])).toContain('BB_UPPER(CLOSE, 20, 1)[20]');
+  });
+});
+
 describe('condition rows', () => {
   it('every indicator choice, on any time, makes a valid rule that reads back', () => {
     for (const i of INDICATORS) for (const p of i.presets) for (const tf of ['', 'D', '5m']) {

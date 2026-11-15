@@ -13,7 +13,7 @@ export type RowOp = '>' | '<' | '>=' | '<=' | '=' | 'xup' | 'xdn';
 /** `join`: how the NEXT row connects to this one. `on`: false = kept on screen, left out of the rule. */
 export type CondRow = { id: string; left: Operand; op: RowOp; right: Operand; join: 'AND' | 'OR' | 'NOT'; on: boolean };
 
-type Ind = { id: string; label: (p: number[]) => string; group: string; tpl: string; presets: number[][]; intraday?: boolean };
+type Ind = { id: string; label: (p: number[]) => string; group: string; tpl: string; presets: number[][]; intraday?: boolean; /** Values for settings an older saved row lacks. */ defs?: number[] };
 /** {0} {1}: the indicator's settings. Each preset is one choice in the dropdown. */
 export const INDICATORS: Ind[] = [
   { id: 'close', group: 'Price', label: () => 'Close', tpl: 'CLOSE', presets: [[]] },
@@ -44,9 +44,9 @@ export const INDICATORS: Ind[] = [
   { id: 'st', group: 'Trend', label: (p) => `Supertrend ${p[0]}, ${p[1]}`, tpl: 'SUPERTREND({0}, {1})', presets: [[7, 3], [10, 2], [10, 3], [14, 2], [21, 1]] },
   { id: 'stdir', group: 'Trend', label: (p) => `Supertrend ${p[0]}, ${p[1]} direction (1 up, −1 down)`, tpl: 'SUPERTREND_DIR({0}, {1})', presets: [[7, 3], [10, 2], [10, 3], [14, 2], [21, 1]] },
   { id: 'chop', group: 'Trend', label: (p) => `Choppiness ${p[0]}`, tpl: 'CHOP({0})', presets: [[14]] },
-  { id: 'bbu', group: 'Trend', label: (p) => `Bollinger upper ${p[0]}`, tpl: 'BB_UPPER(CLOSE, {0}, 2)', presets: [[20]] },
-  { id: 'bbm', group: 'Trend', label: (p) => `Bollinger middle ${p[0]}`, tpl: 'BB_MIDDLE(CLOSE, {0}, 2)', presets: [[20]] },
-  { id: 'bbl', group: 'Trend', label: (p) => `Bollinger lower ${p[0]}`, tpl: 'BB_LOWER(CLOSE, {0}, 2)', presets: [[20]] },
+  { id: 'bbu', group: 'Trend', label: (p) => `Bollinger upper ${p[0]}, ${p[1] ?? 2} std dev`, tpl: 'BB_UPPER(CLOSE, {0}, {1})', presets: [[20, 2], [20, 1], [20, 3]], defs: [20, 2] },
+  { id: 'bbm', group: 'Trend', label: (p) => `Bollinger middle ${p[0]}, ${p[1] ?? 2} std dev`, tpl: 'BB_MIDDLE(CLOSE, {0}, {1})', presets: [[20, 2], [20, 1], [20, 3]], defs: [20, 2] },
+  { id: 'bbl', group: 'Trend', label: (p) => `Bollinger lower ${p[0]}, ${p[1] ?? 2} std dev`, tpl: 'BB_LOWER(CLOSE, {0}, {1})', presets: [[20, 2], [20, 1], [20, 3]], defs: [20, 2] },
   { id: 'atr', group: 'Volatility', label: (p) => `ATR ${p[0]}`, tpl: 'ATR({0})', presets: [[14]] },
   { id: 'atrp', group: 'Volatility', label: (p) => `ATR ${p[0]} as % of price`, tpl: 'ATR_PCT({0})', presets: [[14]] },
   { id: 'hv', group: 'Volatility', label: (p) => `Historical volatility ${p[0]} (%)`, tpl: 'HV({0})', presets: [[10], [20]] },
@@ -96,13 +96,13 @@ export const newRow = (): CondRow => ({ id: `r${++seq}`, left: { tf: '', ind: 'c
 
 // ---------------------------------------------------------------- rows → formula
 
-const fill = (tpl: string, p: number[]) => tpl.replace(/\{(\d)\}/g, (_, k: string) => String(p[Number(k)] ?? p[0]));
+const fill = (tpl: string, p: number[], defs?: number[]) => tpl.replace(/\{(\d)\}/g, (_, k: string) => String(p[Number(k)] ?? defs?.[Number(k)] ?? p[0]));
 function operandText(o: Operand): string {
   if (o.ind === 'num') return String(o.num ?? 0);
   const i = indOf(o.ind);
   if (!i) return 'CLOSE';
   const back = o.ago && canGoBack(o) ? `[${o.ago}]` : '';
-  const core = `${o.tf ? `[${o.tf}] ` : ''}${fill(i.tpl, o.p)}${back}`;
+  const core = `${o.tf ? `[${o.tf}] ` : ''}${fill(i.tpl, o.p, i.defs)}${back}`;
   return o.mult && o.mult !== 1 ? `${o.mult} * ${core}` : core;
 }
 export function rowText(r: CondRow): string {

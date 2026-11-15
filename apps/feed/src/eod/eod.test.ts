@@ -83,6 +83,22 @@ describe('corporate-action adjustment from NSE corporate action file', () => {
     expect(r.adjustments[0].factor).toBeCloseTo(2440 / 2516.8, 12);
     expect(adjustedCandles(b, r.adjustments).map((c) => c.close)).toEqual([2412.27, 2440, 2462]);
   });
+  it('demerger, from the ex-day price: SIEMENS, Siemens Energy split off ex 7 Apr 2025', () => {
+    // NSE: close 4,928.15 on 4 Apr 2025; ex-day (special pre-open) open 2,450.00 → factor 2,450 / 4,928.15.
+    const b = [bar('2025-04-03', 490000, 495000, 1000, 'SIEMENS'), bar('2025-04-04', 495000, 492815, 1000, 'SIEMENS'), bar('2025-04-07', 245000, 240000, 1000, 'SIEMENS')];
+    const r = findAdjustments(b, [{ symbol: 'SIEMENS', exDate: '2025-04-07', purpose: 'DEMERGER' }]);
+    expect(r.unhandled).toEqual([]);
+    expect(r.adjustments[0]).toMatchObject({ date: '2025-04-07', basis: 'ex-day price', check: false });
+    expect(r.adjustments[0].factor).toBeCloseTo(245000 / 492815, 12);
+    expect(adjustedCandles(b, r.adjustments).map((c) => c.close)).toEqual([2460.86, 2450, 2400]);
+    expect(findBreaks(b.map((x) => ({ ...x, isin: 'INE003A01024' })), adjustedCandles(b, r.adjustments), r.adjustments, r.unhandled)).toEqual([]);
+  });
+  it('a demerger whose ex-day price shows no drop stays flagged, never guessed', () => {
+    const b = [bar('2025-04-04', 10000, 10000), bar('2025-04-07', 10050, 10100)];
+    const r = findAdjustments(b, [{ symbol: 'RELIANCE', exDate: '2025-04-07', purpose: 'DEMERGER' }]);
+    expect(r.adjustments).toEqual([]);
+    expect(r.unhandled[0].reason).toMatch(/shows no drop/);
+  });
   it('rights: no adjustment when the issue price is at or above the cum price; face value taken from a later split', () => {
     expect(rightsFactor(100, 120, 1, 4)).toBe(1);
     const b = [bar('2024-01-01', 10000, 10000), bar('2024-01-02', 9500, 9500), bar('2024-06-03', 2000, 2000)];

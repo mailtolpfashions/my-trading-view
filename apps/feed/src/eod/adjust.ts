@@ -29,6 +29,12 @@ export type Adjustment = {
   impliedRatio: number;
   /** True when the actual price gap disagrees with the factor by more than 30%: worth a manual look. */
   check: boolean;
+  /**
+   * Where the factor came from: the action's own terms, or (demergers) NSE's ex-day price. On a demerger's ex-date NSE
+   * runs a special pre-open session to discover the price without the business that left; that open ÷ the last
+   * close is the share of value that stayed. A market measure, not the company's cost-split terms, so it is labelled.
+   */
+  basis: 'terms' | 'ex-day price';
 };
 
 export type UnhandledAction = CorporateAction & { reason: string };
@@ -58,9 +64,15 @@ export function findAdjustments(bars: RawBar[], actions: CorporateAction[], face
     const i = bars.findIndex((b) => b.date >= a.exDate);
     // Only actions inside the history, on the symbol the stock traded under at that time.
     if (i <= 0 || bars[i - 1].date >= a.exDate || bars[i].symbol !== a.symbol) continue;
-    let factor = 1;
+    let factor = 1, basis: Adjustment['basis'] = 'terms';
+    const implied = bars[i].openPaise / bars[i - 1].closePaise;
     for (const p of parsePurpose(a.purpose)) {
       if (p.kind === 'adjust') factor *= p.factor;
+      else if (p.kind === 'demerger') {
+        // A demerger only lowers the price. No drop (or an impossible one) means the day can't be read: leave it flagged.
+        if (implied > 0.05 && implied < 0.995) { factor *= implied; basis = 'ex-day price'; }
+        else unhandled.push({ ...a, reason: `demerger not adjusted: the ex-day open shows no drop (open ÷ previous close = ${implied.toFixed(3)})` });
+      }
       else if (p.kind === 'unhandled') unhandled.push({ ...a, reason: p.reason });
       else if (p.kind === 'rights') {
         const fv = faceValueOn(a.exDate);
@@ -69,10 +81,9 @@ export function findAdjustments(bars: RawBar[], actions: CorporateAction[], face
       }
     }
     if (factor === 1) continue;
-    const implied = bars[i].openPaise / bars[i - 1].closePaise;
     const existing = adjustments.find((x) => x.date === bars[i].date);
-    if (existing) { existing.factor *= factor; existing.purpose += ` + ${a.purpose}`; continue; }
-    adjustments.push({ date: bars[i].date, exDate: a.exDate, symbol: a.symbol, purpose: a.purpose, factor, impliedRatio: implied, check: false });
+    if (existing) { existing.factor *= factor; existing.purpose += ` + ${a.purpose}`; if (basis !== 'terms') existing.basis = basis; continue; }
+    adjustments.push({ date: bars[i].date, exDate: a.exDate, symbol: a.symbol, purpose: a.purpose, factor, impliedRatio: implied, check: false, basis });
   }
   for (const a of adjustments) a.check = Math.abs(a.impliedRatio / a.factor - 1) > 0.3;
   adjustments.sort((x, y) => (x.date < y.date ? -1 : 1));

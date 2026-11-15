@@ -27,6 +27,12 @@ export function BacktestResults({ r }: { r: BacktestResult }) {
           {r.warnings.map((w) => <p key={w} className="flex gap-2"><AlertTriangle size={15} className="mt-0.5 shrink-0 text-accent-deep" />{w}</p>)}
         </div>
       )}
+      {m.skippedSlots > 0 && (
+        <p className="flex gap-2 rounded-[14px] bg-accent-soft px-4 py-3 text-[13px] text-ink-2">
+          <AlertTriangle size={15} className="mt-0.5 shrink-0 text-accent-deep" />
+          {m.skippedSlots.toLocaleString('en-IN')} more {m.skippedSlots === 1 ? 'signal was' : 'signals were'} skipped because every position slot was full{m.openAtEnd === m.trades ? ' (nothing was sold, so slots never freed up)' : ''}. To take them, raise Max open or add a Sell when rule.
+        </p>
+      )}
       <p className="text-[13.5px] text-ink-2">
         {r.stocks.toLocaleString('en-IN')} {r.stocks === 1 ? 'instrument' : 'stocks'}, {date(m.from)} to {date(m.to)}, {(r.ms / 1000).toFixed(1)} s. {m.signals.toLocaleString('en-IN')} entry signals became {m.trades.toLocaleString('en-IN')} trades
         <InfoTip label="Signals that did not become trades">

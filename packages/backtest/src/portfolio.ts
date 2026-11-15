@@ -25,7 +25,9 @@ export type StopSpec =
   | { kind: 'points'; value: number }
   | { kind: 'atr'; mult: number; length: number }
   /** A price level from a formula, re-read at every close, e.g. SUPERTREND(10, 3) or LOWEST(LOW, 10)[1]. */
-  | { kind: 'formula'; formula: string };
+  | { kind: 'formula'; formula: string }
+  /** Fixed at the signal candle's low (the candle whose close gave the signal), set once at entry. */
+  | { kind: 'signal-low' };
 export type TargetSpec = { kind: 'none' } | { kind: 'pct'; value: number } | { kind: 'points'; value: number } | { kind: 'rr'; value: number };
 export type TrailSpec = { kind: 'none' } | { kind: 'pct'; value: number } | { kind: 'points'; value: number } | { kind: 'atr'; mult: number; length: number };
 export type Sizing = { mode: 'qty'; qty: number } | { mode: 'amount'; rupees: number } | { mode: 'percent'; pct: number } | { mode: 'risk'; pct: number };
@@ -164,7 +166,36 @@ export function validateEquityStrategy(s: EquityStrategy): string | null {
 type Prepared = {
   symbol: string; bars: Candle[]; index: Map<number, number>; entry: Series; exit: Series | null; rank: Series;
   stopLevel: Series | null; atrStop: Series | null; atrTrail: Series | null; avgValue: Series; breaks: string[]; isIndex: boolean;
+  /** Weekly / monthly tests: each bar's daily bars [first, last], so trades carry the real trading day, not the period's calendar start. */
+  days: { daily: Candle[]; span: [number, number][] } | null;
 };
+
+/** Where in a bar a fill happened: at its open, at its close, or where the price first reached a level. */
+type At = 'open' | 'close' | { low: number } | { high: number };
+function dayOf(p: Prepared, i: number, at: At): number {
+  const d = p.days;
+  if (!d) return p.bars[i].time;
+  const [a, b] = d.span[i];
+  if (at === 'open') return d.daily[a].time;
+  if (at === 'close') return d.daily[b].time;
+  for (let k = a; k <= b; k++) {
+    const x = d.daily[k];
+    if ('low' in at ? toPaise(x.low) <= at.low : toPaise(x.high) >= at.high) return x.time;
+  }
+  return d.daily[b].time;
+}
+function spans(bars: Candle[], daily: Candle[]): [number, number][] {
+  const out: [number, number][] = [];
+  let k = 0;
+  for (let i = 0; i < bars.length; i++) {
+    const end = i + 1 < bars.length ? bars[i + 1].time : Infinity;
+    while (k < daily.length && daily[k].time < bars[i].time) k++;
+    const a = k;
+    while (k < daily.length && daily[k].time < end) k++;
+    out.push([a, Math.max(a, k - 1)]);
+  }
+  return out;
+}
 
 function prepare(ins: Instrument, s: EquityStrategy, nodes: { entry: Node; exit: Node | null; rank: Node; stop: Node | null }, fromT: number): Prepared | null {
   if (ins.daily.length < 2 && !ins.intraday?.size) return null;
@@ -191,6 +222,7 @@ function prepare(ins: Instrument, s: EquityStrategy, nodes: { entry: Node; exit:
     avgValue: ev.series(compile(isIntraday(s.tf as Tf) ? '[D] AVG_TURNOVER(20)[1]' : 'AVG_TURNOVER(20)', 'num', 'Liquidity'), s.tf as Tf).map((v) => (v == null ? null : v / 1e7)),
     breaks: ins.breaks ?? [],
     isIndex: ins.kind === 'index',
+    days: s.tf === 'W' || s.tf === 'M' ? { daily: ins.daily, span: spans(bars, ins.daily) } : null,
   };
 }
 
@@ -244,8 +276,8 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
   const productOf = (p: Prepared) => (p.isIndex ? 'FUT' : intra ? 'MIS' : 'CNC');
   const markedEquity = () => cash + lots.reduce((a, l) => a + l.qty * (lastClose.get(l.p.symbol) ?? l.entryPrice), 0);
 
-  const close = (l: Lot, i: number, price: number, reason: PortfolioExitReason) => {
-    const t = l.p.bars[i].time;
+  const close = (l: Lot, i: number, price: number, reason: PortfolioExitReason, at: At = 'close') => {
+    const t = dayOf(l.p, i, at);
     const fill = reason === 'end-of-test' || reason === 'data-ended' ? price : slip(price, false);
     let ch = charge('SELL', l.qty, fill, t, productOf(l.p));
     // Bought and sold the same day: the exchange treats a stock trade as intraday (futures charges don't change).
@@ -271,6 +303,7 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
     if (sp.kind === 'points') stop = fill - toPaise(sp.value);
     if (sp.kind === 'atr' && o.p.atrStop![i] != null) stop = fill - toPaise(sp.mult * o.p.atrStop![i]!);
     if (sp.kind === 'formula' && o.stopAt != null) stop = o.stopAt;
+    if (sp.kind === 'signal-low') stop = toPaise(o.p.bars[i].low);
     const risk = stop != null ? fill - stop : null;
     const tg = s.target;
     const target = tg.kind === 'pct' ? Math.ceil(fill * (1 + tg.value / 100)) : tg.kind === 'points' ? fill + toPaise(tg.value)
@@ -293,7 +326,7 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
     // ---- the open: pending exits, then orders placed at the previous close ----
     for (const [l, reason] of [...pendingExit]) {
       const i = l.p.index.get(t);
-      if (i != null) close(l, i, toPaise(l.p.bars[i].open), reason);
+      if (i != null) close(l, i, toPaise(l.p.bars[i].open), reason, 'open');
     }
     const nextOrders: Order[] = [];
     for (const o of orders) {
@@ -306,14 +339,16 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
       if (o.trigger != null) price = high >= o.trigger ? Math.max(open, o.trigger) : null;
       if (price == null) { counts.unfilled++; continue; }
       const fill = slip(price, true);
+      const when = dayOf(o.p, i, o.limit != null && price !== open ? { low: o.limit } : o.trigger != null && price !== open ? { high: o.trigger } : 'open');
       let qty = o.qty;
-      const ch0 = charge('BUY', qty, fill, b.time, productOf(o.p));
+      const ch0 = charge('BUY', qty, fill, when, productOf(o.p));
       if (qty * fill + ch0 > cash) qty = Math.floor((cash * 0.999) / fill); // only what the cash pays for
-      if (qty <= 0) { counts.skippedCash++; continue; }
-      const ch = charge('BUY', qty, fill, b.time, productOf(o.p));
+      // Less than half the planned size is a leftover, not the trade the rules asked for (e.g. 1 share): skip it.
+      if (qty <= 0 || qty * 2 < o.qty) { counts.skippedCash++; continue; }
+      const ch = charge('BUY', qty, fill, when, productOf(o.p));
       cash -= qty * fill + ch;
       const { stop, target } = levelsAtEntry(o, fill);
-      lots.push({ p: o.p, qty, entryIndex: i, entryTime: b.time, entryPrice: fill, entryCharges: ch, stop, target, trail: null, best: fill, worst: fill });
+      lots.push({ p: o.p, qty, entryIndex: i, entryTime: when, entryPrice: fill, entryCharges: ch, stop, target, trail: null, best: fill, worst: fill });
     }
     orders = nextOrders;
 
@@ -335,11 +370,11 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
       l.worst = Math.min(l.worst, low);
       l.best = Math.max(l.best, high);
       if (i > l.entryIndex) { // the entry bar opened at the entry price, so it cannot gap past its own levels
-        if (stop != null && open <= stop) { close(l, i, open, stopReason); continue; }
-        if (l.target != null && open >= l.target) { close(l, i, open, 'target'); continue; }
+        if (stop != null && open <= stop) { close(l, i, open, stopReason, 'open'); continue; }
+        if (l.target != null && open >= l.target) { close(l, i, open, 'target', 'open'); continue; }
       }
-      if (stop != null && low <= stop) { close(l, i, stop, stopReason); continue; }
-      if (l.target != null && high >= l.target) { close(l, i, l.target, 'target'); continue; }
+      if (stop != null && low <= stop) { close(l, i, stop, stopReason, { low: stop }); continue; }
+      if (l.target != null && high >= l.target) { close(l, i, l.target, 'target', { high: l.target }); continue; }
     }
 
     // ---- the close: trailing stops, exit signals, new signals ----
@@ -485,10 +520,11 @@ function summarise(trades: PortfolioTrade[], equity: { time: number; equityPaise
     yearsOut.push({ year: y, returnPct: (v / prev - 1) * 100, trades: ty.length, net: sum(ty, (t) => t.netPaise) });
     prev = v;
   }
-  const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((name, d) => {
-    const tw = closed.filter((t) => new Date((t.entryTime + IST) * 1000).getUTCDay() === d + 1);
+  // Saturday / Sunday rows appear only when NSE held a special session then (e.g. Budget Sunday, 1 Feb 2026).
+  const weekdays = (['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const).map((name, d) => {
+    const tw = closed.filter((t) => new Date((t.entryTime + IST) * 1000).getUTCDay() === (d + 1) % 7);
     return { day: name, trades: tw.length, winRatePct: tw.length ? (tw.filter((t) => t.netPaise > 0).length / tw.length) * 100 : null, netPaise: sum(tw, (t) => t.netPaise) };
-  });
+  }).filter((w, d) => d < 5 || w.trades > 0);
   const byReason = [...new Set(closed.map((t) => t.exitReason))].map((r) => {
     const tr = closed.filter((t) => t.exitReason === r);
     return { reason: r, trades: tr.length, netPaise: sum(tr, (t) => t.netPaise) };

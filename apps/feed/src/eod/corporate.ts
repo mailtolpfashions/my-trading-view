@@ -64,6 +64,8 @@ export type ParsedAction =
   | { kind: 'adjust'; type: 'split' | 'consolidation'; factor: number; fromFv: number; toFv: number }
   /** a new shares for every b held, at face value + premium (rupees); the factor needs the cum price and face value. */
   | { kind: 'rights'; newShares: number; held: number; premium: number }
+  /** Part of the company split off into a new one: the value that left is read from NSE's ex-day price (adjust.ts). */
+  | { kind: 'demerger' }
   | { kind: 'ignore' }
   | { kind: 'unhandled'; reason: string };
 
@@ -98,7 +100,8 @@ function parsePart(p: string): ParsedAction {
   }
   if (/RIGHT/.test(p)) return { kind: 'unhandled', reason: `rights issue without a price: ${p}` };
   if (/\bCALL\b|FIRST CL\b/.test(p)) return { kind: 'ignore' }; // call money on partly-paid shares (a separate security)
-  if (/DEMERGER|DE-MERGER|CAPITAL REDUCTION|REDUCTION OF CAPITAL|ARRANGEMENT|SPIN/.test(p)) return { kind: 'unhandled', reason: `not adjusted (price impact depends on terms): ${p}` };
+  if (/DEMERGER|DE-MERGER|SPIN/.test(p)) return { kind: 'demerger' };
+  if (/CAPITAL REDUCTION|REDUCTION OF CAPITAL|ARRANGEMENT/.test(p)) return { kind: 'unhandled', reason: `not adjusted (price impact depends on terms): ${p}` };
   if (IGNORE.test(p)) return { kind: 'ignore' };
   return { kind: 'unhandled', reason: `unrecognised purpose: ${p}` };
 }

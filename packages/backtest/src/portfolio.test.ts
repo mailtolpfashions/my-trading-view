@@ -28,6 +28,54 @@ const base: EquityStrategy = {
 const run = (ins: Instrument[], s: Partial<EquityStrategy> = {}) => runPortfolio(ins, { ...base, ...s }, null);
 const one = (rows: [number, number, number, number][]) => [{ symbol: 'AAA', daily: bars(rows) }];
 
+describe('weekly / monthly trades are dated by real trading days', () => {
+  it('a month that starts on a Saturday is entered on its first trading day, at that day\'s open', () => {
+    // Jan–May 2024 = 110 weekdays at 90, May's last close 101 (the monthly signal); June opens Mon 3 Jun at 105.
+    const rows = flat(110);
+    rows[109] = [90, 101, 90, 101];
+    const r = run(one([...rows, ...Array.from({ length: 10 }, () => [105, 106, 104, 105] as [number, number, number, number])]), { tf: 'M' });
+    expect(r.trades).toHaveLength(1);
+    const t = r.trades[0];
+    expect(istToday(t.entryTime * 1000)).toBe('2024-06-03');
+    expect(t.entryPricePaise).toBe(10500);
+    expect(istToday(t.exitTime * 1000)).toBe('2024-06-14'); // open at the end: the last trading day held, not 1 Jun
+  });
+});
+
+describe('stop at the low of the last 3 candles', () => {
+  // Entry at 102 (day 2's open). Lows after entry: 101, 105, 108, 110 → on day 6 the last 3 completed lows are 105, 108,
+  // 110: the stop is 105. Day 6 trades down to 104, so the trade stops out at 105 that day.
+  const rows: [number, number, number, number][] = [[95, 96, 94, 101], [102, 104, 101, 103], [106, 107, 105, 106], [109, 110, 108, 109], [111, 112, 110, 111], [111, 111, 104, 106], ...flat(2, 106)];
+  it('LOWEST(LOW, 3) uses the 3 latest completed candles', () => {
+    const r = run(one(rows), { exit: '', stop: { kind: 'formula', formula: 'LOWEST(LOW, 3)' } });
+    expect(r.trades[0]).toMatchObject({ entryPricePaise: 10200, exitPricePaise: 10500, exitReason: 'stop' });
+  });
+  it('the older LOWEST(LOW, n)[1] form skips the latest candle (lows 101, 105, 108 → stop 101: not hit on day 6)', () => {
+    const r = run(one(rows), { exit: '', stop: { kind: 'formula', formula: 'LOWEST(LOW, 3)[1]' } });
+    expect(r.trades[0].exitReason).not.toBe('stop');
+  });
+});
+
+describe('stop at the signal candle\'s low', () => {
+  it('is fixed at entry and does not move up with later lows', () => {
+    // Signal on day 1 (close 101, low 94). Buy day 2 at 102. Lows then rise to 101, 105, 108: a moving stop would follow
+    // them, this one stays at 94. Day 6 drops to 93 → stopped at 94.
+    const rows: [number, number, number, number][] = [[90, 91, 89, 90], [95, 101, 94, 101], [102, 104, 101, 103], [106, 107, 105, 106], [109, 110, 108, 109], [100, 101, 93, 95], ...flat(2, 95)];
+    const r = run(one(rows), { entry: 'CROSSOVER(CLOSE, 100)', exit: '', stop: { kind: 'signal-low' } });
+    expect(r.trades[0]).toMatchObject({ entryPricePaise: 10200, exitPricePaise: 9400, exitReason: 'stop' });
+  });
+});
+
+describe('cash', () => {
+  it('skips a signal when the cash left buys less than half the planned size (no 1-share leftovers)', () => {
+    // Capital ₹1,000; 8 shares planned at ₹102 (₹816) for each of two stocks: ₹184 is left, 1 share for the second → skipped.
+    const rows: [number, number, number, number][] = [[95, 96, 94, 95], [95, 96, 94, 101], [102, 104, 101, 103], [103, 104, 102, 103]];
+    const r = run([{ symbol: 'AAA', daily: bars(rows) }, { symbol: 'BBB', daily: bars(rows) }], { sizing: { mode: 'qty', qty: 8 }, capitalRupees: 1000, entry: 'CROSSOVER(CLOSE, 100)', exit: '' });
+    expect(r.trades.map((t) => [t.symbol, t.qty])).toEqual([['AAA', 8]]);
+    expect(r.metrics.skippedCash).toBe(1);
+  });
+});
+
 describe('fills', () => {
   it('enters at the next open after a signal and exits at the next open after the exit signal', () => {
     const r = run(one([[95, 96, 94, 99], [99, 102, 98, 101], [102, 104, 101, 103], [103, 103, 98, 99], [98, 99, 96, 97]]));

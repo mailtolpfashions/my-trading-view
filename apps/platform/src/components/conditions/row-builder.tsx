@@ -80,7 +80,7 @@ export function RowBuilder({ formula, onChange, mainTf, intraday, examples = fal
     const ago = o.ago ?? 0;
     return (
       <select value={ago} onChange={(e) => on({ ...o, ago: Number(e.target.value) || undefined })} aria-label={label}
-        title="The value now, or as it was some candles back (e.g. RSI 1 candle ago was below 30)" className={`${SEL} w-[124px] ${ago ? 'border-accent text-accent-deep' : 'text-ink-2'}`}>
+        title="The value now, or as it was some candles back (e.g. RSI 1 candle ago was below 30)" className={`${SEL} w-[156px] ${ago ? 'border-accent text-accent-deep' : 'text-ink-2'}`}>
         {(AGOS.includes(ago) ? AGOS : [...AGOS, ago]).map((n) => <option key={n} value={n}>{agoLabel(n)}</option>)}
       </select>
     );

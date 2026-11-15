@@ -5,7 +5,7 @@
 // - serves bars at any intraday timeframe on the same adjusted prices as the daily history (adjust.ts).
 // Zerodha ends the session at 6 AM, so the owner logs in once a day; without a session everything here waits.
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { resample, type Tf } from '@mtv/rules';
 import type { Candle } from '@mtv/shared';
@@ -18,6 +18,7 @@ import { adjustToEod, type DayInfo } from './adjust';
 import { MinuteBuilder } from './builder';
 import { MinuteStore, dateOfIst } from './store';
 import { OptionRecorder, OptionStore, pickContracts } from './options';
+import { LOCK_TOUCH_MS, releaseLock, releaseLockSync, takeLock, touchLock } from './lock';
 
 const OPTION_UNDERLYINGS = ['NIFTY', 'BANKNIFTY'];
 
@@ -132,26 +133,24 @@ export class LiveService {
     }
   }
 
-  /**
-   * Only one process may stream and write minutes (two would race on the same files). The lock holds this process's
-   * id; a lock left by a process that has ended is taken over.
-   */
+  /** The lock that keeps a second process from streaming. It is held while its process is alive and heartbeating (lock.ts). */
+  get lockFile() { return path.join(this.store.dir, '..', 'live.lock'); }
+  private lockTouchedAt = 0;
+
   private async takeLock() {
-    const file = path.join(this.store.dir, '..', 'live.lock');
-    const other = Number(await readFile(file, 'utf8').catch(() => '0'));
-    if (other && other !== process.pid) {
-      let alive = true;
-      try { process.kill(other, 0); } catch { alive = false; }
-      if (alive) throw new Error(`Another data service (process ${other}) is already streaming live data`);
-    }
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, String(process.pid));
+    const stale = await takeLock(this.lockFile);
+    if (stale) this.log(`Took over a stale live-data lock (process ${stale})`);
+    this.lockTouchedAt = Date.now();
   }
+
+  /** Removes the lock on shutdown, so the next start is not blocked. */
+  releaseLockSync() { releaseLockSync(this.lockFile); }
 
   stop() {
     this.provider?.ticker.stop();
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    void releaseLock(this.lockFile).catch(() => {});
     this.status.state = activeSession() ? 'off' : 'login-required';
   }
 
@@ -215,6 +214,7 @@ export class LiveService {
 
   private everySecond() {
     const now = nowSec();
+    if (Date.now() - this.lockTouchedAt >= LOCK_TOUCH_MS) { this.lockTouchedAt = Date.now(); void touchLock(this.lockFile).catch(() => {}); }
     this.builder.flush(now);
     this.options.flush(now);
     if (dateOfIst(now) !== this.optionsDay) { this.optionsDay = dateOfIst(now); this.options.rowsToday = 0; }

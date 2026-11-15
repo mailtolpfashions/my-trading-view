@@ -67,8 +67,11 @@ describe('corporate action purposes (wording as NSE publishes it)', () => {
     expect(parsePurpose('RIGHTS 1:5 @ PREMIUM RS 90')).toEqual([{ kind: 'rights', newShares: 1, held: 5, premium: 90 }]);
     for (const p of ['FIRST CL RS 450 PR SH', 'FST&FNL CALL - RS 0.80', 'SCND&FNL CALL - RS 5']) expect(parsePurpose(p), p).toEqual([{ kind: 'ignore' }]);
   });
-  it('rights without a price, demergers and unknown wording are flagged, never guessed', () => {
-    for (const p of ['RIGHTS 1:1', 'RIGHTS 10:63', 'DEMERGER', 'CAPITAL REDUCTION', 'SOMETHING NEW', 'BONUS', 'FV SPLIT']) {
+  it('demergers are read from the ex-day price (adjust.ts); capital reductions and arrangements are not', () => {
+    for (const p of ['DEMERGER', 'DE-MERGER', 'SPIN OFF']) expect(parsePurpose(p), p).toEqual([{ kind: 'demerger' }]);
+  });
+  it('rights without a price and unknown wording are flagged, never guessed', () => {
+    for (const p of ['RIGHTS 1:1', 'RIGHTS 10:63', 'CAPITAL REDUCTION', 'SCHEME OF ARRANGEMENT', 'SOMETHING NEW', 'BONUS', 'FV SPLIT']) {
       expect(parsePurpose(p).some((x) => x.kind === 'unhandled'), p).toBe(true);
     }
   });
