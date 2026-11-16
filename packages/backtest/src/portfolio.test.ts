@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { computeCharges, istToday } from '@mtv/paper';
 import type { Candle } from '@mtv/shared';
 import { resample } from '@mtv/rules';
-import { runPortfolio, type EquityStrategy, type Instrument } from './portfolio';
+import { runPortfolio, type EquityStrategy, type Instrument, type MarketFilter } from './portfolio';
 
 const IST = 5.5 * 3600;
 /** Weekday bars from Mon 1 Jan 2024, stamped 09:15 IST: [open, high, low, close]. */
@@ -289,5 +289,62 @@ describe('intraday', () => {
 
   it('refuses bad session times', () => {
     expect(() => run(ins(day5m(0, flatPx(99))), { ...intra, intraday: { lastEntry: '15:20', squareOff: '15:15' } })).toThrow(/before the square-off/);
+  });
+});
+
+describe('market filter (a rule on another chart, e.g. NIFTY)', () => {
+  // The stock closes at 101 every day (entry rule true), opens at 101+day so each fill shows which day it happened.
+  const stock = () => [{ symbol: 'AAA', daily: bars(Array.from({ length: 12 }, (_, d) => [101 + d, 102 + d, 100, 101] as [number, number, number, number])) }];
+  const mkt = (closes: number[]) => bars(closes.map((c) => [c, c, c, c] as [number, number, number, number]));
+  const on: MarketFilter = { symbol: 'NIFTY', rule: 'CLOSE > 60', whenOff: 'keep' };
+  const go = (closes: number[], m: Partial<MarketFilter> = {}, s: Partial<EquityStrategy> = {}) =>
+    runPortfolio(stock(), { ...base, exit: '', ...s, market: { ...on, ...m } }, null, mkt(closes));
+
+  it('no buys while the rule is off; the first buy follows the first close where it is on', () => {
+    const r = go([50, 50, 50, 70, 70, 70, 70, 70, 70, 70, 70, 70]);
+    expect(r.trades).toHaveLength(1);
+    expect(r.trades[0].entryPricePaise).toBe(10500); // signal at day 3's close (market on that close), fill day 4's open
+    expect(r.metrics.marketOff).toBe(3);
+  });
+  it('reads the market at the same close as the stock, never a later one', () => {
+    const a = go([50, 50, 50, 50, 70, 70, 70, 70, 70, 70, 70, 70]);
+    expect(a.trades[0].entryPricePaise).toBe(10600); // on from day 4's close → fill day 5
+    // Changing the market after day 4 changes nothing up to then.
+    const b = go([50, 50, 50, 50, 70, 10, 10, 10, 10, 10, 10, 10]);
+    expect(b.trades[0].entryPricePaise).toBe(10600);
+  });
+  it('sell-all exits every holding at the next open with reason "market"; keep holds on', () => {
+    const closes = [70, 70, 70, 50, 50, 50, 50, 50, 50, 50, 50, 50];
+    const sold = go(closes, { whenOff: 'sell-all' });
+    expect(sold.trades[0]).toMatchObject({ entryPricePaise: 10200, exitPricePaise: 10500, exitReason: 'market' });
+    const kept = go(closes, { whenOff: 'keep' });
+    expect(kept.trades).toHaveLength(1);
+    expect(kept.trades[0].exitReason).toBe('end-of-test');
+  });
+  it('size scale multiplies the quantity, clamped to 0..1', () => {
+    const closes = Array.from({ length: 12 }, () => 70);
+    expect(go(closes, { rule: '', sizeScale: '0.5' }).trades[0].qty).toBe(5);
+    expect(go(closes, { rule: '', sizeScale: '3' }).trades[0].qty).toBe(10);
+    expect(go(closes, { rule: '', sizeScale: '0' }).trades).toHaveLength(0);
+  });
+  it('is refused on weekly / monthly strategies and without market bars', () => {
+    expect(() => runPortfolio(stock(), { ...base, tf: 'W', market: on }, null, mkt([70]))).toThrow(/daily and intraday/);
+    expect(() => runPortfolio(stock(), { ...base, market: on }, null, null)).toThrow(/No daily history for NIFTY/);
+  });
+});
+
+describe('market filter on an intraday strategy', () => {
+  // Day 0 and day 1 of 5-minute bars; a signal at day 1's 09:25 close fills at 09:30.
+  const day5m = (dayIndex: number, sig: boolean): Candle[] => Array.from({ length: 75 }, (_, k) => {
+    const v = sig && k === 2 ? 101 : 99;
+    return { time: Date.UTC(2024, 0, 1 + dayIndex) / 1000 - IST + 9 * 3600 + 15 * 60 + k * 300, open: 99, high: v, low: 99, close: v, volume: 1000 };
+  });
+  const b = [...day5m(0, false), ...day5m(1, true)];
+  const ins: Instrument[] = [{ symbol: 'AAA', daily: resample(b, 'D'), intraday: new Map([['5m', b]]) }];
+  const mkt = (c0: number, c1: number) => bars([[c0, c0, c0, c0], [c1, c1, c1, c1]]);
+  const go = (c0: number, c1: number) => runPortfolio(ins, { ...base, tf: '5m', exit: '', from: '2024-01-01', to: '2024-01-31', market: { symbol: 'NIFTY', rule: 'CLOSE > 60', whenOff: 'keep' } }, null, mkt(c0, c1));
+  it('uses the market\'s previous day, since today\'s daily bar is not finished', () => {
+    expect(go(70, 50).trades).toHaveLength(1); // yesterday on, today's (unknown at 09:25) off
+    expect(go(50, 70).trades).toHaveLength(0); // yesterday off
   });
 });

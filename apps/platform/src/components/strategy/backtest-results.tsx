@@ -15,7 +15,7 @@ const pct = (v: number | null | undefined, d = 2, sign = true) => (v == null ? '
 const num = (v: number | null | undefined, d = 2) => (v == null ? '–' : v.toFixed(d));
 const date = (t: number | null) => (t == null ? '–' : new Date((t + IST) * 1000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }));
 const tone = (v: number | null | undefined) => (v == null ? '' : v > 0 ? 'text-up' : v < 0 ? 'text-down' : '');
-const REASON: Record<string, string> = { signal: 'Exit signal', stop: 'Stop loss', trail: 'Trailing stop', target: 'Target', time: 'Time exit', 'square-off': 'Square-off', 'end-of-test': 'Open at end', 'data-ended': 'Stock stopped trading' };
+const REASON: Record<string, string> = { signal: 'Exit signal', stop: 'Stop loss', trail: 'Trailing stop', target: 'Target', time: 'Time exit', 'square-off': 'Square-off', market: 'Market filter off', 'end-of-test': 'Open at end', 'data-ended': 'Stock stopped trading' };
 
 export function BacktestResults({ r }: { r: BacktestResult }) {
   const m = r.metrics;

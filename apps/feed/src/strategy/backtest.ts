@@ -100,9 +100,12 @@ export async function runStrategyBacktest(req: BacktestRequest) {
   }
   if (instruments.length > MAX_STOCKS) throw new StrategyError(`That is ${instruments.length.toLocaleString('en-IN')} stocks; pick a list of at most ${MAX_STOCKS.toLocaleString('en-IN')}`);
   const nifty = dailyHistory('NIFTY');
-  const result = runPortfolio(instruments, req.strategy, nifty?.candles ?? null);
+  // The market filter reads NIFTY only for now (the builder offers nothing else).
+  if (req.strategy.market && req.strategy.market.symbol !== 'NIFTY') throw new StrategyError('The market filter can only check NIFTY for now');
+  const result = runPortfolio(instruments, req.strategy, nifty?.candles ?? null, req.strategy.market ? nifty?.candles ?? null : null);
 
   const warnings: string[] = [];
+  if (req.strategy.market && result.metrics.marketOff) warnings.push(`The NIFTY filter was off for ${result.metrics.marketOff.toLocaleString('en-IN')} buy signals, so they were skipped.`);
   if (indices.length) {
     warnings.push(`${indices.join(', ')} ${indices.length === 1 ? 'is' : 'are'} tested as a stand-in for index futures or an index ETF: quantity is in index units (1 unit gains ₹1 per point), charges are at futures rates, and futures premium, rollover and lot sizes are not included.`);
     if (VOLUME_WORDS.test(rules)) warnings.push(`Your rules use volume (${rules.match(VOLUME_WORDS)![1]}), which indices don't have: they never signal on ${indices.join(', ')}.`);

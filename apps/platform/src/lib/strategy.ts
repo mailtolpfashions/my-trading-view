@@ -25,7 +25,10 @@ export type EquityStrategy = {
   maxOpen: number; pyramid: number; cooldownBars: number; maxEntriesPerBar: number; rank: string; minAvgValueCr: number;
   capitalRupees: number; reinvest: boolean; slippagePct: number; broker: string; charges: boolean;
   from: string; to: string; riskFreePct: number;
+  /** Buy only while a rule on NIFTY's daily chart holds (packages/backtest MarketFilter). Daily and intraday only. */
+  market?: MarketFilter;
 };
+export type MarketFilter = { symbol: string; rule?: string; whenOff: 'keep' | 'sell-all'; sizeScale?: string };
 
 export type StrategyDoc = { id?: string; name: string; description: string; style: 'intraday' | 'swing' | 'positional'; strategy: EquityStrategy; universe: UniverseSpec };
 
@@ -94,7 +97,7 @@ export const TEMPLATES: Template[] = [
 
 export type Trade = {
   symbol: string; qty: number; entryTime: number; entryPricePaise: number; exitTime: number; exitPricePaise: number;
-  exitReason: 'signal' | 'stop' | 'trail' | 'target' | 'time' | 'square-off' | 'end-of-test' | 'data-ended';
+  exitReason: 'signal' | 'stop' | 'trail' | 'target' | 'time' | 'square-off' | 'market' | 'end-of-test' | 'data-ended';
   grossPaise: number; chargesPaise: number; netPaise: number; returnPct: number; bars: number; maePct: number; mfePct: number; dataBreak: boolean; open: boolean;
 };
 export type BacktestResult = {

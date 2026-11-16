@@ -76,6 +76,23 @@ export type EquityStrategy = {
   to: string;
   /** Annual risk-free rate for Sharpe and Sortino, %. */
   riskFreePct: number;
+  /** A rule on another chart (e.g. NIFTY); its daily bars are passed to runPortfolio as `market`. */
+  market?: MarketFilter;
+};
+
+/**
+ * Market filter, read on the market's DAILY bars. A daily strategy uses the market's close of the same day as the stock
+ * signal (both are known at that close); an intraday strategy uses the market's previous day, since today's daily bar
+ * is not finished. A missing value (not enough history) counts as "off" and as scale 0.
+ */
+export type MarketFilter = {
+  symbol: string;
+  /** Condition: new buys only while it is true. Empty = always on (use with sizeScale only). */
+  rule?: string;
+  /** When the rule turns false: keep holdings (new buys stop), or sell everything at the next open. */
+  whenOff: 'keep' | 'sell-all';
+  /** Value: each new position's size is multiplied by it, clamped to 0..1, e.g. MIN(1, 15 / HV(20)). */
+  sizeScale?: string;
 };
 
 /**
@@ -88,7 +105,7 @@ export type Instrument = {
   intraday?: Map<Tf, Candle[]>;
 };
 
-export type PortfolioExitReason = 'signal' | 'stop' | 'trail' | 'target' | 'time' | 'square-off' | 'end-of-test' | 'data-ended';
+export type PortfolioExitReason = 'signal' | 'stop' | 'trail' | 'target' | 'time' | 'square-off' | 'market' | 'end-of-test' | 'data-ended';
 export type PortfolioTrade = {
   symbol: string;
   qty: number;
@@ -160,6 +177,11 @@ export function validateEquityStrategy(s: EquityStrategy): string | null {
     if (v.kind === 'atr' && !(v.mult > 0 && Number.isInteger(v.length) && v.length >= 1)) return `${l}: ATR multiple and length must be above zero`;
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s.from) || !/^\d{4}-\d{2}-\d{2}$/.test(s.to) || s.from > s.to) return 'Pick a start date before the end date';
+  if (s.market) {
+    if (s.tf === 'W' || s.tf === 'M') return 'The market filter works on daily and intraday strategies';
+    if (!s.market.rule?.trim() && !s.market.sizeScale?.trim()) return 'Give the market filter a rule or a size scale';
+    if (s.market.whenOff !== 'keep' && s.market.whenOff !== 'sell-all') return 'Pick what happens to holdings when the market rule turns off';
+  }
   return null;
 }
 
@@ -234,9 +256,33 @@ type Order = { p: Prepared; signalIndex: number; qty: number; limit: number | nu
 
 export type PortfolioResult = ReturnType<typeof summarise> & { trades: PortfolioTrade[] };
 
-export function runPortfolio(instruments: Instrument[], s: EquityStrategy, benchmark: Candle[] | null): PortfolioResult {
+/** Market rule and size scale by day, looked up for a stock bar without seeing anything after its close. */
+function marketLookup(m: MarketFilter, bars: Candle[], intra: boolean) {
+  const source = (tf: Tf) => (tf === 'D' ? bars : tf === 'W' || tf === 'M' ? resample(bars, tf) : null);
+  const ev = new Evaluator(source);
+  const on = m.rule?.trim() ? ev.series(compile(m.rule, 'bool', 'Market rule'), 'D') : null;
+  const scale = m.sizeScale?.trim() ? ev.series(compile(m.sizeScale, 'num', 'Market size scale'), 'D') : null;
+  const days = bars.map((b) => dayNo(b.time));
+  /** Index of the market bar to use for a stock bar at time t, or -1. */
+  const at = (t: number) => {
+    const d = intra ? dayNo(t) - 1 : dayNo(t);
+    let lo = 0, hi = days.length - 1, r = -1;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (days[mid] <= d) { r = mid; lo = mid + 1; } else hi = mid - 1; }
+    return r;
+  };
+  return (t: number) => {
+    const i = at(t);
+    const isOn = !on ? true : i >= 0 && on[i] === 1;
+    const v = !scale ? 1 : i >= 0 ? scale[i] : null;
+    return { on: isOn, scale: v == null || !Number.isFinite(v) ? 0 : Math.max(0, Math.min(1, v)) };
+  };
+}
+
+export function runPortfolio(instruments: Instrument[], s: EquityStrategy, benchmark: Candle[] | null, market: Candle[] | null = null): PortfolioResult {
   const bad = validateEquityStrategy(s);
   if (bad) throw new StrategyError(bad);
+  if (s.market && !market?.length) throw new StrategyError(`No daily history for ${s.market.symbol}, the market filter`);
+  const marketAt = s.market ? marketLookup(s.market, market!, isIntraday(s.tf as Tf)) : null;
   const nodes = {
     entry: compile(s.entry, 'bool', 'Entry'),
     exit: s.exit?.trim() ? compile(s.exit, 'bool', 'Exit') : null,
@@ -266,7 +312,7 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
   const lastClose = new Map<string, number>();
   const trades: PortfolioTrade[] = [];
   const equity: { time: number; equityPaise: number; open: number }[] = [];
-  const counts: Counts = { signals: 0, skippedSlots: 0, skippedCash: 0, unfilled: 0, illiquid: 0, lateEntry: 0, earlyEntry: 0 };
+  const counts: Counts = { signals: 0, skippedSlots: 0, skippedCash: 0, unfilled: 0, illiquid: 0, lateEntry: 0, earlyEntry: 0, marketOff: 0 };
 
   const slip = (price: number, buy: boolean) => (buy ? Math.ceil(price * (1 + s.slippagePct / 100)) : Math.floor(price * (1 - s.slippagePct / 100)));
   const charge = (side: 'BUY' | 'SELL', qty: number, price: number, time: number, product: 'CNC' | 'MIS' | 'FUT' = 'CNC') =>
@@ -379,6 +425,7 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
 
     // ---- the close: trailing stops, exit signals, new signals ----
     for (const p of here) lastClose.set(p.symbol, toPaise(p.bars[p.index.get(t)!].close));
+    const mkt = marketAt ? marketAt(t) : { on: true, scale: 1 };
     for (const l of [...lots]) {
       const i = l.p.index.get(t);
       if (i == null) continue;
@@ -388,7 +435,8 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
       const d = trailDistance(l, i);
       if (d != null) l.trail = Math.max(l.trail ?? -Infinity, l.best - d);
       if (pendingExit.has(l)) continue;
-      if (l.p.exit?.[i] === 1) pendingExit.set(l, 'signal');
+      if (!mkt.on && s.market?.whenOff === 'sell-all') pendingExit.set(l, 'market');
+      else if (l.p.exit?.[i] === 1) pendingExit.set(l, 'signal');
       else if (s.maxBars != null && i - l.entryIndex + 1 >= s.maxBars) pendingExit.set(l, 'time');
     }
 
@@ -407,6 +455,7 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
         const le = lastExit.get(p.symbol);
         if (le != null && i - le <= s.cooldownBars) return false;
         if (!p.isIndex && s.minAvgValueCr > 0 && !((p.avgValue[i] ?? 0) >= s.minAvgValueCr)) { counts.illiquid++; return false; }
+        if (!mkt.on || mkt.scale <= 0) { counts.marketOff++; return false; }
         return true;
       }).sort((a, b) => {
         // Higher rank first; stocks without a rank value last.
@@ -430,6 +479,7 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
           const risk = estimate - (levelsAtEntry(o, estimate).stop ?? estimate);
           qty = risk > 0 ? Math.floor((basis * sz.pct) / 100 / risk) : 0;
         }
+        if (marketAt) qty = Math.floor(qty * mkt.scale);
         if (qty <= 0) { counts.skippedCash++; continue; }
         const od = s.order;
         orders.push({
@@ -460,7 +510,8 @@ function maxIndexAtOrBefore(p: Prepared, t: number): number {
 
 /** Signals seen, and why some did not become trades. */
 /** earlyEntry: intraday signals that would fill before the start time. lateEntry: intraday signals after the last-entry time, on a day's last bar, or whose order would land on another day. */
-type Counts = { signals: number; skippedSlots: number; skippedCash: number; unfilled: number; illiquid: number; lateEntry: number; earlyEntry: number };
+/** marketOff: signals skipped because the market filter was off (or its size scale was 0). */
+type Counts = { signals: number; skippedSlots: number; skippedCash: number; unfilled: number; illiquid: number; lateEntry: number; earlyEntry: number; marketOff: number };
 
 const PERIODS_PER_YEAR: Record<string, number> = { D: 252, W: 52, M: 12 };
 /** Bars a year: 252 sessions of 375 minutes on intraday timeframes. */

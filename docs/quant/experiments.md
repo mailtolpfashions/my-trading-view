@@ -1,6 +1,6 @@
 # Experiment registry
 
-Generated 2026-11-11 11:34 UTC from apps/feed/.data/research/experiments.jsonl (11 entries). Detail files: apps/feed/.data/research/quant/<id>-*.json.
+Generated 2026-11-16 20:23 UTC from apps/feed/.data/research/experiments.jsonl (13 entries). Detail files: apps/feed/.data/research/quant/<id>-*.json.
 
 | ID | Family | Name | Period (role) | Data to | Verdict | Result |
 |---|---|---|---|---|---|---|
@@ -15,6 +15,8 @@ Generated 2026-11-11 11:34 UTC from apps/feed/.data/research/experiments.jsonl (
 | E-20261111-009 | B10 | B10 signal check: 52-week-high breakout, mean vs median, liquid stocks | 2011-09-01 → 2023-12-31 (train+validation) | EOD 2026-11-09, F&O 2026-11-09, git 7163c8e | info | H=20: mean excess 0.54%, median excess 0.06%, beats crowd 45.28% of the time (n=26130). |
 | E-20261111-010 | P11 | P11 sizing and combination of the surviving leads on ₹10 lakh | 2019-02-01 → 2023-12-31 (train+validation) | EOD 2026-11-09, F&O 2026-11-09, git 7163c8e | fail | Highest CAGR with DD ≤ 10% (closes) and margin ≤ 70%: W Tue→Wed s16 high ×3: CAGR 11.24%, DD 5.5%. |
 | E-20261111-011 | P12 | P12 holdout 2024-01 → last day: weekly Monday books, monthly benchmark, controls (read once) | 2024-01-01 → 2026-11-09 (holdout) | EOD 2026-11-09, F&O 2026-11-09, git 7163c8e | lead | W (Mon→1 day left, high IV) ₹94576; Wx (Mon→expiry) ₹141602 (Thu-era ₹94085, Tue-era ₹28491); M ₹178685. W×3 holdout CAGR 9.14% DD 12.18%. |
+| E-20261116-001 | B9 | B9b momentum with a NIFTY market filter | 2011-09-01 → 2023-12-31 (train+validation) | EOD 2026-11-13, F&O 2026-11-13, git a7fbded | fail | Chosen lb252 open10 stop0 skip0 roc126-keep: validation CAGR 15.96% vs NIFTY 14.8%, DD 44.25% vs 38.44%; 0/24 of its filter pass. |
+| E-20261116-002 | B9-final | B9c momentum + NIFTY 100-day filter, one-time final check 2024→ | 2024-01-01 → 2026-11-13 (holdout) | EOD 2026-11-13, F&O 2026-11-13, git a7fbded | fail | Filter family median CAGR -4% / DD 41% vs NIFTY 5.2% / 15.77%; unfiltered median DD 42%. |
 
 ## E-20261111-001 — Regime table NIFTY/BANKNIFTY 2011-2026
 
@@ -136,3 +138,25 @@ Generated 2026-11-11 11:34 UTC from apps/feed/.data/research/experiments.jsonl (
 - Validation: `{"holdoutTouched":true,"readOnce":true,"fixedBefore":"books and controls fixed in docs/quant/02-results-phase5-11.md and this script before HOLDOUT_UNLOCK was set","labelCorrection":"A3b labels: daysBefore 3 was a Monday entry for Thursday expiries (same as daysBefore 4); the lead is the Monday-close entry"}`
 - Caveats: Daily closes only. NIFTY weekly expiry moved to Tuesday in 2025: the Mon→1-day-left book cannot trade a Tuesday expiry (entry day = exit day), so its Tuesday-era rows are skips; Wx (Monday → expiry) is the 1-night version there. Money at today's size; ₹1 slippage assumed; gap stress is a model.
 - Verdict: **lead**. W (Mon→1 day left, high IV) ₹94576; Wx (Mon→expiry) ₹141602 (Thu-era ₹94085, Tue-era ₹28491); M ₹178685. W×3 holdout CAGR 9.14% DD 12.18%.
+
+## E-20261116-001 — B9b momentum with a NIFTY market filter
+
+- Hypothesis: A NIFTY trend filter (or volatility scaling) keeps most of B9's return while cutting its 35–65% drawdowns below 25%.
+- Script: `scripts/research/quant/b9b-momentum-filter.ts`
+- Ran: 2026-11-16 12:22 UTC; data: EOD to 2026-11-13, F&O 2011-01-03 → 2026-11-13, minutes to 2026-11, commit a7fbded
+- Costs: zerodha; 0.03% a side (assumed) on stocks with ≥ ₹10 crore average turnover; charges itemised, dated
+- Params: `{"base":"B9 (E-20261111-008) settings","filters":{"none":null,"sma200-keep":{"symbol":"NIFTY","rule":"CLOSE > SMA(CLOSE, 200)","whenOff":"keep"},"sma200-sell":{"symbol":"NIFTY","rule":"CLOSE > SMA(CLOSE, 200)","whenOff":"sell-all"},"sma100-keep":{"symbol":"NIFTY","rule":"CLOSE > SMA(CLOSE, 100)","whenOff":"keep"},"sma100-sell":{"symbol":"NIFTY","rule":"CLOSE > SMA(CLOSE, 100)","whenOff":"sell-all"},"roc126-keep":{"symbol":"NIFTY","rule":"ROC(CLOSE, 126) > 0","whenOff":"keep"},"roc126-sell":{"symbol":"NIFTY","rule":"ROC(CLOSE, 126) > 0","whenOff":"sell-all"},"vol":{"symbol":"NIFTY","sizeScale":"MIN(1, 15 / HV(20))","whenOff":"keep"},"sma200-keep-vol":{"symbol":"NIFTY","rule":"CLOSE > SMA(CLOSE, 200)","sizeScale":"MIN(1, 15 / HV(20))","whenOff":"keep"}},"grid":{"lookback":[63,126,252],"maxOpen":[10,20],"stopPct":[0,15],"skipMonth":[0,1],"filter":["none","sma200-keep","sma200-sell","sma100-keep","sma100-sell","roc126-keep","roc126-sell","vol","sma200-keep-vol"]},"chosenOnTrainBy":"Calmar","capital":1000000,"universe":"2705 NSE equity shares incl. delisted","passMark":"validation CAGR > NIFTY, max DD < 25%, and at least 12 of the chosen filter's 24 settings do the same"}`
+- Validation: `{"trainValidationSplit":{"train":{"from":"2011-01-01","to":"2018-12-31"},"validation":{"from":"2019-01-01","to":"2023-12-31"},"holdout":{"from":"2024-01-01","to":"2026-12-31"}},"holdoutTouched":false,"selection":"single choice on train (Calmar) over all filters × settings","survivorship":"none","placebo":"each filter across the same 24 base settings; NIFTY as the crowd"}`
+- Caveats: Rotation is approximated: each holding exits after 21 sessions and re-enters only if it still ranks. Slippage 0.03% a side assumed. Filter read at the same close as the stock signal; orders fill next open. Sell-all exits pay full charges and slippage at the next open.
+- Verdict: **fail**. Chosen lb252 open10 stop0 skip0 roc126-keep: validation CAGR 15.96% vs NIFTY 14.8%, DD 44.25% vs 38.44%; 0/24 of its filter pass.
+
+## E-20261116-002 — B9c momentum + NIFTY 100-day filter, one-time final check 2024→
+
+- Hypothesis: The NIFTY-above-100-day filter that cut 2019–2023 drawdowns (B9b) also does so on unseen 2024–2026 data.
+- Script: `scripts/research/quant/b9c-holdout.ts`
+- Ran: 2026-11-16 12:43 UTC; data: EOD to 2026-11-13, F&O 2011-01-03 → 2026-11-13, minutes to 2026-11, commit a7fbded
+- Costs: zerodha; 0.03% a side (assumed) on stocks with ≥ ₹10 crore average turnover; charges itemised, dated
+- Params: `{"filters":{"none":null,"sma100-keep":{"symbol":"NIFTY","rule":"CLOSE > SMA(CLOSE, 100)","whenOff":"keep"},"sma100-sell":{"symbol":"NIFTY","rule":"CLOSE > SMA(CLOSE, 100)","whenOff":"sell-all"}},"grid":{"lookback":[63,126,252],"maxOpen":[10,20],"stopPct":[0,15],"skipMonth":[0,1],"filter":["none","sma100-keep","sma100-sell"]},"capital":1000000,"passMark":"filter family median CAGR > NIFTY, median DD < 25%, and below the unfiltered control"}`
+- Validation: `{"holdoutTouched":true,"runs":"once, no tuning","pickedFrom":"E-20261116-001 (seen on 2019–2023, so this is the only fair test)"}`
+- Caveats: Under 3 years of data; one market phase. Slippage 0.03% a side assumed.
+- Verdict: **fail**. Filter family median CAGR -4% / DD 41% vs NIFTY 5.2% / 15.77%; unfiltered median DD 42%.

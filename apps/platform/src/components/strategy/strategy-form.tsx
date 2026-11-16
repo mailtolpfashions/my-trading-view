@@ -137,6 +137,44 @@ export function TrailPick({ s, set }: { s: EquityStrategy; set: (p: Partial<Equi
 }
 
 const lakh = (r: number) => (r >= 1e7 ? `₹${r / 1e7} Cr` : `₹${r / 1e5} L`);
+/** "Only buy when NIFTY is …": a rule on NIFTY's daily chart, and what happens to holdings when it turns off. */
+export const MARKET_RULES: { key: string; label: string; rule: string }[] = [
+  { key: 'sma200', label: 'above its 200-day average', rule: 'CLOSE > SMA(CLOSE, 200)' },
+  { key: 'sma100', label: 'above its 100-day average', rule: 'CLOSE > SMA(CLOSE, 100)' },
+  { key: 'sma50', label: 'above its 50-day average', rule: 'CLOSE > SMA(CLOSE, 50)' },
+  { key: 'roc126', label: 'higher than 6 months ago', rule: 'ROC(CLOSE, 126) > 0' },
+];
+export function MarketPick({ s, set }: { s: EquityStrategy; set: (p: Partial<EquityStrategy>) => void }) {
+  const m = s.market;
+  const preset = m ? MARKET_RULES.find((r) => r.rule === m.rule) : null;
+  const key = !m ? 'any' : preset ? preset.key : 'custom';
+  return (
+    <>
+      <label className="flex flex-wrap items-center gap-1.5 text-[13px] text-ink-2">
+        <span>Only buy when NIFTY is</span>
+        <select value={key} aria-label="Market filter" className={SMALL} onChange={(e) => {
+          const k = e.target.value, r = MARKET_RULES.find((x) => x.key === k);
+          set({ market: k === 'any' ? undefined : { symbol: 'NIFTY', whenOff: m?.whenOff ?? 'keep', rule: r ? r.rule : (m?.rule || 'CLOSE > SMA(CLOSE, 200)') } });
+        }}>
+          <option value="any">anything (no filter)</option>
+          {MARKET_RULES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+          <option value="custom">Custom rule…</option>
+        </select>
+        {m && key === 'custom' && <input value={m.rule ?? ''} spellCheck={false} onChange={(e) => set({ market: { ...m, rule: e.target.value } })} className={`${inputCls} h-9 w-[220px] font-mono text-[13px]`} aria-label="NIFTY rule" placeholder="CLOSE > SMA(CLOSE, 200)" />}
+      </label>
+      {m && (
+        <label className="flex flex-wrap items-center gap-1.5 text-[13px] text-ink-2">
+          <span>When it turns</span>
+          <select value={m.whenOff} aria-label="When the market rule turns off" className={SMALL} onChange={(e) => set({ market: { ...m, whenOff: e.target.value as 'keep' | 'sell-all' } })}>
+            <option value="keep">stop buying, keep holdings</option>
+            <option value="sell-all">sell everything next morning</option>
+          </select>
+        </label>
+      )}
+    </>
+  );
+}
+
 export function CapitalPick({ s, set }: { s: EquityStrategy; set: (p: Partial<EquityStrategy>) => void }) {
   const choices = [100000, 500000, 1000000, 2500000, 5000000, 10000000].map((v) => ({ key: String(v), label: lakh(v), value: v }));
   return (

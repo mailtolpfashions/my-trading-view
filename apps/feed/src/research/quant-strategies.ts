@@ -198,12 +198,25 @@ function build(): Built {
       `Buy liquid NSE stocks the day they close at a 52-week high, up to ${r.p.maxOpen} at once. Sell on a trailing stop ${r.p.trail}× the daily range below the best price, or after ${r.p.maxBars} days${r.p.exitRule === 'sma50' ? ', or when the price closes under its 50-day average' : ''}.`,
       r.curve, tradesOf(f.breakoutTable, id));
   }
-  const momentum = f.momentum ? read<{ p: { lookback: number; maxOpen: number; stopPct: number; skipMonth: number }; curve: { date: string; equity: number }[] }[]>(f.momentum) ?? [] : [];
+  // B9 (no filter) or B9b (same settings × NIFTY market filters; its "none" rows repeat B9 and keep B9's keys).
+  const momentum = f.momentum ? read<{ p: { lookback: number; maxOpen: number; stopPct: number; skipMonth: number; filter?: string }; curve: { date: string; equity: number }[] }[]>(f.momentum) ?? [] : [];
   const months: Record<number, string> = { 63: '3-month', 126: '6-month', 252: '12-month' };
+  const FILTER: Record<string, { title: string; plain: string }> = {
+    'sma200-keep': { title: 'NIFTY above 200-day avg', plain: ' Buy only while NIFTY closes above its 200-day average; when it drops below, stop buying but keep what you hold.' },
+    'sma200-sell': { title: 'NIFTY above 200-day avg, sell all below', plain: ' Buy only while NIFTY closes above its 200-day average; when it drops below, sell everything the next morning.' },
+    'sma100-keep': { title: 'NIFTY above 100-day avg', plain: ' Buy only while NIFTY closes above its 100-day average; when it drops below, stop buying but keep what you hold.' },
+    'sma100-sell': { title: 'NIFTY above 100-day avg, sell all below', plain: ' Buy only while NIFTY closes above its 100-day average; when it drops below, sell everything the next morning.' },
+    'roc126-keep': { title: 'NIFTY up over 6 months', plain: ' Buy only while NIFTY is higher than 6 months ago; otherwise stop buying but keep what you hold.' },
+    'roc126-sell': { title: 'NIFTY up over 6 months, sell all otherwise', plain: ' Buy only while NIFTY is higher than 6 months ago; otherwise sell everything the next morning.' },
+    vol: { title: 'smaller when NIFTY is jumpy', plain: ' Buy smaller amounts when NIFTY has been swinging more than usual (size × 15% ÷ NIFTY’s 20-day volatility, at most full size).' },
+    'sma200-keep-vol': { title: 'NIFTY above 200-day avg, smaller when jumpy', plain: ' Buy only while NIFTY closes above its 200-day average, and buy smaller amounts when NIFTY has been swinging more than usual.' },
+  };
   for (const r of momentum) {
-    const id = `lb${r.p.lookback} open${r.p.maxOpen} stop${r.p.stopPct} skip${r.p.skipMonth}`;
-    stock('stocks-momentum', `momentum|${id}`, `Strongest stocks · top ${r.p.maxOpen} by ${months[r.p.lookback] ?? r.p.lookback} rise${r.p.skipMonth ? ' (skip last month)' : ''}${r.p.stopPct ? ` · ${r.p.stopPct}% stop` : ''}`,
-      `Hold the ${r.p.maxOpen} liquid NSE stocks with the biggest ${months[r.p.lookback] ?? `${r.p.lookback}-day`} rise${r.p.skipMonth ? ' (ignoring the last month)' : ''} that are above their 200-day average, and swap them about once a month.${r.p.stopPct ? ` Sell any stock that falls ${r.p.stopPct}% from its buy price.` : ''}`,
+    const base = `lb${r.p.lookback} open${r.p.maxOpen} stop${r.p.stopPct} skip${r.p.skipMonth}`;
+    const fl = r.p.filter && r.p.filter !== 'none' ? FILTER[r.p.filter] ?? { title: r.p.filter, plain: '' } : null;
+    const id = r.p.filter ? `${base} ${r.p.filter}` : base;
+    stock('stocks-momentum', fl ? `momentum|${base}|${r.p.filter}` : `momentum|${base}`, `Strongest stocks · top ${r.p.maxOpen} by ${months[r.p.lookback] ?? r.p.lookback} rise${r.p.skipMonth ? ' (skip last month)' : ''}${r.p.stopPct ? ` · ${r.p.stopPct}% stop` : ''}${fl ? ` · ${fl.title}` : ''}`,
+      `Hold the ${r.p.maxOpen} liquid NSE stocks with the biggest ${months[r.p.lookback] ?? `${r.p.lookback}-day`} rise${r.p.skipMonth ? ' (ignoring the last month)' : ''} that are above their 200-day average, and swap them about once a month.${r.p.stopPct ? ` Sell any stock that falls ${r.p.stopPct}% from its buy price.` : ''}${fl?.plain ?? ''}`,
       r.curve, tradesOf(f.momentumTable, id));
   }
   return { list, detail };

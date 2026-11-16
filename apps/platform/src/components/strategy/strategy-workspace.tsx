@@ -11,7 +11,7 @@ import { userApi, type SavedScreen, type Watchlist } from '@/lib/user';
 import { confirmDialog } from '../dialog';
 import { InfoTip } from '../info-tip';
 import { Button, Card, Segmented, inputCls } from '../ui';
-import { BuyAtPick, CapitalPick, MaxOpenPick, PeriodPick, SessionPicks, SizePick, StopPick, TargetPick, TrailPick, WORD } from './strategy-form';
+import { BuyAtPick, CapitalPick, MARKET_RULES, MarketPick, MaxOpenPick, PeriodPick, SessionPicks, SizePick, StopPick, TargetPick, TrailPick, WORD } from './strategy-form';
 import { BacktestResults } from './backtest-results';
 import { StrategyGallery } from './strategy-gallery';
 import { SymbolPicker, TEST_INDICES } from './symbol-picker';
@@ -163,7 +163,7 @@ export function StrategyWorkspace() {
             <UniverseSelect universe={doc.universe} filters={{}} meta={meta} watchlists={watchlists} watch={watch} className={WORD}
               onChange={(universe) => setDoc({ ...doc, universe })} onPick={() => setDoc({ ...doc, universe: { kind: 'symbols', symbols: [] } })} />
             <span>checking every</span>
-            <select value={s.tf} onChange={(e) => set({ tf: e.target.value as EquityStrategy['tf'] })} aria-label="Candles" className={WORD}>
+            <select value={s.tf} onChange={(e) => { const tf = e.target.value as EquityStrategy['tf']; set({ tf, ...(tf === 'W' || tf === 'M' ? { market: undefined } : {}) }); }} aria-label="Candles" className={WORD}>
               {([['1m', '1-minute'], ['5m', '5-minute'], ['15m', '15-minute'], ['1h', '1-hour'], ['D', 'daily'], ['W', 'weekly'], ['M', 'monthly']] as const).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
             <span>candle over</span>
@@ -195,6 +195,11 @@ export function StrategyWorkspace() {
             <Row label="Entry">
               <BuyAtPick s={s} set={set} />
             </Row>
+            {s.tf !== 'W' && s.tf !== 'M' && (
+              <Row label="Market" tip="Checks NIFTY's daily chart. A daily strategy reads NIFTY's close on the same day as the stock's signal; an intraday one reads NIFTY's previous day, because today's isn't finished. In our research a NIFTY filter on momentum stocks cut the falls only in some years, so test it before trusting it.">
+                <MarketPick s={s} set={set} />
+              </Row>
+            )}
             {/* exit */}
             <Row label="Exit">
               <StopPick s={s} set={set} />
@@ -298,6 +303,7 @@ function StrategySentence({ doc }: { doc: StrategyDoc }) {
       {stop && <> Stop at {stop}.</>}
       {target && <> Target {target}.</>}
       {exit && <> Sell when {exit}.</>}
+      {s.market?.rule && <> Only buy while NIFTY is {MARKET_RULES.find((r) => r.rule === s.market!.rule)?.label ?? <code>{s.market.rule}</code>}{s.market.whenOff === 'sell-all' ? '; when it isn’t, sell everything the next morning' : '; when it isn’t, stop buying but keep what you hold'}.</>}
       {day && <> Trades from {day.firstEntry ?? '09:15'}, none after {day.lastEntry}, everything closed at {day.squareOff}.</>}
     </p>
   );
