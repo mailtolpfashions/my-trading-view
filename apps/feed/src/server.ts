@@ -48,6 +48,7 @@ import { patternEvidence, presetEvidence } from './screener/evidence';
 import { paperLog, takeTodayIfDue } from './paperlog/blind-buy';
 import { tradeLabRoutes } from './tradelab/routes';
 import { buildSnapshot as buildSellerSnapshot, loadEvidence as loadSellerEvidence, sellerDays } from './seller/snapshot';
+import { calibrationSummary, dayDetail, logRun, settlePending } from './seller/calibration';
 import { StudyError, catalog as studyCatalog, computeStudy, encodeNonFinite } from './studies/library';
 import { findInstrument, loadEquities, searchInstruments } from './symbols';
 import { COUNTED_ROUTES, VisitorQuota } from './visitor-quota';
@@ -211,6 +212,29 @@ app.get<{ Querystring: { at?: string } }>('/api/seller/view', async (req, reply)
 });
 // Recorded days that can be replayed: option-minute coverage per day
 app.get('/api/seller/days', async () => sellerDays());
+
+// Calibration log (phase 4): a run every 5 minutes 09:20–15:25 while live, whether or not the screen is open; each day
+// is settled from stored data after 15:55 (Kite's official minutes are in by 15:50) and at startup.
+let sellerLoggedAt = '', sellerSettledOn = '';
+async function sellerLogTick() {
+  const now = Math.floor(Date.now() / 1000), ist = new Date((now + 19800) * 1000);
+  const date = ist.toISOString().slice(0, 10), min = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  if (live.status.state === 'live' && min >= 9 * 60 + 20 && min <= 15 * 60 + 25 && min % 5 === 0 && sellerLoggedAt !== `${date} ${min}`) {
+    sellerLoggedAt = `${date} ${min}`;
+    const at = now - (now % 60);
+    const view = intraday.analyze(await buildSellerSnapshot(at, { live: true }), await loadSellerEvidence());
+    if (view.audit.spot != null) await logRun(view, at, 'live');
+  }
+  if (min >= 15 * 60 + 55 && sellerSettledOn !== date) { sellerSettledOn = date; await settlePending(date); }
+}
+setInterval(() => { sellerLogTick().catch((e) => app.log.warn({ err: e }, 'seller calibration log failed')); }, 20_000);
+settlePending(new Date(Date.now() + 19800_000).toISOString().slice(0, 10)).catch((e) => app.log.warn({ err: e }, 'seller calibration settle failed'));
+app.get('/api/seller/calibration', async () => calibrationSummary());
+app.get<{ Querystring: { date?: string } }>('/api/seller/calibration-day', async (req, reply) => {
+  const date = req.query.date ?? '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.code(400).send({ error: 'bad_date', message: 'Use YYYY-MM-DD' });
+  return (await dayDetail(date)) ?? reply.code(404).send({ error: 'no_log', message: `Nothing logged on ${date}` });
+});
 
 app.get('/api/selling-three', async (_req, reply) => (await sellingThree()) ?? reply.code(404).send({ error: 'not_run', message: 'The comparison has not been built yet' }));
 app.get<{ Params: { name: string } }>('/api/selling-research/:name', async (req, reply) => (await sellingResearch(req.params.name)) ?? reply.code(404).send({ error: 'not_run', message: 'This test has not been run yet' }));

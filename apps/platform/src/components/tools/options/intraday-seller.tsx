@@ -66,6 +66,7 @@ export function IntradaySellerTool({ tool }: { tool: Tool }) {
       {r.error && !res && <p role="alert" className="rounded-[12px] bg-down-soft px-3 py-2 text-[13px] text-down">{r.error}</p>}
       {!res && !r.error && <div className="panel h-[260px] animate-pulse" />}
       {v && res && <Body v={v} res={res} onReplay={() => setMode('replay')} />}
+      <CalibrationLog />
     </ToolShell>
   );
 }
@@ -269,6 +270,69 @@ function Details({ v, res }: { v: View; res: Resp }) {
           <h3 className="mb-1.5 flex items-center gap-2 font-bold">Log line <button type="button" onClick={() => { void navigator.clipboard?.writeText(v.log).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); }} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold text-accent-deep hover:bg-accent-soft"><Copy size={12} />{copied ? 'Copied' : 'Copy'}</button></h3>
           <code className="block overflow-x-auto rounded-[10px] bg-raised px-3 py-2 text-[11.5px]">{v.log}</code>
         </section>
+      </div>
+    </details>
+  );
+}
+
+// ---------------------------------------------------------------- calibration log (phase 4)
+type Bucket = { range: string; n: number; predicted: number | null; actual: number | null };
+type LogSetup = {
+  date: string; firstAt: string; runs: number; side: string; strike: number; entryBid: number | null; exitAsk: number | null; exitAt: string | null; worstAsk: number | null;
+  invalidatedAt: string | null; touched1529: boolean; breachOdds: number | null; pnlHold: number | null; pnlWithInvalidation: number | null; notes: string[];
+};
+type Calib = {
+  days: { date: string; runs: number; live: number; settled: boolean; close1530: number | null; setups: number; pnlHold: number | null }[];
+  totals: { days: number; runs: number; setups: number; priced: number; won: number; pnlHold: number; pnlWithInvalidation: number; worst: number | null; strikeReached: number; directionIssued: number; directionHeld: number };
+  breach: Bucket[]; e4: Bucket[]; setups: LogSetup[]; note: string;
+};
+const rs = (v: number | null | undefined) => (v == null ? '—' : `${v < 0 ? '−' : ''}₹${Math.abs(v).toLocaleString('en-IN')}`);
+const pcOdds = (v: number | null) => (v == null ? '—' : `${Math.round(v * 100)}%`);
+
+/** What the engine suggested on past days and what happened after: paper sells at the bid, bought back at 15:00's ask. */
+function CalibrationLog() {
+  const r = useFeed<Calib>('seller/calibration', 600_000);
+  const c = r.data;
+  if (!c) return null;
+  const t = c.totals;
+  const head = !t.days ? 'Nothing logged yet: the log fills every 5 minutes while the app streams with Kite in market hours.'
+    : `${t.days} day${t.days === 1 ? '' : 's'} logged · ${t.setups} suggested sell${t.setups === 1 ? '' : 's'} · ${t.priced} with full prices: ${t.won} won, ${rs(t.pnlHold)} in total per lot`;
+  const table = (rows: Bucket[], what: string) => (
+    <table className="w-full text-left">
+      <thead><tr className="text-muted"><th className="py-1 font-semibold">{what}</th><th className="font-semibold">Times</th><th className="font-semibold">Engine said</th><th className="font-semibold">Happened</th></tr></thead>
+      <tbody>{rows.filter((b) => b.n).map((b) => <tr key={b.range} className="border-t border-line"><td className="py-1">{b.range}</td><td className="num">{b.n}</td><td className="num">{pcOdds(b.predicted)}</td><td className="num">{pcOdds(b.actual)}</td></tr>)}</tbody>
+    </table>
+  );
+  return (
+    <details className="panel">
+      <summary className="cursor-pointer list-none px-4 py-3 text-[13px] marker:hidden">
+        <span className="font-bold">Calibration log</span> <span className="text-ink-2">· {head}</span>
+        <InfoTip label="About the log">{c.note} A sell counts once a day per side and strike (the first time it was suggested); suggestions before 09:30 or from 15:00 on are not counted. A trade with no recorded price near 15:00 is left unpriced, never guessed.</InfoTip>
+      </summary>
+      <div className="grid gap-4 border-t border-line p-4 text-[12.5px]">
+        {t.days > 0 && t.priced < 20 && <p className="rounded-[10px] bg-raised px-3 py-2 text-ink-2">Only {t.priced} priced trade{t.priced === 1 ? '' : 's'} so far: far too few to say whether the engine works. The rules stay JUDGMENT until the log has many sessions.</p>}
+        {c.setups.length > 0 && (
+          <section className="overflow-x-auto">
+            <h3 className="mb-1.5 font-bold">Every suggested sell</h3>
+            <table className="w-full min-w-[640px] text-left">
+              <thead><tr className="text-muted">{['Day', 'Time', 'Sell', 'Sold at (bid)', 'Bought back (ask)', 'Worst', 'Strike reached', 'Result / lot'].map((h) => <th key={h} className="py-1 font-semibold">{h}</th>)}</tr></thead>
+              <tbody>{c.setups.map((s) => (
+                <tr key={s.date + s.firstAt + s.side + s.strike} className="border-t border-line align-top">
+                  <td className="py-1">{s.date}</td><td>{s.firstAt}</td><td>{s.side} {s.strike}</td><td className="num">{n2(s.entryBid)}</td>
+                  <td className="num">{s.exitAsk == null ? '—' : `${n2(s.exitAsk)} at ${s.exitAt}`}</td><td className="num">{n2(s.worstAsk)}</td><td>{s.touched1529 ? 'yes' : 'no'}</td>
+                  <td className={`num font-semibold ${s.pnlHold == null ? 'text-muted' : s.pnlHold >= 0 ? 'text-up' : 'text-down'}`}>{s.pnlHold == null ? (s.notes[0] ?? 'no price') : rs(s.pnlHold)}{s.invalidatedAt && <span className="block font-normal text-muted">invalidated {s.invalidatedAt}: {rs(s.pnlWithInvalidation)}</span>}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </section>
+        )}
+        {t.days > 0 && (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <section><h3 className="mb-1.5 font-bold">Strike reached: engine's odds vs what happened</h3>{table(c.breach, 'Odds band')}</section>
+            <section><h3 className="mb-1.5 font-bold">E4 range held until 15:30</h3>{table(c.e4, 'Odds band')}</section>
+          </div>
+        )}
+        {t.days > 0 && <p className="text-muted">Days: {c.days.map((d) => `${d.date} (${d.runs} runs${d.live ? '' : ', replayed'})`).join(' · ')}</p>}
       </div>
     </details>
   );
