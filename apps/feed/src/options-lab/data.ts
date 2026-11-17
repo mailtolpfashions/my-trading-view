@@ -52,8 +52,8 @@ async function build(u: string, lastDay: string): Promise<LabData> {
   const vix = (await prisma.indexEod.findMany({ where: { name: 'INDIA VIX' }, select: { date: true, closePaise: true }, orderBy: { date: 'asc' } }))
     .map((r) => ({ date: r.date, iv: r.closePaise / 100 }));
   // The index's daily bars, for weekly swing support and resistance (NSE's index file starts June 2011).
-  const bars = (await prisma.indexEod.findMany({ where: { name: u === 'NIFTY' ? 'NIFTY 50' : 'NIFTY BANK' }, select: { date: true, highPaise: true, lowPaise: true, closePaise: true }, orderBy: { date: 'asc' } }))
-    .map((r) => ({ date: r.date, high: r.highPaise, low: r.lowPaise, close: r.closePaise }));
+  const bars = (await prisma.indexEod.findMany({ where: { name: u === 'NIFTY' ? 'NIFTY 50' : 'NIFTY BANK' }, select: { date: true, openPaise: true, highPaise: true, lowPaise: true, closePaise: true }, orderBy: { date: 'asc' } }))
+    .map((r) => ({ date: r.date, open: r.openPaise, high: r.highPaise, low: r.lowPaise, close: r.closePaise }));
 
   return {
     days, monthly, expiries, iv, vix, bars,
@@ -63,7 +63,7 @@ async function build(u: string, lastDay: string): Promise<LabData> {
       if (hit) return hit;
       const rows = (await prisma.fnoEod.findMany({
         where: { underlying: u, kind: { in: ['CE', 'PE'] }, expiry: { in: cal.labels(expiry) }, date: { gte: from, lte: to } },
-        select: { date: true, expiry: true, kind: true, strikePaise: true, closePaise: true, settlePaise: true, traded: true },
+        select: { date: true, expiry: true, kind: true, strikePaise: true, openPaise: true, closePaise: true, settlePaise: true, traded: true },
       })) as Row[];
       // One row per date, type and strike: a traded row first, then the expiry's own label (as the studies merge them).
       const best = new Map<string, Row>();
@@ -73,7 +73,7 @@ async function build(u: string, lastDay: string): Promise<LabData> {
       }
       const byDate = new Map<string, LabQuote[]>();
       for (const x of best.values()) {
-        const q: LabQuote = { kind: x.kind, strikePaise: x.strikePaise, closePaise: x.closePaise, settlePaise: x.settlePaise, traded: x.traded };
+        const q: LabQuote = { kind: x.kind, strikePaise: x.strikePaise, openPaise: x.openPaise, closePaise: x.closePaise, settlePaise: x.settlePaise, traded: x.traded };
         const l = byDate.get(x.date); if (l) l.push(q); else byDate.set(x.date, [q]);
       }
       for (const list of byDate.values()) for (const kind of ['CE', 'PE'] as const) {

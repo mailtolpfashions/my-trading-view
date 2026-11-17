@@ -60,8 +60,17 @@ export type LabStrategy = {
   iv: 'any' | 'high' | 'top-third' | 'low';
   /** Trade only when India VIX at entry is above this percentile (0–100) of the previous 252 sessions. Off when unset. */
   vixAbove?: number;
-  /** No `daysLeft`: hold to the trade's expiry. `bookPct`: % of the entry credit earned. `stopCredit`: a loss of this × credit. */
-  exit: { daysLeft?: number; bookPct?: number; stopRupees?: number; stopCredit?: number };
+  /**
+   * No `daysLeft`: hold to the trade's expiry. `bookPct`: % of the entry credit earned. `stopCredit`: a loss of this × credit.
+   * `gap`: exit at the open when the index, after a close inside them, opens beyond a sold leg's break-even (strike ± entry credit per unit).
+   */
+  exit: { daysLeft?: number; bookPct?: number; stopRupees?: number; stopCredit?: number; gap?: boolean };
+  /**
+   * Rebalance a sold call and put at a close when one is worth `ratio` × the other or more: 'away' buys back the dearer
+   * leg and sells one of its kind priced like the cheaper; 'closer' buys back the cheaper and sells one priced like the
+   * dearer. At most `max` times a trade.
+   */
+  rebalance?: { ratio: number; mode: 'away' | 'closer'; max: number };
   adjust?: LabAdjust[];
   /** When adjustments are checked: every close (default) or only the week's last close (a weekly chart). */
   check?: 'daily' | 'weekly';
@@ -78,7 +87,7 @@ export type LabStrategy = {
 
 // ---------------------------------------------------------------- data
 
-export type LabQuote = { kind: 'CE' | 'PE'; strikePaise: number; closePaise: number; settlePaise: number; traded: boolean };
+export type LabQuote = { kind: 'CE' | 'PE'; strikePaise: number; closePaise: number; settlePaise: number; traded: boolean; openPaise?: number };
 export type LabDay = { date: string; spotPaise: number | null; lotSize: number | null };
 
 /** What the lab reads. The feed implements it over Postgres; tests over memory. */
@@ -98,13 +107,13 @@ export interface LabData {
   /** India VIX closes, for the VIX filter. */
   vix?: IvPoint[];
   /** The index's daily bars (paise), for weekly swing support and resistance. */
-  bars?: { date: string; high: number; low: number; close: number }[];
+  bars?: { date: string; high: number; low: number; close: number; open?: number }[];
 }
 
 // ---------------------------------------------------------------- results
 
 export type LabTradeLeg = { side: 'BUY' | 'SELL'; kind: 'CE' | 'PE' | 'FUT'; strike: number; expiry: string; lots: number; entry: number; exit: number; model: boolean; added?: string; closed?: string };
-export type LabExit = 'expiry' | 'days-left' | 'booked' | 'stop';
+export type LabExit = 'expiry' | 'days-left' | 'booked' | 'stop' | 'gap';
 export type LabTrade = {
   entry: string; exit: string; expiry: string; reason: LabExit;
   spotIn: number; spotOut: number; ivHigh: boolean | null; ivRank: number | null;
@@ -225,6 +234,7 @@ export function validateLab(s: LabStrategy): string | null {
   const e = s.exit;
   if (e.daysLeft != null && !(Number.isSafeInteger(e.daysLeft) && e.daysLeft >= 1)) return 'Days left must be a whole number of 1 or more';
   for (const v of [e.bookPct, e.stopRupees, e.stopCredit]) if (v != null && !(v > 0)) return 'Exit values must be above zero';
+  if (s.rebalance && !(s.rebalance.ratio > 1 && s.rebalance.ratio <= 10 && Number.isSafeInteger(s.rebalance.max) && s.rebalance.max >= 1 && s.rebalance.max <= 20)) return 'Rebalance: ratio above 1 (up to 10), 1 to 20 times';
   if (s.vixAbove != null && !(s.vixAbove >= 0 && s.vixAbove < 100)) return 'VIX percentile must be from 0 to 99';
   if (!(s.slippage >= 0 && s.slippage <= 50)) return 'Slippage must be from ₹0 to ₹50';
   for (const a of s.adjust ?? []) {
@@ -247,6 +257,7 @@ export async function runLab(s: LabStrategy, data: LabData): Promise<LabResult> 
   if (invalid) throw new LabError(invalid);
   const all = data.days;
   const weeks = data.bars ? weeklyBars(data.bars) : null;
+  const barOpen = new Map((data.bars ?? []).filter((b) => b.open).map((b) => [b.date, b.open!]));
   if (all.length < 2) throw new LabError('Not enough F&O history');
   const dates = all.map((d) => d.date), idx = new Map(dates.map((d, i) => [d, i])), day = new Map(all.map((d) => [d.date, d]));
   const first = (d: string) => { let lo = 0, hi = dates.length; while (lo < hi) { const m = (lo + hi) >> 1; if (dates[m] < d) lo = m + 1; else hi = m; } return dates[lo] ?? null; };
@@ -369,9 +380,38 @@ export async function runLab(s: LabStrategy, data: LabData): Promise<LabResult> 
       events.push({ date: t, text: lv ? `Watching ${w.swing} at ${(lv.price / 100).toFixed(0)} (weekly swing ${lv.kind}, week to ${lv.end})` : `No weekly swing ${w.swing} ${SWING_GAP_PCT}%+ away: that adjustment cannot fire` });
     };
     (s.adjust ?? []).forEach((x, a) => { if (x.after == null) arm(a, d, spot); });
+    // Break-evens of the sold legs: the highest sold call's strike + the entry credit per unit, the lowest sold put's − it.
+    const perUnit = credit / lot;
+    const breakEvens = () => {
+      const ce = open.filter((l) => l.q < 0 && l.kind === 'CE').map((l) => l.strike), pe = open.filter((l) => l.q < 0 && l.kind === 'PE').map((l) => l.strike);
+      return { up: ce.length ? Math.max(...ce) + perUnit : Infinity, down: pe.length ? Math.min(...pe) - perUnit : -Infinity };
+    };
+    const closeLeg = (l: Open, t: string, why: string) => {
+      const px = fill(l, -l.q, l.mark, t);
+      events.push({ date: t, text: `${why}: bought back ${Math.abs(l.q)} lot${Math.abs(l.q) > 1 ? 's' : ''} of ${legName(l)} at ₹${(px / 100).toFixed(2)}` });
+      l.lastExit = px; l.q = 0; l.closed = t;
+    };
+    let rebalances = 0;
     // ---- every close while open
     for (let j = idx.get(d)! + 1; j <= idx.get(end)!; j++) {
       const t = dates[j], sp = day.get(t)?.spotPaise;
+      const o = barOpen.get(t);
+      if (s.exit.gap && o) {
+        const be = breakEvens();
+        const prev = day.get(dates[j - 1])?.spotPaise; // a gap: the last close was inside the break-evens, the open is beyond
+        if (prev != null && prev < be.up && prev > be.down && (o >= be.up || o <= be.down)) {
+          let fromClose = 0;
+          for (const l of open) {
+            if (l.q === 0 || l.kind === 'FUT' || t > l.expiry) continue;
+            const rows = await chainOn(l.expiry, t), r = rows.find((x) => x.kind === l.kind && x.strikePaise === l.strike);
+            if (r?.traded && r.openPaise && r.openPaise > 0) l.mark = r.openPaise;
+            else { const v = boundedMark(rows, l.kind, l.strike, sp ?? 0); if (v != null) l.mark = v; fromClose++; }
+          }
+          events.push({ date: t, text: `Opened at ${(o / 100).toFixed(0)}, beyond the break-even ${o >= be.up ? (be.up / 100).toFixed(0) : (be.down / 100).toFixed(0)}: out at the open${fromClose ? ` (${fromClose} leg${fromClose > 1 ? 's' : ''} had no opening trade: priced at the close)` : ''}` });
+          exit = t; reason = 'gap';
+          break;
+        }
+      }
       for (const l of open) {
         if (l.q === 0 || t > l.expiry) continue;
         const v = l.kind === 'FUT' ? await futOn(l.expiry, t) : boundedMark(await chainOn(l.expiry, t), l.kind, l.strike, sp ?? 0);
@@ -411,6 +451,25 @@ export async function runLab(s: LabStrategy, data: LabData): Promise<LabResult> 
               open.push(l);
               events.push({ date: t, text: `${lots > 0 ? 'Bought' : 'Sold'} ${spec.lots} lot${spec.lots > 1 ? 's' : ''} of ${legName(l)} at ₹${(px / 100).toFixed(2)}` });
             }
+          }
+        }
+      }
+      if (!last && sp && s.rebalance && rebalances < s.rebalance.max) {
+        const ce = [...open].reverse().find((l) => l.q < 0 && l.kind === 'CE' && l.expiry >= t), pe = [...open].reverse().find((l) => l.q < 0 && l.kind === 'PE' && l.expiry >= t);
+        if (ce && pe && Math.max(ce.mark, pe.mark) >= s.rebalance.ratio * Math.max(1, Math.min(ce.mark, pe.mark))) {
+          const dear = ce.mark >= pe.mark ? ce : pe, cheap = dear === ce ? pe : ce;
+          const [out, target] = s.rebalance.mode === 'away' ? [dear, cheap.mark] : [cheap, dear.mark];
+          const spec: LabLeg = { side: 'SELL', kind: out.kind as 'CE' | 'PE', lots: Math.abs(out.q), strike: { by: 'premium', rupees: target / 100 }, expiry: out.spec.expiry };
+          const p = await pick(spec, t, sp, out.expiry);
+          if (typeof p !== 'string' && p.strike !== out.strike) {
+            rebalances++;
+            const lots = out.q;
+            closeLeg(out, t, `Rebalance (${(dear.mark / 100).toFixed(2)} vs ${(cheap.mark / 100).toFixed(2)})`);
+            const l: Open = { spec, kind: spec.kind, expiry: out.expiry, strike: p.strike, q: 0, entryPx: p.px, mark: p.px, model: p.model, added: t };
+            const px = fill(l, lots, p.px, t);
+            l.q = lots;
+            open.push(l);
+            events.push({ date: t, text: `Sold ${Math.abs(lots)} lot${Math.abs(lots) > 1 ? 's' : ''} of ${legName(l)} at ₹${(px / 100).toFixed(2)}` });
           }
         }
       }

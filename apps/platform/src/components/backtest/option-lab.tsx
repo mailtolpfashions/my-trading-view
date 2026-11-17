@@ -21,7 +21,7 @@ const NUM = 'num h-9 rounded-[10px] border border-line-strong bg-panel px-2 text
 const DRAFT = 'platform.optionLab.draft';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-const REASON: Record<LabTrade['reason'], string> = { expiry: 'Expiry', 'days-left': 'Days left', booked: 'Booked', stop: 'Stop' };
+const REASON: Record<LabTrade['reason'], string> = { expiry: 'Expiry', 'days-left': 'Days left', booked: 'Booked', stop: 'Stop', gap: 'Gap at open' };
 const tone = (v: number | null | undefined) => (!v ? '' : v > 0 ? 'text-up' : 'text-down');
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 /** An optional number box: blank = off. */
@@ -295,6 +295,24 @@ function ExitFields({ s, set }: { s: LabStrategy; set: (p: Partial<LabStrategy>)
         <span>or</span>
         <input type="number" min={0.1} step={0.5} placeholder="off" value={e.stopCredit ?? ''} onChange={(x) => setExit({ stopCredit: opt(x.target.value) })} aria-label="Stop at a loss of this many times the credit" className={`${NUM} w-[64px]`} />
         <span>× the credit</span>
+      </div>
+      <label className="flex flex-wrap items-center gap-2">
+        <input type="checkbox" checked={!!e.gap} onChange={(x) => setExit({ gap: x.target.checked || undefined })} className="h-4 w-4 accent-[var(--accent)]" />
+        <span>Exit at the open when the index gaps past the break-even</span>
+        <InfoTip label="Gap exit">After a close inside the break-evens (the sold strikes ± the entry credit), an open beyond one of them closes the trade at the options&apos; opening prices. A leg with no opening trade is priced at the close (shown in the trade&apos;s details).</InfoTip>
+      </label>
+      <div className="flex flex-wrap items-center gap-2">
+        <span>Rebalance when one sold leg is worth</span>
+        <input type="number" min={1.1} step={0.5} placeholder="off" value={s.rebalance?.ratio ?? ''} onChange={(x) => { const r = opt(x.target.value); set({ rebalance: r ? { ratio: r, mode: s.rebalance?.mode ?? 'away', max: s.rebalance?.max ?? 3 } : undefined }); }} aria-label="Rebalance ratio" className={`${NUM} w-[64px]`} />
+        <span>× the other</span>
+        {s.rebalance && <>
+          <select value={s.rebalance.mode} onChange={(x) => set({ rebalance: { ...s.rebalance!, mode: x.target.value as 'away' | 'closer' } })} aria-label="Rebalance how" className={SEL}>
+            <option value="away">push the dearer leg away</option><option value="closer">bring the cheaper leg closer</option>
+          </select>
+          <span>at most</span>
+          <input type="number" min={1} max={20} value={s.rebalance.max} onChange={(x) => set({ rebalance: { ...s.rebalance!, max: Math.max(1, Math.min(20, Math.floor(Number(x.target.value) || 1))) } })} aria-label="At most this many times" className={`${NUM} w-[58px]`} />
+          <span>times</span>
+        </>}
       </div>
     </div>
   );

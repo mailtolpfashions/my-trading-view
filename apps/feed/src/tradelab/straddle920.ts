@@ -8,6 +8,8 @@
 // Rule, log and entries: .userdata/tradelab-straddle920.json (git-ignored).
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { prisma } from '@mtv/db';
+import { computeOptionCharges } from '@mtv/paper';
 import { live } from '../intraday/instance';
 import { istDate, istMinute, type TradeLab } from './engine';
 import { kiteMarket, prismaRepo } from './live';
@@ -15,7 +17,16 @@ import { LabError } from './types';
 
 export type S920Rule = { id: string; name: string; enabled: boolean; underlying: 'NIFTY'; entry: string; exit: string; stopPct: number; lots: number; updatedAt: string };
 export type S920Leg = { symbol: string; label: string; kind: 'CE' | 'PE'; strikePaise: number; bidPaise: number; askPaise: number; orderId: string | null; fillPaise: number | null; stopPaise: number | null; stopOrderId: string | null };
-export type S920Entry = { date: string; expiry: string; dte: number; at: number; spotPaise: number; legs: S920Leg[]; closedAt: number | null; clean: boolean; note: string | null };
+/**
+ * The "breakout shift" version (rule 4 of the YouTube short-straddle series), tracked beside the real paper trade on the
+ * same live quotes without placing orders: the same 9:20 ATM straddle, no stop. When NIFTY breaks the last 2 sessions'
+ * high, buy back the call and sell a call priced at about half the put (lean with the breakout); below their low, the
+ * same with the put. If NIFTY comes back inside that range, buy back the shifted leg and sell the ATM one again. At most
+ * SHADOW_MAX shifts a day; everything is bought back at the exit time. Sells at the bid, buys at the ask, with charges.
+ */
+export type ShadowLeg = { symbol: string; label: string; kind: 'CE' | 'PE'; strikePaise: number; qty: number; sellPaise: number; sellAt: number; buyPaise: number | null; buyAt: number | null };
+export type S920Shadow = { rangeHighPaise: number; rangeLowPaise: number; state: 'neutral' | 'up' | 'down'; shifts: number; legs: ShadowLeg[]; events: { at: number; text: string }[]; chargesPaise: number; netPaise: number | null };
+export type S920Entry = { date: string; expiry: string; dte: number; at: number; spotPaise: number; legs: S920Leg[]; closedAt: number | null; clean: boolean; note: string | null; shadow?: S920Shadow | null };
 export type S920Event = { at: number; action: 'placed' | 'skipped' | 'error' | 'checked' | 'closed'; text: string };
 type Doc = { rule: S920Rule; events: S920Event[]; entries: S920Entry[] };
 
@@ -82,6 +93,11 @@ export async function s920Tick(lab: TradeLab, now = Math.floor(Date.now() / 1000
   if (!kiteMarket.isOpen(now)) return;
   const today = istDate(now), min = istMinute(now);
 
+  // 0. The breakout-shift shadow: follow today's open one on live quotes.
+  for (const e of d.entries.filter((x) => x.shadow && x.shadow.netPaise == null)) {
+    if (await shadowStep(e, rule, now, e.date !== today || min >= hm(rule.exit))) await save();
+  }
+
   // 1. Close: today's legs at the exit time; an older day's legs (app was off at the exit) at the first chance.
   for (const e of d.entries.filter((x) => x.closedAt == null)) {
     if (e.date === today && min < hm(rule.exit)) continue;
@@ -120,7 +136,13 @@ export async function s920Tick(lab: TradeLab, now = Math.floor(Date.now() / 1000
   if (inst.some((i) => !i)) { log('error', `ATM ${atm / 100} call or put is not tradable`, now); await save(); return; }
 
   // arm a minute early so the two strikes are streaming, then place at the entry time
-  if (armedOn !== today) { armedOn = today; armedAt = now; kiteMarket.watch(inst as NonNullable<(typeof inst)[number]>[]); return; }
+  if (armedOn !== today) {
+    armedOn = today; armedAt = now;
+    // the ATM pair, plus strikes within 4% for the shadow's shifts
+    const band = chainOf.filter((c) => Math.abs(c.strike * 100 - spot) <= spot * 0.04).map((c) => kiteMarket.instrument(c.tradingsymbol)).filter((i): i is NonNullable<typeof i> => !!i);
+    kiteMarket.watch([...(inst as NonNullable<(typeof inst)[number]>[]), ...band]);
+    return;
+  }
   if (min < hm(rule.entry) || now - armedAt < ARM_WAIT_SEC) return;
 
   const dte = weekdaysTo(today, expiry);
@@ -149,8 +171,93 @@ export async function s920Tick(lab: TradeLab, now = Math.floor(Date.now() / 1000
     }
   }
   if (!entry.legs.some((l) => l.fillPaise)) { entry.closedAt = now; entry.clean = false; entry.note = 'Nothing filled'; }
+  entry.shadow = await shadowStart(today, expiry, inst as NonNullable<(typeof inst)[number]>[], rule.lots, now).catch((err) => { log('error', `Breakout-shift version not started: ${(err as Error).message}`, now); return null; });
   d.entries.push(entry);
   await save();
+}
+
+// ---------------------------------------------------------------- the breakout-shift shadow
+
+const SHADOW_MAX = 4, BACK_IN = 0.001; // back inside the range by 0.1%, so one tick on the line is not a flip
+type Inst = NonNullable<ReturnType<typeof kiteMarket.instrument>>;
+const bidOf = (q: { bidPaise: number; ltpPaise: number }) => (q.bidPaise > 0 ? q.bidPaise : q.ltpPaise);
+const askOf = (q: { askPaise: number; ltpPaise: number }) => (q.askPaise > 0 ? q.askPaise : q.ltpPaise);
+
+/** The quote whose price is nearest `targetPaise` (ties: the one further from the money). */
+export function nearestPremium<T extends { strikePaise: number; pricePaise: number }>(list: T[], targetPaise: number, kind: 'CE' | 'PE'): T | null {
+  let best: T | null = null;
+  for (const x of list) {
+    if (!(x.pricePaise > 0)) continue;
+    const g = Math.abs(x.pricePaise - targetPaise), bg = best ? Math.abs(best.pricePaise - targetPaise) : Infinity;
+    if (g < bg || (g === bg && best && (kind === 'CE' ? x.strikePaise > best.strikePaise : x.strikePaise < best.strikePaise))) best = x;
+  }
+  return best;
+}
+
+async function shadowStart(today: string, expiry: string, inst: Inst[], lots: number, now: number): Promise<S920Shadow> {
+  const bars = await prisma.indexEod.findMany({ where: { name: 'NIFTY 50', date: { lt: today } }, orderBy: { date: 'desc' }, take: 2, select: { highPaise: true, lowPaise: true } });
+  if (bars.length < 2) throw new Error('no NIFTY high/low for the last 2 sessions');
+  const s: S920Shadow = { rangeHighPaise: Math.max(...bars.map((b) => b.highPaise)), rangeLowPaise: Math.min(...bars.map((b) => b.lowPaise)), state: 'neutral', shifts: 0, legs: [], events: [], chargesPaise: 0, netPaise: null };
+  for (const i of inst) {
+    const q = kiteMarket.quote(i);
+    if (!q) throw new Error(`no quote for ${i.label}`);
+    shadowSell(s, i, lots * i.lot, bidOf(q), now, today);
+  }
+  s.events.push({ at: now, text: `Range of the last 2 sessions ${(s.rangeLowPaise / 100).toFixed(0)}–${(s.rangeHighPaise / 100).toFixed(0)}; sold ${inst.map((i) => i.label).join(' and ')} (expiry ${expiry})` });
+  return s;
+}
+function shadowSell(s: S920Shadow, i: Inst, qty: number, px: number, now: number, date: string) {
+  s.legs.push({ symbol: i.symbol, label: i.label, kind: i.kind as 'CE' | 'PE', strikePaise: i.strikePaise, qty, sellPaise: px, sellAt: now, buyPaise: null, buyAt: null });
+  s.chargesPaise += computeOptionCharges({ side: 'SELL', qty, premiumPaise: px, date }).total;
+}
+function shadowBuy(s: S920Shadow, l: ShadowLeg, px: number, now: number, date: string) {
+  l.buyPaise = px; l.buyAt = now;
+  s.chargesPaise += computeOptionCharges({ side: 'BUY', qty: l.qty, premiumPaise: px, date }).total;
+}
+
+/** One step of the shadow on live quotes. `closing`: buy everything back (exit time, or a later day). Returns true if it changed. */
+async function shadowStep(e: S920Entry, rule: S920Rule, now: number, closing: boolean): Promise<boolean> {
+  const s = e.shadow!, date = istDate(now);
+  const openLeg = (kind: 'CE' | 'PE') => s.legs.find((l) => l.kind === kind && l.buyPaise == null);
+  if (closing) {
+    for (const l of s.legs.filter((x) => x.buyPaise == null)) {
+      const i = kiteMarket.instrument(l.symbol), q = i && kiteMarket.quote(i);
+      if (!q) return false; // try again on the next tick
+      shadowBuy(s, l, askOf(q), now, date);
+    }
+    s.netPaise = s.legs.reduce((a, l) => a + (l.sellPaise - (l.buyPaise ?? 0)) * l.qty, 0) - s.chargesPaise;
+    s.events.push({ at: now, text: `${e.date === date ? rule.exit : 'Late'} exit: net ${(s.netPaise / 100).toFixed(0)} after charges` });
+    return true;
+  }
+  if (s.shifts >= SHADOW_MAX) return false;
+  const spot = kiteMarket.underlyingPrice(rule.underlying), k = live.kite();
+  if (spot == null || !k) return false;
+  const quotes = (kind: 'CE' | 'PE') => k.nfoContracts(rule.underlying).filter((c) => c.expiry === e.expiry && c.kind === kind)
+    .map((c) => { const i = kiteMarket.instrument(c.tradingsymbol), q = i && kiteMarket.quote(i); return i && q && q.at >= now - 120 ? { i, strikePaise: c.strike * 100, pricePaise: bidOf(q) } : null; })
+    .filter((x): x is NonNullable<typeof x> => !!x);
+  const swap = (kind: 'CE' | 'PE', pickNew: (list: ReturnType<typeof quotes>) => ReturnType<typeof quotes>[number] | null, why: string, state: S920Shadow['state']) => {
+    const old = openLeg(kind), oi = old && kiteMarket.instrument(old.symbol), oq = oi && kiteMarket.quote(oi);
+    const next = pickNew(quotes(kind));
+    if (!old || !oq || !next || next.i.symbol === old.symbol) return false;
+    shadowBuy(s, old, askOf(oq), now, date);
+    shadowSell(s, next.i, old.qty, next.pricePaise, now, date);
+    s.shifts++; s.state = state;
+    s.events.push({ at: now, text: `${why} (NIFTY ${(spot / 100).toFixed(0)}): bought back ${old.label} at ₹${(askOf(oq) / 100).toFixed(2)}, sold ${next.i.label} at ₹${(next.pricePaise / 100).toFixed(2)}` });
+    return true;
+  };
+  const half = (kind: 'CE' | 'PE') => { const o = openLeg(kind === 'CE' ? 'PE' : 'CE'), i = o && kiteMarket.instrument(o.symbol), q = i && kiteMarket.quote(i); return q ? bidOf(q) / 2 : null; };
+  const atm = (list: ReturnType<typeof quotes>) => list.reduce<ReturnType<typeof quotes>[number] | null>((b, x) => (!b || Math.abs(x.strikePaise - spot) < Math.abs(b.strikePaise - spot) ? x : b), null);
+  if (s.state === 'neutral' && spot > s.rangeHighPaise) {
+    const t = half('CE');
+    return t != null && swap('CE', (l) => nearestPremium(l.filter((x) => x.strikePaise > spot), t, 'CE'), `Broke above ${(s.rangeHighPaise / 100).toFixed(0)}`, 'up');
+  }
+  if (s.state === 'neutral' && spot < s.rangeLowPaise) {
+    const t = half('PE');
+    return t != null && swap('PE', (l) => nearestPremium(l.filter((x) => x.strikePaise < spot), t, 'PE'), `Broke below ${(s.rangeLowPaise / 100).toFixed(0)}`, 'down');
+  }
+  if (s.state === 'up' && spot < s.rangeHighPaise * (1 - BACK_IN)) return swap('CE', atm, `Back inside below ${(s.rangeHighPaise / 100).toFixed(0)}: false breakout`, 'neutral');
+  if (s.state === 'down' && spot > s.rangeLowPaise * (1 + BACK_IN)) return swap('PE', atm, `Back inside above ${(s.rangeLowPaise / 100).toFixed(0)}: false breakout`, 'neutral');
+  return false;
 }
 
 // ---------------------------------------------------------------- the report
@@ -160,6 +267,8 @@ export type S920Report = {
   days: (Omit<S920Entry, 'legs'> & { legs: (S920Leg & { exitPaise: number | null; how: 'stop' | 'time' | 'open' | null })[]; netPaise: number | null; chargesPaise: number })[];
   byDte: { dte: number; days: number; won: number; netPaise: number; worstPaise: number }[];
   totals: { days: number; clean: number; won: number; netPaise: number; chargesPaise: number; stopsHit: number; bothStopped: number };
+  /** The breakout-shift shadow on the same clean days. */
+  shadow: { days: number; won: number; netPaise: number; shifts: number; byDte: { dte: number; days: number; won: number; netPaise: number; worstPaise: number }[] };
 };
 
 export async function s920Report(): Promise<S920Report> {
@@ -192,6 +301,11 @@ export async function s920Report(): Promise<S920Report> {
   }
   const stops = clean.flatMap((x) => x.legs).filter((l) => l.how === 'stop').length;
   return {
+    shadow: (() => {
+      const sh = clean.filter((x) => x.shadow?.netPaise != null), m = new Map<number, { dte: number; days: number; won: number; netPaise: number; worstPaise: number }>();
+      for (const x of sh) { const n = x.shadow!.netPaise!, r = m.get(x.dte) ?? { dte: x.dte, days: 0, won: 0, netPaise: 0, worstPaise: 0 }; r.days++; if (n > 0) r.won++; r.netPaise += n; r.worstPaise = Math.min(r.worstPaise, n); m.set(x.dte, r); }
+      return { days: sh.length, won: sh.filter((x) => x.shadow!.netPaise! > 0).length, netPaise: sh.reduce((a, x) => a + x.shadow!.netPaise!, 0), shifts: sh.reduce((a, x) => a + x.shadow!.shifts, 0), byDte: [...m.values()].sort((a, b) => a.dte - b.dte) };
+    })(),
     rule: d.rule, days: days.reverse(), byDte: [...by.values()].sort((a, b) => a.dte - b.dte),
     totals: { days: days.length, clean: clean.length, won: clean.filter((x) => x.netPaise! > 0).length, netPaise: clean.reduce((a, x) => a + x.netPaise!, 0), chargesPaise: clean.reduce((a, x) => a + x.chargesPaise, 0), stopsHit: stops, bothStopped: clean.filter((x) => x.legs.every((l) => l.how === 'stop')).length },
   };

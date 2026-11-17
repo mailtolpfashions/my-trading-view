@@ -58,19 +58,31 @@ export function Straddle920Panel() {
         <span>Net after charges <b className={tone(t.netPaise)}>{signedInr(t.netPaise)}</b> (charges {inr(t.chargesPaise)})</span>
       </p>
 
+      <p className="num mt-1 flex flex-wrap items-center gap-x-4 text-[12.5px] text-muted">
+        <span className="flex items-center gap-1">Breakout-shift version <InfoTip label="Breakout-shift version">
+          <p>Tracked beside the real paper trade on the same live prices, without placing orders: the same 9:20 straddle with no stop. If NIFTY breaks the last 2 sessions&rsquo; high, the call is bought back and a call priced at about half the put is sold; below their low, the same with the put. Back inside the range, the shifted leg returns to ATM. At most 4 shifts a day; everything is bought back at {r.exit}. Sells at the bid, buys at the ask, with charges.</p>
+          <p>This is rule 5 of the YouTube short-straddle series, to compare with the 20% stops.</p>
+        </InfoTip></span>
+        <span>Days {data.shadow.days}, won {data.shadow.won}, shifts {data.shadow.shifts}</span>
+        <span>Net after charges <b className={tone(data.shadow.netPaise)}>{signedInr(data.shadow.netPaise)}</b></span>
+      </p>
+
       {data.byDte.length > 0 && (
         <table className="num mt-2 w-full text-[12.5px]">
-          <thead><tr className="text-left text-muted"><th>Days to expiry</th><th className="text-right">Days</th><th className="text-right">Won</th><th className="text-right">Net</th><th className="text-right">Worst day</th></tr></thead>
-          <tbody>{data.byDte.map((b) => (
-            <tr key={b.dte} className="border-t border-line"><td>{DTE(b.dte)}</td><td className="text-right">{b.days}</td><td className="text-right">{b.won}</td><td className={`text-right font-semibold ${tone(b.netPaise)}`}>{signedInr(b.netPaise)}</td><td className={`text-right ${tone(b.worstPaise)}`}>{b.worstPaise < 0 ? signedInr(b.worstPaise) : '—'}</td></tr>
-          ))}</tbody>
+          <thead><tr className="text-left text-muted"><th>Days to expiry</th><th className="text-right">Days</th><th className="text-right">Won</th><th className="text-right">Net</th><th className="text-right">Worst day</th><th className="text-right">Breakout-shift net</th></tr></thead>
+          <tbody>{data.byDte.map((b) => {
+            const sh = data.shadow.byDte.find((x) => x.dte === b.dte);
+            return (
+              <tr key={b.dte} className="border-t border-line"><td>{DTE(b.dte)}</td><td className="text-right">{b.days}</td><td className="text-right">{b.won}</td><td className={`text-right font-semibold ${tone(b.netPaise)}`}>{signedInr(b.netPaise)}</td><td className={`text-right ${tone(b.worstPaise)}`}>{b.worstPaise < 0 ? signedInr(b.worstPaise) : '—'}</td><td className={`text-right ${sh ? tone(sh.netPaise) : ''}`}>{sh ? signedInr(sh.netPaise) : '—'}</td></tr>
+            );
+          })}</tbody>
         </table>
       )}
 
       {data.days.length > 0 && (
         <div className="mt-2 max-h-[300px] overflow-auto">
           <table className="num w-full text-[12.5px]">
-            <thead><tr className="text-left text-muted"><th>Day</th><th>Expiry</th><th>Leg</th><th className="text-right">Sold</th><th className="text-right">Stop</th><th className="text-right">Bought back</th><th>How</th><th className="text-right">Net</th></tr></thead>
+            <thead><tr className="text-left text-muted"><th>Day</th><th>Expiry</th><th>Leg</th><th className="text-right">Sold</th><th className="text-right">Stop</th><th className="text-right">Bought back</th><th>How</th><th className="text-right">Net</th><th className="text-right">Shift version</th></tr></thead>
             <tbody>
               {data.days.flatMap((d) => d.legs.map((l, i) => (
                 <tr key={`${d.date}-${l.symbol}`} className="border-t border-line" title={d.note ?? undefined}>
@@ -78,6 +90,7 @@ export function Straddle920Panel() {
                   <td>{l.label}</td><td className="text-right">{inr(l.fillPaise)}</td><td className="text-right">{inr(l.stopPaise)}</td><td className="text-right">{inr(l.exitPaise)}</td>
                   <td>{l.how ? HOW[l.how] : '—'}</td>
                   <td className={`text-right ${i === 0 && d.netPaise != null ? tone(d.netPaise) : ''}`}>{i === 0 ? (!d.clean ? 'left out' : d.netPaise == null ? 'open' : signedInr(d.netPaise)) : ''}</td>
+                  <td className={`text-right ${i === 0 && d.shadow?.netPaise != null ? tone(d.shadow.netPaise) : ''}`} title={i === 0 && d.shadow ? d.shadow.events.map((x) => x.text).join('\n') : undefined}>{i === 0 ? (!d.shadow ? '—' : d.shadow.netPaise == null ? `open (${d.shadow.shifts} shift${d.shadow.shifts === 1 ? '' : 's'})` : signedInr(d.shadow.netPaise)) : ''}</td>
                 </tr>
               )))}
             </tbody>
