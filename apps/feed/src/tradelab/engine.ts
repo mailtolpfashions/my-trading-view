@@ -80,7 +80,7 @@ export class TradeLab {
     const dir = input.side === 'BUY' ? 1 : -1;
     const entry = net === 0 || Math.sign(net) === dir || Math.abs(input.qty) > Math.abs(net); // adds to (or flips) the position
     if (!system && entry) {
-      if (min < hm(s.firstEntry)) throw new LabError(`No new trades before ${s.firstEntry} (your trading window)`);
+      if (min < hm(s.firstEntry) && !input.ignoreWindow) throw new LabError(`No new trades before ${s.firstEntry} (your trading window)`);
       if (input.product === 'MIS' && min >= hm(s.squareOff)) throw new LabError(`No new intraday trades from ${s.squareOff}: intraday positions close then`);
       if (i.expiry && i.expiry < date) throw new LabError(`${i.label} has expired`);
     }

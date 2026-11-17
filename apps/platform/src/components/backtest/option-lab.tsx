@@ -116,6 +116,11 @@ export function OptionLab() {
               options={[{ value: 'any', label: 'Any IV' }, { value: 'high', label: 'High IV' }, { value: 'top-third', label: 'Top third' }, { value: 'low', label: 'Low IV' }]} />
           </Row>
 
+          <Row label="India VIX" tip="India VIX on the entry day, ranked against its previous 252 sessions (about a year). Above 75% = higher than 75% of the past year. Checked at entry only.">
+            <Segmented label="India VIX filter" value={s.vixAbove == null ? 'any' : String(s.vixAbove)} onChange={(v) => set({ vixAbove: v === 'any' ? undefined : Number(v) })}
+              options={[{ value: 'any', label: 'Any' }, { value: '25', label: 'Above 25%' }, { value: '50', label: 'Above 50%' }, { value: '75', label: 'Above 75%' }]} />
+          </Row>
+
           <Row label="Legs" tip="Delta picks the traded strike whose delta is nearest. % and points count from the index at entry. A strike must have traded that day, or the trade is skipped (see More settings).">
             <div className="grid w-full gap-2">
               {legs.map((l, i) => <LegRow key={i} i={i} leg={l} onChange={(x) => setLeg(i, x)} onRemove={legs.length > 1 ? () => set({ legs: legs.filter((_, k) => k !== i), adjust: undefined }) : undefined} />)}
@@ -138,6 +143,13 @@ export function OptionLab() {
               ))}
               <button type="button" onClick={() => set({ adjust: [...(s.adjust ?? []), { when: { leg: 0 }, dir: legs[0]?.kind === 'PE' ? 'down' : 'up', actions: [{ close: 0, lots: 1 }] }] })}
                 className="inline-flex h-9 items-center gap-1.5 justify-self-start rounded-[10px] px-2 text-[13px] font-semibold text-ink-2 hover:bg-raised hover:text-ink"><Plus size={15} /> Add adjustment</button>
+              {(s.adjust ?? []).length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                  <span>Check adjustments at</span>
+                  <Segmented label="Check adjustments at" value={s.check ?? 'daily'} onChange={(check) => set({ check: check === 'weekly' ? 'weekly' : undefined })} options={[{ value: 'daily', label: 'Every close' }, { value: 'weekly', label: 'Weekly close' }]} />
+                  <InfoTip label="Support and resistance">Support and resistance are weekly swing points known at the time: a week whose low (or high) is beyond the 3 weeks on each side, from the last 2 years, at least 3% from the index. Support is the nearest one below, resistance the nearest above; an old swing high below the index counts as support. They are set when the adjustment becomes active, and each trade&apos;s details show the level and when it broke.</InfoTip>
+                </div>
+              )}
             </div>
           </Row>
 
@@ -297,7 +309,7 @@ function legChoices(s: LabStrategy, upTo: number): { i: number; name: string; ki
 
 function AdjustRow({ k, a, s, onChange, onRemove }: { k: number; a: LabAdjust; s: LabStrategy; onChange: (a: LabAdjust) => void; onRemove: () => void }) {
   const choices = legChoices(s, k);
-  const whenValue = 'leg' in a.when ? `leg:${a.when.leg}` : 'pct';
+  const whenValue = 'leg' in a.when ? `leg:${a.when.leg}` : 'swing' in a.when ? `swing:${a.when.swing}` : 'pct';
   const setAct = (j: number, act: LabAdjust['actions'][number]) => onChange({ ...a, actions: a.actions.map((x, i) => (i === j ? act : x)) });
   const idx = s.underlying === 'NIFTY' ? 'NIFTY' : 'Bank Nifty';
   return (
@@ -306,9 +318,11 @@ function AdjustRow({ k, a, s, onChange, onRemove }: { k: number; a: LabAdjust; s
         <span className="num w-6 shrink-0 text-[12.5px] font-bold text-muted">#{k + 1}</span>
         <span>When {idx} closes</span>
         <select value={a.dir} onChange={(e) => onChange({ ...a, dir: e.target.value as 'up' | 'down' })} aria-label="Direction" className={SEL}><option value="up">at or above</option><option value="down">at or below</option></select>
-        <select value={whenValue} onChange={(e) => onChange({ ...a, when: e.target.value === 'pct' ? { pct: a.dir === 'down' ? -5 : 5 } : { leg: Number(e.target.value.slice(4)) } })} aria-label="Level" className={`${SEL} max-w-[16rem]`}>
+        <select value={whenValue} onChange={(e) => { const v = e.target.value; onChange(v.startsWith('swing:') ? { ...a, when: { swing: v.slice(6) as 'support' | 'resistance' }, dir: v === 'swing:support' ? 'down' : 'up' } : { ...a, when: v === 'pct' ? { pct: a.dir === 'down' ? -5 : 5 } : { leg: Number(v.slice(4)) } }); }} aria-label="Level" className={`${SEL} max-w-[16rem]`}>
           {choices.filter((c) => c.kind !== 'FUT').map((c) => <option key={c.i} value={`leg:${c.i}`}>{c.name.split(':')[0]}&apos;s strike</option>)}
           <option value="pct">a % from entry</option>
+          <option value="swing:support">the support (weekly swing)</option>
+          <option value="swing:resistance">the resistance (weekly swing)</option>
         </select>
         {'pct' in a.when && <><input type="number" step={0.5} value={a.when.pct} onChange={(e) => onChange({ ...a, when: { pct: Number(e.target.value) } })} aria-label="% from entry" className={`${NUM} w-[70px]`} /><span>%</span></>}
         {k > 0 && (
@@ -337,8 +351,10 @@ function AdjustRow({ k, a, s, onChange, onRemove }: { k: number; a: LabAdjust; s
             <input type="number" min={1} value={act.add.lots} onChange={(e) => setAct(j, { add: { ...act.add, lots: Math.max(1, Math.floor(Number(e.target.value) || 1)) } })} aria-label="Lots" className={`${NUM} w-[58px]`} />
             <select value={act.add.kind} onChange={(e) => setAct(j, { add: { ...act.add, kind: e.target.value as 'CE' | 'PE' } })} aria-label="Call or put" className={SEL}><option value="CE">Call</option><option value="PE">Put</option></select>
             <span>at</span>
-            <input type="number" step={0.5} value={act.add.strike.by === 'pct' ? act.add.strike.pct : 0} onChange={(e) => setAct(j, { add: { ...act.add, strike: { by: 'pct', pct: Number(e.target.value) } } })} aria-label="% from the entry index" className={`${NUM} w-[70px]`} />
-            <span>% from entry</span>
+            <input type="number" step={0.5} value={act.add.strike.by === 'pct' ? act.add.strike.pct : 0} onChange={(e) => setAct(j, { add: { ...act.add, strike: { by: 'pct', pct: Number(e.target.value), from: act.add.strike.by === 'pct' ? act.add.strike.from : undefined } } })} aria-label="Strike distance in %" className={`${NUM} w-[70px]`} />
+            <select value={act.add.strike.by === 'pct' && act.add.strike.from === 'now' ? 'now' : 'entry'} onChange={(e) => setAct(j, { add: { ...act.add, strike: { by: 'pct', pct: act.add.strike.by === 'pct' ? act.add.strike.pct : 0, from: e.target.value === 'now' ? 'now' : undefined } } })} aria-label="Counted from" className={SEL}>
+              <option value="entry">% from the entry index</option><option value="now">% from the index then</option>
+            </select>
           </>}
           {a.actions.length > 1 && <button type="button" onClick={() => onChange({ ...a, actions: a.actions.filter((_, i) => i !== j) })} aria-label="Remove this action" className="grid h-8 w-8 place-items-center rounded-[8px] text-muted hover:text-down"><X size={14} /></button>}
         </div>
@@ -385,6 +401,35 @@ function MoreSettings({ s, set }: { s: LabStrategy; set: (p: Partial<LabStrategy
 
 // ---------------------------------------------------------------- results
 
+function MonteCarlo({ mc, money, trades }: { mc: LabResponse['result']['monteCarlo']; money: LabStrategy['money']; trades: number }) {
+  const tip = (
+    <InfoTip label="Monte Carlo" className="ml-1">
+      <p>The real trades are drawn at random, with repeats, into {mc?.runs.toLocaleString('en-IN') ?? '10,000'} new histories of the same length. Each history is a different order of luck; the falls below are read from all of them.</p>
+      <p>Capital needed keeps the 1-in-20 worst fall within 20% of it. It only reorders what happened: a move bigger than the worst real trade (a large gap) is not in it, so keep a buffer.</p>
+    </InfoTip>
+  );
+  if (!mc) {
+    return (
+      <Card title={<>Risk check{tip}</>}>
+        <p className="text-[13.5px] text-ink-2">{money !== 'today' ? 'Shown when money is at today’s size (More settings).' : `Needs at least 20 trades; this run has ${trades}.`}</p>
+      </Card>
+    );
+  }
+  return (
+    <Card title={<>Risk check{tip}</>}>
+      <p className="text-[15px] text-ink">
+        Keep about <b>{lakh(mc.capital)}</b> per set of lots{mc.returnPct != null && <> · that is <b className={tone(mc.returnPct)}>{mc.returnPct.toFixed(1)}% a year</b> on it</>}
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Stat label="Typical worst fall" value={inr(mc.typicalFall)} cls="text-down" tip="Half the random histories fell less than this from a peak, half more." />
+        <Stat label="1 in 20 worse than" value={inr(mc.fall1in20)} cls="text-down" />
+        <Stat label="1 in 100 worse than" value={inr(mc.fall1in100)} cls="text-down" />
+        <Stat label="Chance a year loses" value={`${mc.losingYearPct}%`} />
+      </div>
+    </Card>
+  );
+}
+
 function Results({ res, ran }: { res: LabResponse; ran: LabStrategy }) {
   const { result: r, preview, margin } = res;
   const m = r.summary;
@@ -421,6 +466,8 @@ function Results({ res, ran }: { res: LabResponse; ran: LabStrategy }) {
           <Stat label="Worst point while open" value={inr(m.worstMtm)} cls="text-down" tip="The lowest a trade stood at any close before it ended: what you would have had to sit through." />
         </div>
       </Card>
+
+      <MonteCarlo mc={r.monteCarlo} money={ran.money} trades={m.trades} />
 
       <Card title="Year by year">
         <table className="num w-full text-[13.5px]">
@@ -487,7 +534,7 @@ function Results({ res, ran }: { res: LabResponse; ran: LabStrategy }) {
                             <p key={j}><span className={l.side === 'BUY' ? 'text-up' : 'text-down'}>{l.side === 'BUY' ? 'Buy' : 'Sell'}</span> {l.lots} {l.kind === 'FUT' ? 'future' : `${l.strike} ${l.kind}`} ({fmtDate(l.expiry)}): ₹{l.entry.toFixed(2)} → ₹{l.exit.toFixed(2)}{l.added ? ` · added ${fmtDate(l.added)}` : ''}{l.closed ? ` · closed ${fmtDate(l.closed)}` : ''}{l.model ? ' · settlement price' : ''}</p>
                           ))}
                           {t.events.map((ev, j) => <p key={`e${j}`} className="text-ink">{fmtDate(ev.date)}: {ev.text}</p>)}
-                          <p className="mt-1 text-muted">Credit {inr(t.credit)} · charges {inr(t.charges)}{t.ivRank != null ? ` · IV rank ${Math.round(t.ivRank * 100)}%` : ''}</p>
+                          <p className="mt-1 text-muted">Credit {inr(t.credit)} · charges {inr(t.charges)}{t.ivRank != null ? ` · IV rank ${Math.round(t.ivRank * 100)}%` : ''}{t.vix != null ? ` · India VIX ${t.vix.toFixed(1)}${t.vixRank != null ? ` (${Math.round(t.vixRank * 100)}%)` : ''}` : ''}</p>
                         </td>
                       </tr>
                     )}

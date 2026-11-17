@@ -121,6 +121,8 @@ export type PlaceInput = {
   targetPaise?: number;
   source?: string;
   reason?: string;
+  /** For a rule that tests someone else's timings (e.g. the 9:20 straddle): allow an entry before the window's first entry. */
+  ignoreWindow?: boolean;
 };
 
 export class LabError extends Error {}

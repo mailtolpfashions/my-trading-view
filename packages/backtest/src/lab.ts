@@ -24,7 +24,8 @@ export type LabStrike =
   | { by: 'atm' }
   | { by: 'forward' }
   | { by: 'delta'; delta: number }
-  | { by: 'pct'; pct: number }
+  /** `from: 'now'` (legs added in an adjustment): count from the index at that close instead of the entry. */
+  | { by: 'pct'; pct: number; from?: 'entry' | 'now' }
   | { by: 'points'; points: number }
   | { by: 'premium'; rupees: number };
 
@@ -48,7 +49,7 @@ export type LabAction = { close: number; lots: number } | { add: LabLeg };
  * `when.leg` = that leg's strike; `when.pct` = this % from the entry's reference (see distanceFrom). `dir` = at or above (up) / at or below.
  * `after` = only once adjustment number `after` has been done. Leg numbers count the starting legs, then added ones.
  */
-export type LabAdjust = { when: { leg: number } | { pct: number }; dir: 'up' | 'down'; after?: number; actions: LabAction[] };
+export type LabAdjust = { when: { leg: number } | { pct: number } | { swing: 'support' | 'resistance' }; dir: 'up' | 'down'; after?: number; actions: LabAction[] };
 
 export type LabStrategy = {
   name: string;
@@ -57,9 +58,13 @@ export type LabStrategy = {
   legs: LabLeg[];
   /** Trade only when the ATM IV (25 to 60 days out) is: above its past-year median, in its top third, or at/below the median. */
   iv: 'any' | 'high' | 'top-third' | 'low';
+  /** Trade only when India VIX at entry is above this percentile (0–100) of the previous 252 sessions. Off when unset. */
+  vixAbove?: number;
   /** No `daysLeft`: hold to the trade's expiry. `bookPct`: % of the entry credit earned. `stopCredit`: a loss of this × credit. */
   exit: { daysLeft?: number; bookPct?: number; stopRupees?: number; stopCredit?: number };
   adjust?: LabAdjust[];
+  /** When adjustments are checked: every close (default) or only the week's last close (a weekly chart). */
+  check?: 'daily' | 'weekly';
   /** What % and point distances (and adjustment levels) count from: the index at entry, or the entry's ATM strike. */
   distanceFrom?: 'index' | 'atm';
   /** A strike that did not trade on the entry day: skip the trade, or use NSE's (capped) settlement price. */
@@ -90,6 +95,10 @@ export interface LabData {
   futures(expiry: string, from: string, to: string): Promise<Map<string, number>>;
   /** ATM IV history (one reading a day), for the IV filter. */
   iv: IvPoint[];
+  /** India VIX closes, for the VIX filter. */
+  vix?: IvPoint[];
+  /** The index's daily bars (paise), for weekly swing support and resistance. */
+  bars?: { date: string; high: number; low: number; close: number }[];
 }
 
 // ---------------------------------------------------------------- results
@@ -99,6 +108,8 @@ export type LabExit = 'expiry' | 'days-left' | 'booked' | 'stop';
 export type LabTrade = {
   entry: string; exit: string; expiry: string; reason: LabExit;
   spotIn: number; spotOut: number; ivHigh: boolean | null; ivRank: number | null;
+  /** India VIX at entry and its percentile (0–1) against the previous 252 sessions. */
+  vix?: number | null; vixRank?: number | null;
   legs: LabTradeLeg[]; events: { date: string; text: string }[];
   /** ₹: the entry credit (negative = a debit), money after charges, charges, and the worst close while open. */
   credit: number; net: number; charges: number; worstMtm: number; worstMtmOn: string;
@@ -120,6 +131,15 @@ export type LabResult = {
   from: string; to: string;
   /** For `money: 'today'`: the index close and lot size the money is scaled to. */
   today: { date: string; spot: number; lot: number };
+  /** Random reorderings of the real trades (money at today's size, 20+ trades); null otherwise. */
+  monteCarlo: LabMonteCarlo | null;
+};
+
+/** ₹ falls are negative. `capital`: money that keeps the 1-in-20 worst fall within 20%. */
+export type LabMonteCarlo = {
+  runs: number; trades: number; perYear: number;
+  typicalFall: number; fall1in20: number; fall1in100: number;
+  losingYearPct: number; capital: number; returnPct: number | null;
 };
 
 export class LabError extends Error {}
@@ -130,6 +150,63 @@ const R = Math.round;
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
 const daysBetween = (a: string, b: string) => (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / DAY;
 const weekday = (d: string) => new Date(`${d}T00:00:00Z`).getUTCDay();
+
+/**
+ * India VIX percentile (0–1) on `d` against the previous 252 readings, or null when those readings do not form about one
+ * year (our VIX history has gaps: 2012 has 35 days, 2013 one), so the filter skips years it cannot judge.
+ */
+function vixRankOn(vix: IvPoint[], d: string): number | null {
+  const i = vix.findIndex((p) => p.date >= d);
+  if (i < 252 || vix[i].date !== d) return null;
+  if (daysBetween(vix[i - 252].date, d) > 400) return null;
+  return ivRank(vix, d, 252);
+}
+
+// ---------------------------------------------------------------- weekly swing support and resistance
+
+/** A week's bar: the week's high, low and last close, ending on its last trading day. */
+type Week = { end: string; high: number; low: number; close: number };
+/**
+ * A week is a swing low (high) when its low (high) is beyond the SWING_WEEKS weeks on each side; it is known only once
+ * those later weeks have closed. Levels come from the last SWING_LOOKBACK weeks and must be SWING_GAP_PCT away.
+ */
+export const SWING_WEEKS = 3, SWING_LOOKBACK = 104, SWING_GAP_PCT = 3;
+export function weeklyBars(bars: { date: string; high: number; low: number; close: number }[]): Week[] {
+  const out: Week[] = [];
+  let key = '';
+  for (const b of bars) {
+    const k = mondayOf(b.date);
+    if (k !== key) { out.push({ end: b.date, high: b.high, low: b.low, close: b.close }); key = k; }
+    else { const w = out[out.length - 1]; w.end = b.date; w.high = Math.max(w.high, b.high); w.low = Math.min(w.low, b.low); w.close = b.close; }
+  }
+  return out;
+}
+/** Swing highs and lows known on `asOf` (their confirming weeks have closed). */
+export function swingsKnown(weeks: Week[], asOf: string): { end: string; price: number; kind: 'high' | 'low' }[] {
+  const n = SWING_WEEKS, out: { end: string; price: number; kind: 'high' | 'low' }[] = [];
+  let last = weeks.length - 1;
+  while (last >= 0 && weeks[last].end > asOf) last--;
+  for (let i = Math.max(n, last - SWING_LOOKBACK); i + n <= last; i++) {
+    const w = weeks[i], around = [...weeks.slice(i - n, i), ...weeks.slice(i + 1, i + n + 1)];
+    if (around.every((x) => w.high > x.high)) out.push({ end: w.end, price: w.high, kind: 'high' });
+    if (around.every((x) => w.low < x.low)) out.push({ end: w.end, price: w.low, kind: 'low' });
+  }
+  return out;
+}
+/**
+ * Support = the nearest swing level (a high or a low: old resistance counts) at least SWING_GAP_PCT below the index;
+ * resistance = the nearest at least that far above. Null when there is none (e.g. at an all-time high).
+ */
+export function swingLevel(weeks: Week[], asOf: string, refPaise: number, side: 'support' | 'resistance'): { price: number; end: string; kind: 'high' | 'low' } | null {
+  const gap = refPaise * (SWING_GAP_PCT / 100);
+  let best: { price: number; end: string; kind: 'high' | 'low' } | null = null;
+  for (const x of swingsKnown(weeks, asOf)) {
+    if (side === 'support' ? x.price > refPaise - gap : x.price < refPaise + gap) continue;
+    if (!best || (side === 'support' ? x.price > best.price : x.price < best.price)) best = x;
+  }
+  return best;
+}
+const mondayOf = (d: string) => { const t = Date.parse(`${d}T00:00:00Z`), w = (new Date(t).getUTCDay() + 6) % 7; return new Date(t - w * DAY).toISOString().slice(0, 10); };
 
 export function validateLab(s: LabStrategy): string | null {
   if (!s.legs.length) return 'Add at least one leg';
@@ -148,10 +225,12 @@ export function validateLab(s: LabStrategy): string | null {
   const e = s.exit;
   if (e.daysLeft != null && !(Number.isSafeInteger(e.daysLeft) && e.daysLeft >= 1)) return 'Days left must be a whole number of 1 or more';
   for (const v of [e.bookPct, e.stopRupees, e.stopCredit]) if (v != null && !(v > 0)) return 'Exit values must be above zero';
+  if (s.vixAbove != null && !(s.vixAbove >= 0 && s.vixAbove < 100)) return 'VIX percentile must be from 0 to 99';
   if (!(s.slippage >= 0 && s.slippage <= 50)) return 'Slippage must be from ₹0 to ₹50';
   for (const a of s.adjust ?? []) {
     if (!a.actions.length) return 'An adjustment needs at least one action';
     if ('leg' in a.when && !(a.when.leg >= 0 && a.when.leg < s.legs.length + 6)) return 'An adjustment points at a leg that does not exist';
+    if ('swing' in a.when && a.when.swing !== 'support' && a.when.swing !== 'resistance') return 'Pick support or resistance';
   }
   return null;
 }
@@ -167,13 +246,17 @@ export async function runLab(s: LabStrategy, data: LabData): Promise<LabResult> 
   const invalid = validateLab(s);
   if (invalid) throw new LabError(invalid);
   const all = data.days;
+  const weeks = data.bars ? weeklyBars(data.bars) : null;
   if (all.length < 2) throw new LabError('Not enough F&O history');
   const dates = all.map((d) => d.date), idx = new Map(dates.map((d, i) => [d, i])), day = new Map(all.map((d) => [d.date, d]));
   const first = (d: string) => { let lo = 0, hi = dates.length; while (lo < hi) { const m = (lo + hi) >> 1; if (dates[m] < d) lo = m + 1; else hi = m; } return dates[lo] ?? null; };
   const lastDay = dates[dates.length - 1];
   const todayRow = [...all].reverse().find((d) => d.spotPaise && d.lotSize)!;
   const todayN = todayRow.spotPaise! * todayRow.lotSize!;
-  const from = s.from ?? dates[0], to = s.to && s.to < lastDay ? s.to : lastDay;
+  // With the VIX filter, the test starts on the first day VIX can be ranked, so years it cannot judge don't dilute a year's profit.
+  const vixStart = s.vixAbove != null && data.vix ? (dates.find((d) => vixRankOn(data.vix!, d) != null) ?? lastDay) : dates[0];
+  const from0 = s.from ?? dates[0];
+  const from = from0 < vixStart ? vixStart : from0, to = s.to && s.to < lastDay ? s.to : lastDay;
   const slip = Math.round(s.slippage * 100);
 
   // ---- planned trades: [entry day, the trade's expiry]
@@ -236,15 +319,20 @@ export async function runLab(s: LabStrategy, data: LabData): Promise<LabResult> 
     if (s.iv === 'high' && hi !== true) continue;
     if (s.iv === 'low' && hi !== false) continue;
     if (s.iv === 'top-third' && !((rank ?? 0) >= 0.67)) continue;
+    const vixRank = data.vix ? vixRankOn(data.vix, d) : null;
+    if (s.vixAbove != null && !((vixRank ?? -1) > s.vixAbove / 100)) continue;
     const meta = day.get(d)!;
     if (!meta.spotPaise || !meta.lotSize) { skipped.push({ date: d, reason: 'No index close that day' }); continue; }
     const r = await play(plan.entry, plan.expiry, exitPlanned, meta.spotPaise, meta.lotSize, hi, rank);
     if (typeof r === 'string') { skipped.push({ date: d, reason: r }); continue; }
+    if (data.vix) { r.vix = data.vix.find((p) => p.date === d)?.iv ?? null; r.vixRank = vixRank; }
     trades.push(r);
     busyUntil = r.exit;
   }
 
-  return { trades, skipped, summary: summarizeLab(trades, from, to), from, to, today: { date: todayRow.date, spot: todayRow.spotPaise! / 100, lot: todayRow.lotSize! } };
+  const summary = summarizeLab(trades, from, to);
+  const monteCarlo = s.money === 'today' && trades.length >= 20 ? labMonteCarlo(trades.map((t) => t.net), summary.trades / summary.years, summary.perYear) : null;
+  return { trades, skipped, summary, monteCarlo, from, to, today: { date: todayRow.date, spot: todayRow.spotPaise! / 100, lot: todayRow.lotSize! } };
 
   async function play(d: string, e: string, x0: string, spot: number, lot: number, hi: boolean | null, rank: number | null): Promise<LabTrade | string> {
     const scale = s.money === 'today' ? todayN / (spot * lot) : 1;
@@ -271,6 +359,16 @@ export async function runLab(s: LabStrategy, data: LabData): Promise<LabResult> 
     const value = () => open.reduce((a, l) => a + l.q * lot * l.mark, 0);
     const daily: LabTrade['daily'] = [];
 
+    // Swing levels: fixed when an adjustment becomes active (at entry, or when the adjustment it follows is done).
+    const armed = new Map<number, { level: number; text: string } | null>();
+    const arm = (a: number, t: string, ref: number) => {
+      const w = s.adjust![a].when;
+      if (!('swing' in w)) return;
+      const lv = weeks ? swingLevel(weeks, t, ref, w.swing) : null;
+      armed.set(a, lv ? { level: lv.price, text: `${w.swing} ${(lv.price / 100).toFixed(0)} (swing ${lv.kind} of the week to ${lv.end})` } : null);
+      events.push({ date: t, text: lv ? `Watching ${w.swing} at ${(lv.price / 100).toFixed(0)} (weekly swing ${lv.kind}, week to ${lv.end})` : `No weekly swing ${w.swing} ${SWING_GAP_PCT}%+ away: that adjustment cannot fire` });
+    };
+    (s.adjust ?? []).forEach((x, a) => { if (x.after == null) arm(a, d, spot); });
     // ---- every close while open
     for (let j = idx.get(d)! + 1; j <= idx.get(end)!; j++) {
       const t = dates[j], sp = day.get(t)?.spotPaise;
@@ -280,14 +378,19 @@ export async function runLab(s: LabStrategy, data: LabData): Promise<LabResult> 
         if (v != null) l.mark = v;
       }
       const last = t === end;
-      if (!last && sp) {
+      const weekEnd = j + 1 >= dates.length || mondayOf(dates[j + 1]) !== mondayOf(t);
+      if (!last && sp && (s.check !== 'weekly' || weekEnd)) {
         for (let a = 0; a < (s.adjust ?? []).length; a++) {
           const adj = s.adjust![a];
           if (done.has(a) || (adj.after != null && !done.has(adj.after))) continue;
           let level: number | null;
-          if ('leg' in adj.when) { const l = open[adj.when.leg]; level = l && l.q !== 0 && l.kind !== 'FUT' ? l.strike : null; } else level = ref0 * (1 + adj.when.pct / 100);
+          if ('leg' in adj.when) { const l = open[adj.when.leg]; level = l && l.q !== 0 && l.kind !== 'FUT' ? l.strike : null; }
+          else if ('swing' in adj.when) level = armed.get(a)?.level ?? null;
+          else level = ref0 * (1 + adj.when.pct / 100);
           if (level == null || !(adj.dir === 'up' ? sp >= level : sp <= level)) continue;
           done.add(a);
+          if ('swing' in adj.when) events.push({ date: t, text: `${s.check === 'weekly' ? 'Weekly close' : 'Close'} ${(sp / 100).toFixed(0)} ${adj.dir === 'up' ? 'above' : 'below'} ${armed.get(a)!.text}` });
+          (s.adjust ?? []).forEach((x, b) => { if (x.after === a) arm(b, t, sp); });
           for (const act of adj.actions) {
             if ('close' in act) {
               const l = open[act.close];
@@ -410,7 +513,7 @@ async function entryKit(s: LabStrategy, data: LabData, d: string, e: string, end
       return p ? { strike: p.strikePaise, px: p.closePaise, model: false } : `No traded ${k}`;
     }
     // Distances count from the entry's reference (the index, or its ATM strike), also for legs added later.
-    const target = st.by === 'atm' ? spotT : st.by === 'pct' ? ref0 * (1 + st.pct / 100) : ref0 + st.points * 100;
+    const target = st.by === 'atm' ? spotT : st.by === 'pct' ? (st.from === 'now' ? spotT : ref0) * (1 + st.pct / 100) : ref0 + st.points * 100;
     const p = nearest(usable.filter((x) => Math.abs(x.strikePaise - target) <= tol), target);
     if (p) return { strike: p.strikePaise, px: p.closePaise, model: false };
     if (s.missing === 'settlement') {
@@ -450,6 +553,36 @@ export function summarizeLab(trades: LabTrade[], from: string, to: string): LabS
     avgWin: w.length ? R(w.reduce((a, b) => a + b, 0) / w.length) : null, avgLoss: l.length ? R(l.reduce((a, b) => a + b, 0) / l.length) : null,
     best: nets.length ? Math.max(...nets) : null, worst: nets.length ? Math.min(...nets) : null, worstMtm: trades.length ? Math.min(...trades.map((t) => t.worstMtm)) : null,
     losingYears: byYear.filter((y) => y.net < 0).length, byYear, modelPriced: trades.filter((t) => t.model > 0).length,
+  };
+}
+
+/**
+ * Monte Carlo: build `runs` histories by drawing the real trade results at random (with repeats), as many as were
+ * tested, and read the worst fall from a peak in each. Seeded, so the same trades always give the same answer.
+ * It reorders what happened; it cannot invent a move bigger than the worst real trade.
+ */
+export function labMonteCarlo(nets: number[], tradesPerYear: number, perYear: number, runs = 10_000): LabMonteCarlo {
+  let seed = 12345;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+  const n = nets.length, block = Math.max(1, Math.round(tradesPerYear));
+  const falls: number[] = [];
+  let years = 0, losing = 0;
+  for (let k = 0; k < runs; k++) {
+    let eq = 0, peak = 0, worst = 0, yr = 0;
+    for (let i = 0; i < n; i++) {
+      const x = nets[Math.floor(rnd() * n)];
+      eq += x; peak = Math.max(peak, eq); worst = Math.min(worst, eq - peak);
+      yr += x;
+      if ((i + 1) % block === 0) { years++; if (yr < 0) losing++; yr = 0; }
+    }
+    falls.push(worst);
+  }
+  falls.sort((a, b) => a - b);
+  const at = (p: number) => R(falls[Math.min(runs - 1, Math.floor(p * runs))]);
+  const fall1in20 = at(0.05), capital = R(-fall1in20 / 0.2);
+  return {
+    runs, trades: n, perYear, typicalFall: at(0.5), fall1in20, fall1in100: at(0.01),
+    losingYearPct: years ? Math.round((losing / years) * 1000) / 10 : 0, capital, returnPct: capital > 0 ? Math.round((perYear / capital) * 1000) / 10 : null,
   };
 }
 

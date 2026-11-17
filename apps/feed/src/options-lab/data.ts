@@ -49,9 +49,14 @@ async function build(u: string, lastDay: string): Promise<LabData> {
   const monthly = [...lastOf.values()].sort();
   const expiries = [...new Set([...cal.expired, ...ahead])].sort();
   const iv = await ivHistory(u);
+  const vix = (await prisma.indexEod.findMany({ where: { name: 'INDIA VIX' }, select: { date: true, closePaise: true }, orderBy: { date: 'asc' } }))
+    .map((r) => ({ date: r.date, iv: r.closePaise / 100 }));
+  // The index's daily bars, for weekly swing support and resistance (NSE's index file starts June 2011).
+  const bars = (await prisma.indexEod.findMany({ where: { name: u === 'NIFTY' ? 'NIFTY 50' : 'NIFTY BANK' }, select: { date: true, highPaise: true, lowPaise: true, closePaise: true }, orderBy: { date: 'asc' } }))
+    .map((r) => ({ date: r.date, high: r.highPaise, low: r.lowPaise, close: r.closePaise }));
 
   return {
-    days, monthly, expiries, iv,
+    days, monthly, expiries, iv, vix, bars,
     async chains(expiry, from, to) {
       const k = `${expiry}|${from}|${to}`;
       const hit = chainCache.get(k);

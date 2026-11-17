@@ -14,6 +14,7 @@ import { InfoTip } from '../info-tip';
 import { Button, Card } from '../ui';
 import { BasketsPanel } from './baskets-panel';
 import { PremiumPanel } from './premium-panel';
+import { Straddle920Panel } from './straddle920-panel';
 import { RulesPanel } from './rules-panel';
 
 const tone = (v: number) => (v > 0 ? 'text-up' : v < 0 ? 'text-down' : 'text-ink-2');
@@ -121,6 +122,9 @@ export function TradeLabPage() {
 
       {/* the weekly premium paper trade kept by the research programme */}
       <PremiumPanel />
+
+      {/* the 9:20 straddle forward paper test (video rule) */}
+      <Straddle920Panel />
 
       {/* automatic rules and their decision log */}
       <RulesPanel />

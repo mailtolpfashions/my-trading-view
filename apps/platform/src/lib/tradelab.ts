@@ -82,6 +82,21 @@ export const premiumApi = {
   save: (r: Partial<PremiumRule>) => feed<PremiumRule>('tradelab/premium', r),
 };
 
+// ---------------------------------------------------------------- the 9:20 straddle forward paper test
+
+export type S920Rule = { id: string; name: string; enabled: boolean; underlying: 'NIFTY'; entry: string; exit: string; stopPct: number; lots: number; updatedAt: string };
+export type S920Leg = { symbol: string; label: string; kind: 'CE' | 'PE'; strikePaise: number; bidPaise: number; askPaise: number; fillPaise: number | null; stopPaise: number | null; exitPaise: number | null; how: 'stop' | 'time' | 'open' | null };
+export type S920Day = { date: string; expiry: string; dte: number; at: number; spotPaise: number; legs: S920Leg[]; closedAt: number | null; clean: boolean; note: string | null; netPaise: number | null; chargesPaise: number };
+export type S920Report = {
+  rule: S920Rule; days: S920Day[]; events: PremiumEvent[] | { at: number; action: string; text: string }[];
+  byDte: { dte: number; days: number; won: number; netPaise: number; worstPaise: number }[];
+  totals: { days: number; clean: number; won: number; netPaise: number; chargesPaise: number; stopsHit: number; bothStopped: number };
+};
+export const s920Api = {
+  report: () => feed<S920Report>('tradelab/straddle920'),
+  save: (r: Partial<S920Rule>) => feed<S920Rule>('tradelab/straddle920', r),
+};
+
 export const autoApi = {
   rules: () => feed<{ rules: AutoRule[]; results: Record<string, RuleResult> }>('tradelab/rules'),
   save: (r: Partial<AutoRule>) => feed<AutoRule>('tradelab/rules', r),
