@@ -5,6 +5,7 @@ import { toPaise, type OrderType, type Product, type Side } from '@mtv/paper';
 import { live } from '../intraday/instance';
 import { AutoError, autoTick, baskets, deleteBasket, deleteRule, events, executeBasket, ruleResults, rules, saveBasket, saveRule, type AutoRule, type Basket } from './auto';
 import { PremiumError, premiumEvents, premiumReport, premiumTick, savePremiumRule, type PremiumRule } from './premium';
+import { PivotError, pivotReport, pivotTick, savePivotRule, type PivotRule } from './pivotbuy';
 import { S920Error, s920Events, s920Report, s920Tick, saveS920Rule, type S920Rule } from './straddle920';
 import { TradeLab } from './engine';
 import { kiteMarket, liveMargin, nseCloses, prismaRepo } from './live';
@@ -20,7 +21,7 @@ export function tradeLabRoutes(app: FastifyInstance) {
     try {
       return await fn((req.body ?? {}) as B, req);
     } catch (e) {
-      if (e instanceof LabError || e instanceof AutoError || e instanceof PremiumError || e instanceof S920Error || (e instanceof Error && /paise|decimal|number/i.test(e.message))) return reply.code(400).send({ error: 'rejected', message: e.message });
+      if (e instanceof LabError || e instanceof AutoError || e instanceof PremiumError || e instanceof S920Error || e instanceof PivotError || (e instanceof Error && /paise|decimal|number/i.test(e.message))) return reply.code(400).send({ error: 'rejected', message: e.message });
       req.log.error(e);
       return reply.code(500).send({ error: 'failed', message: 'Trade lab could not do that' });
     }
@@ -105,6 +106,11 @@ export function tradeLabRoutes(app: FastifyInstance) {
   app.get('/api/tradelab/straddle920', owner(async () => ({ ...(await s920Report()), events: await s920Events(200) })));
   app.post('/api/tradelab/straddle920', owner(async (b: Partial<S920Rule>) => saveS920Rule(b)));
   setInterval(() => { s920Tick(tradeLab).catch((e) => app.log.warn({ err: e }, '9:20 straddle rule failed')); }, 15_000);
+
+  // The option pivot buy forward paper test (the user's rule): both versions, every trade, and its log.
+  app.get('/api/tradelab/pivotbuy', owner(async () => pivotReport()));
+  app.post('/api/tradelab/pivotbuy', owner(async (b: Partial<PivotRule>) => savePivotRule(b)));
+  setInterval(() => { pivotTick().catch((e) => app.log.warn({ err: e }, 'option pivot rule failed')); }, 15_000);
 
   // The engine's clock: fills, square-off, expiry of day orders and F&O settlement.
   setInterval(() => { tradeLab.step().catch((e) => app.log.warn({ err: e }, 'trade lab step failed')); }, 2000);

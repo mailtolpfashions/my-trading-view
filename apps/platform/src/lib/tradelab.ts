@@ -99,6 +99,27 @@ export const s920Api = {
   save: (r: Partial<S920Rule>) => feed<S920Rule>('tradelab/straddle920', r),
 };
 
+// ---------------------------------------------------------------- the option pivot buy forward paper test
+
+export type PivotRule = { id: string; name: string; enabled: boolean; lots: number; targetPts: number; stopPts: number; maxTrades: number; entryFrom: string; entryTo: string; exit: string; updatedAt: string };
+export type PivotLevel = { name: string; paise: number };
+export type PivotTradeRow = {
+  version: 'fixed' | 'ladder'; level: string; entryAt: number; entryPaise: number; exitAt: number | null; exitPaise: number | null;
+  why: 'target' | 'stop' | 'trail' | 'time' | null; reached: string | null; date: string; leg: string; kind: 'CE' | 'PE'; qty: number;
+  grossPaise: number | null; chargesPaise: number; netPaise: number | null; clean: boolean;
+};
+type PivotTotal = { trades: number; won: number; netPaise: number; chargesPaise: number; byKind: Record<'CE' | 'PE', { trades: number; won: number; netPaise: number }> };
+export type PivotReport = {
+  rule: PivotRule; events: { at: number; action: string; text: string }[]; cleanDays: number;
+  days: { date: string; expiry: string; strikePaise: number; clean: boolean; note: string | null; closedAt: number | null; legs: { label: string; kind: 'CE' | 'PE'; prev: { date: string; highPaise: number; lowPaise: number; closePaise: number }; levels: PivotLevel[]; lastPaise: number | null }[] }[];
+  trades: PivotTradeRow[];
+  totals: Record<'fixed' | 'ladder', PivotTotal>;
+};
+export const pivotApi = {
+  report: () => feed<PivotReport>('tradelab/pivotbuy'),
+  save: (r: Partial<PivotRule>) => feed<PivotRule>('tradelab/pivotbuy', r),
+};
+
 export const autoApi = {
   rules: () => feed<{ rules: AutoRule[]; results: Record<string, RuleResult> }>('tradelab/rules'),
   save: (r: Partial<AutoRule>) => feed<AutoRule>('tradelab/rules', r),

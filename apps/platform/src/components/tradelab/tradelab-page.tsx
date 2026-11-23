@@ -15,6 +15,7 @@ import { Button, Card } from '../ui';
 import { BasketsPanel } from './baskets-panel';
 import { PremiumPanel } from './premium-panel';
 import { Straddle920Panel } from './straddle920-panel';
+import { PivotBuyPanel } from './pivotbuy-panel';
 import { RulesPanel } from './rules-panel';
 
 const tone = (v: number) => (v > 0 ? 'text-up' : v < 0 ? 'text-down' : 'text-ink-2');
@@ -125,6 +126,9 @@ export function TradeLabPage() {
 
       {/* the 9:20 straddle forward paper test (video rule) */}
       <Straddle920Panel />
+
+      {/* the option pivot buy forward paper test (the owner's rule) */}
+      <PivotBuyPanel />
 
       {/* automatic rules and their decision log */}
       <RulesPanel />
