@@ -42,6 +42,27 @@ describe('weekly / monthly trades are dated by real trading days', () => {
   });
 });
 
+describe('weekly buy that fills mid-week', () => {
+  it('is not stopped by a low made earlier that week, before the fill', () => {
+    // Week 1 closes 101 (signal), high 101 = the buy-stop trigger. Week 2: Monday dips to 80 without reaching 101,
+    // Tuesday trades up through 101 (fill). The 5% stop (95.95) must not be hit by Monday's 80.
+    const w1: [number, number, number, number][] = [...flat(4), [90, 101, 90, 101]];
+    const w2: [number, number, number, number][] = [[95, 96, 80, 95], [100, 102, 99, 101], ...flat(3, 101)];
+    const r = run(one([...w1, ...w2, ...flat(5, 101)]), { tf: 'W', exit: '', order: { type: 'stop', offsetPct: 0 }, stop: { kind: 'pct', value: 5 } });
+    expect(r.trades).toHaveLength(1);
+    expect(r.trades[0].exitReason).not.toBe('stop');
+    expect(istToday(r.trades[0].entryTime * 1000)).toBe('2024-01-09');
+  });
+  it('is stopped when the low after the fill reaches the stop, dated on or after the entry', () => {
+    const w1: [number, number, number, number][] = [...flat(4), [90, 101, 90, 101]];
+    const w2: [number, number, number, number][] = [[95, 96, 80, 95], [100, 102, 99, 101], [101, 101, 94, 95], ...flat(2, 95)];
+    const r = run(one([...w1, ...w2, ...flat(5, 95)]), { tf: 'W', exit: '', order: { type: 'stop', offsetPct: 0 }, stop: { kind: 'pct', value: 5 } });
+    expect(r.trades[0].exitReason).toBe('stop');
+    expect(istToday(r.trades[0].exitTime * 1000)).toBe('2024-01-10');
+    expect(r.trades[0].exitTime).toBeGreaterThanOrEqual(r.trades[0].entryTime);
+  });
+});
+
 describe('stop at the low of the last 3 candles', () => {
   // Entry at 102 (day 2's open). Lows after entry: 101, 105, 108, 110 → on day 6 the last 3 completed lows are 105, 108,
   // 110: the stop is 105. Day 6 trades down to 104, so the trade stops out at 105 that day.

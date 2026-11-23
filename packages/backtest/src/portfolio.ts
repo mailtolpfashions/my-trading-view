@@ -197,10 +197,10 @@ type Prepared = {
 
 /** Where in a bar a fill happened: at its open, at its close, or where the price first reached a level. */
 type At = 'open' | 'close' | { low: number } | { high: number };
-function dayOf(p: Prepared, i: number, at: At): number {
+function dayOf(p: Prepared, i: number, at: At, from?: number): number {
   const d = p.days;
   if (!d) return p.bars[i].time;
-  const [a, b] = d.span[i];
+  const [a, b] = fromDay(p, i, from);
   if (at === 'open') return d.daily[a].time;
   if (at === 'close') return d.daily[b].time;
   for (let k = a; k <= b; k++) {
@@ -208,6 +208,17 @@ function dayOf(p: Prepared, i: number, at: At): number {
     if ('low' in at ? toPaise(x.low) <= at.low : toPaise(x.high) >= at.high) return x.time;
   }
   return d.daily[b].time;
+}
+/**
+ * Weekly / monthly: the daily bars [first, last] of bar i, starting at the day that holds `from` when given. A buy that
+ * fills mid-week (a stop or limit order) owns the stock only from that day: earlier days of the week cannot hit its levels.
+ */
+function fromDay(p: Prepared, i: number, from?: number): [number, number] {
+  const [a, b] = p.days!.span[i];
+  if (from == null) return [a, b];
+  let k = a;
+  while (k < b && dayNo(p.days!.daily[k + 1].time) <= dayNo(from)) k++;
+  return [k, b];
 }
 function spans(bars: Candle[], daily: Candle[]): [number, number][] {
   const out: [number, number][] = [];
@@ -328,7 +339,7 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
   const markedEquity = () => cash + lots.reduce((a, l) => a + l.qty * (lastClose.get(l.p.symbol) ?? l.entryPrice), 0);
 
   const close = (l: Lot, i: number, price: number, reason: PortfolioExitReason, at: At = 'close') => {
-    const t = dayOf(l.p, i, at);
+    const t = dayOf(l.p, i, at, i === l.entryIndex ? l.entryTime : undefined);
     const fill = reason === 'end-of-test' || reason === 'data-ended' ? price : slip(price, false);
     let ch = charge('SELL', l.qty, fill, t, productOf(l.p));
     // Bought and sold the same day: the exchange treats a stock trade as intraday (futures charges don't change).
@@ -413,7 +424,12 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
     for (const l of [...lots]) {
       const i = l.p.index.get(t);
       if (i == null) continue;
-      const b = l.p.bars[i], open = toPaise(b.open), high = toPaise(b.high), low = toPaise(b.low);
+      const b = l.p.bars[i], open = toPaise(b.open);
+      let high = toPaise(b.high), low = toPaise(b.low);
+      if (l.p.days && i === l.entryIndex) { // weekly / monthly entry bar: only the days from the fill on
+        const [a, z] = fromDay(l.p, i, l.entryTime), ds = l.p.days.daily.slice(a, z + 1);
+        high = toPaise(Math.max(...ds.map((x) => x.high))); low = toPaise(Math.min(...ds.map((x) => x.low)));
+      }
       const formula = s.stop.kind === 'formula' && i > l.entryIndex && l.p.stopLevel![i - 1] != null ? toPaise(l.p.stopLevel![i - 1]!) : null;
       const levels = [l.stop, l.trail, formula].filter((x): x is number => x != null);
       // A formula target is the previous close's level (known before this bar), so it starts the bar after entry.
