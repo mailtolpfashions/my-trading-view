@@ -51,7 +51,7 @@ export async function runStrategyBacktest(req: BacktestRequest) {
   const fromT = Date.parse(`${req.strategy.from}T00:00:00+05:30`) / 1000, toT = Date.parse(`${req.strategy.to}T23:59:59+05:30`) / 1000;
   const intra = isIntraday(req.strategy.tf as Tf);
   // Intraday: the strategy's timeframe plus any intraday timeframe its rules name, all built from stored minutes.
-  const ruleTfs = [req.strategy.entry, req.strategy.exit, req.strategy.rank, req.strategy.stop.kind === 'formula' ? req.strategy.stop.formula : '']
+  const ruleTfs = [req.strategy.entry, req.strategy.exit, req.strategy.rank, req.strategy.stop.kind === 'formula' ? req.strategy.stop.formula : '', req.strategy.target.kind === 'formula' ? req.strategy.target.formula : '']
     .flatMap((x) => { const p = x?.trim() ? parseFormula(x) : null; return p?.ok ? [...timeframesOf(p.node)] : []; });
   const minuteTfs = intra ? [...new Set<Tf>([req.strategy.tf as Tf, ...ruleTfs.filter(isIntraday)])] : [];
   const finest = minuteTfs.reduce<Tf | null>((a, t) => (a == null || TF_MINUTES[t]! < TF_MINUTES[a]! ? t : a), null);

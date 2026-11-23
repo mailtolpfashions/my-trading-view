@@ -28,7 +28,10 @@ export type StopSpec =
   | { kind: 'formula'; formula: string }
   /** Fixed at the signal candle's low (the candle whose close gave the signal), set once at entry. */
   | { kind: 'signal-low' };
-export type TargetSpec = { kind: 'none' } | { kind: 'pct'; value: number } | { kind: 'points'; value: number } | { kind: 'rr'; value: number };
+export type TargetSpec =
+  | { kind: 'none' } | { kind: 'pct'; value: number } | { kind: 'points'; value: number } | { kind: 'rr'; value: number }
+  /** A price level from a formula, re-read at every close and used from the next bar, e.g. BB_UPPER(CLOSE, 20, 2). */
+  | { kind: 'formula'; formula: string };
 export type TrailSpec = { kind: 'none' } | { kind: 'pct'; value: number } | { kind: 'points'; value: number } | { kind: 'atr'; mult: number; length: number };
 export type Sizing = { mode: 'qty'; qty: number } | { mode: 'amount'; rupees: number } | { mode: 'percent'; pct: number } | { mode: 'risk'; pct: number };
 export type OrderSpec = { type: 'market' } | { type: 'limit'; offsetPct: number } | { type: 'stop'; offsetPct: number };
@@ -187,7 +190,7 @@ export function validateEquityStrategy(s: EquityStrategy): string | null {
 
 type Prepared = {
   symbol: string; bars: Candle[]; index: Map<number, number>; entry: Series; exit: Series | null; rank: Series;
-  stopLevel: Series | null; atrStop: Series | null; atrTrail: Series | null; avgValue: Series; breaks: string[]; isIndex: boolean;
+  stopLevel: Series | null; targetLevel: Series | null; atrStop: Series | null; atrTrail: Series | null; avgValue: Series; breaks: string[]; isIndex: boolean;
   /** Weekly / monthly tests: each bar's daily bars [first, last], so trades carry the real trading day, not the period's calendar start. */
   days: { daily: Candle[]; span: [number, number][] } | null;
 };
@@ -219,7 +222,7 @@ function spans(bars: Candle[], daily: Candle[]): [number, number][] {
   return out;
 }
 
-function prepare(ins: Instrument, s: EquityStrategy, nodes: { entry: Node; exit: Node | null; rank: Node; stop: Node | null }, fromT: number): Prepared | null {
+function prepare(ins: Instrument, s: EquityStrategy, nodes: { entry: Node; exit: Node | null; rank: Node; stop: Node | null; target: Node | null }, fromT: number): Prepared | null {
   if (ins.daily.length < 2 && !ins.intraday?.size) return null;
   const bySrc = new Map<Tf, Candle[]>([['D', ins.daily], ...(ins.intraday ?? [])]);
   const source = (tf: Tf) => {
@@ -231,7 +234,7 @@ function prepare(ins: Instrument, s: EquityStrategy, nodes: { entry: Node; exit:
   // Exact values are needed from the start of the test, less what the conditions look back on.
   const first = bars.findIndex((b) => b.time >= fromT);
   if (first < 0) return null;
-  const back = Math.max(...[nodes.entry, nodes.exit, nodes.rank, nodes.stop].filter((n): n is Node => !!n).map(lookback));
+  const back = Math.max(...[nodes.entry, nodes.exit, nodes.rank, nodes.stop, nodes.target].filter((n): n is Node => !!n).map(lookback));
   const ev = new Evaluator(source, Number.isFinite(back) ? Math.max(0, first - back - 1) : 0);
   return {
     symbol: ins.symbol, bars, index: new Map(bars.map((b, i) => [b.time, i])),
@@ -239,6 +242,7 @@ function prepare(ins: Instrument, s: EquityStrategy, nodes: { entry: Node; exit:
     exit: nodes.exit ? ev.series(nodes.exit, s.tf as Tf) : null,
     rank: ev.series(nodes.rank, s.tf as Tf),
     stopLevel: nodes.stop ? ev.series(nodes.stop, s.tf as Tf) : null,
+    targetLevel: nodes.target ? ev.series(nodes.target, s.tf as Tf) : null,
     atrStop: s.stop.kind === 'atr' ? atr(bars, s.stop.length) : null,
     atrTrail: s.trail.kind === 'atr' ? atr(bars, s.trail.length) : null,
     avgValue: ev.series(compile(isIntraday(s.tf as Tf) ? '[D] AVG_TURNOVER(20)[1]' : 'AVG_TURNOVER(20)', 'num', 'Liquidity'), s.tf as Tf).map((v) => (v == null ? null : v / 1e7)),
@@ -288,6 +292,7 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
     exit: s.exit?.trim() ? compile(s.exit, 'bool', 'Exit') : null,
     rank: compile(s.rank?.trim() || 'AVG_TURNOVER(20)', 'num', 'Ranking'),
     stop: s.stop.kind === 'formula' ? compile(s.stop.formula, 'num', 'Stop level') : null,
+    target: s.target.kind === 'formula' ? compile(s.target.formula, 'num', 'Target level') : null,
   };
   const fromT = Date.parse(`${s.from}T00:00:00+05:30`) / 1000, toT = Date.parse(`${s.to}T23:59:59+05:30`) / 1000;
   const broker: BrokerProfile = brokerById(s.broker);
@@ -411,16 +416,19 @@ export function runPortfolio(instruments: Instrument[], s: EquityStrategy, bench
       const b = l.p.bars[i], open = toPaise(b.open), high = toPaise(b.high), low = toPaise(b.low);
       const formula = s.stop.kind === 'formula' && i > l.entryIndex && l.p.stopLevel![i - 1] != null ? toPaise(l.p.stopLevel![i - 1]!) : null;
       const levels = [l.stop, l.trail, formula].filter((x): x is number => x != null);
+      // A formula target is the previous close's level (known before this bar), so it starts the bar after entry.
+      const tgtLevel = s.target.kind === 'formula' && i > l.entryIndex && l.p.targetLevel![i - 1] != null ? toPaise(l.p.targetLevel![i - 1]!) : null;
+      const target = s.target.kind === 'formula' ? tgtLevel : l.target;
       const stop = levels.length ? Math.max(...levels) : null;
       const stopReason: PortfolioExitReason = stop != null && l.trail != null && stop === l.trail && (l.stop == null || l.trail > l.stop) ? 'trail' : 'stop';
       l.worst = Math.min(l.worst, low);
       l.best = Math.max(l.best, high);
       if (i > l.entryIndex) { // the entry bar opened at the entry price, so it cannot gap past its own levels
         if (stop != null && open <= stop) { close(l, i, open, stopReason, 'open'); continue; }
-        if (l.target != null && open >= l.target) { close(l, i, open, 'target', 'open'); continue; }
+        if (target != null && open >= target) { close(l, i, open, 'target', 'open'); continue; }
       }
       if (stop != null && low <= stop) { close(l, i, stop, stopReason, { low: stop }); continue; }
-      if (l.target != null && high >= l.target) { close(l, i, l.target, 'target', { high: l.target }); continue; }
+      if (target != null && high >= target) { close(l, i, target, 'target', { high: target }); continue; }
     }
 
     // ---- the close: trailing stops, exit signals, new signals ----

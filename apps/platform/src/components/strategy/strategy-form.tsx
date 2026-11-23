@@ -100,16 +100,21 @@ export function TargetPick({ s, set }: { s: EquityStrategy; set: (p: Partial<Equ
     { key: 'none', label: 'No target', value: { kind: 'none' } },
     ...[1, 2, 3, 5, 10].map((v) => ({ key: `pct${v}`, label: `${v}% above entry`, value: { kind: 'pct' as const, value: v } })),
     ...[1.5, 2, 3].map((v) => ({ key: `rr${v}`, label: `${v} × the risk`, value: { kind: 'rr' as const, value: v } })),
+    { key: 'bbup', label: 'Upper Bollinger band (20, 2)', value: { kind: 'formula', formula: 'BB_UPPER(CLOSE, 20, 2)' } },
   ];
   const t = s.target;
   return (
     <Pick label="Target" value={t} choices={choices} same={eq} onChange={(target) => set({ target })} makeCustom={() => ({ kind: 'points', value: 20 }) as EquityStrategy['target']}
       custom={() => t.kind === 'none' ? null : (
         <>
-          <select value={t.kind} aria-label="Target type" className={SMALL} onChange={(e) => set({ target: { kind: e.target.value as 'pct' | 'points' | 'rr', value: t.value } })}>
-            <option value="pct">% above entry</option><option value="points">₹ above entry</option><option value="rr">× the risk</option>
+          <select value={t.kind} aria-label="Target type" className={SMALL} onChange={(e) => {
+            const k = e.target.value;
+            set({ target: k === 'formula' ? { kind: 'formula', formula: 'BB_UPPER(CLOSE, 20, 2)' } : { kind: k as 'pct' | 'points' | 'rr', value: t.kind === 'formula' ? 5 : t.value } });
+          }}>
+            <option value="pct">% above entry</option><option value="points">₹ above entry</option><option value="rr">× the risk</option><option value="formula">Indicator level</option>
           </select>
-          <input type="number" step="any" min={0} value={t.value} onChange={(e) => set({ target: { kind: t.kind, value: num(e.target.value) } })} className={NUM} aria-label="Target size" />
+          {t.kind !== 'formula' && <input type="number" step="any" min={0} value={t.value} onChange={(e) => set({ target: { kind: t.kind, value: num(e.target.value) } })} className={NUM} aria-label="Target size" />}
+          {t.kind === 'formula' && <input value={t.formula} onChange={(e) => set({ target: { kind: 'formula', formula: e.target.value } })} spellCheck={false} className={`${inputCls} h-9 w-[200px] font-mono text-[12.5px]`} aria-label="Target level formula" title="A price level, read at every close, e.g. BB_UPPER(CLOSE, 20, 2)" />}
         </>
       )} />
   );

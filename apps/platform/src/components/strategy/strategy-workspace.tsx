@@ -291,7 +291,8 @@ function StrategySentence({ doc }: { doc: StrategyDoc }) {
   const stop = s.stop.kind === 'pct' ? `${s.stop.value}% below the entry` : s.stop.kind === 'points' ? `₹${s.stop.value} below the entry` : s.stop.kind === 'atr' ? `${s.stop.mult} × ATR (${s.stop.length}) below the entry`
     : s.stop.kind === 'signal-low' ? 'the low of the signal candle (fixed)'
     : s.stop.kind === 'formula' ? (STOP_PICKS.find((x) => x.formula === (s.stop as { formula: string }).formula)?.text ?? (s.stop as { formula: string }).formula) + ', moving with it' : null;
-  const target = s.target.kind === 'pct' ? `${s.target.value}% above the entry` : s.target.kind === 'points' ? `₹${s.target.value} above the entry` : s.target.kind === 'rr' ? `${s.target.value} × the risk` : null;
+  const target = s.target.kind === 'pct' ? `${s.target.value}% above the entry` : s.target.kind === 'points' ? `₹${s.target.value} above the entry` : s.target.kind === 'rr' ? `${s.target.value} × the risk`
+    : s.target.kind === 'formula' ? (s.target.formula.replace(/\s/g, '') === 'BB_UPPER(CLOSE,20,2)' ? 'the upper Bollinger band (20, 2), moving with it' : `${s.target.formula}, moving with it`) : null;
   const day = isIntradayTf(s.tf) ? s.intraday ?? DEFAULT_INTRADAY : null;
   return (
     <p className="mb-2 rounded-[12px] bg-accent-soft px-4 py-2.5 text-[13.5px] leading-relaxed text-ink-2">

@@ -56,6 +56,19 @@ describe('stop at the low of the last 3 candles', () => {
   });
 });
 
+describe('target at a formula level', () => {
+  // Entry at 102 (day 2's open). The target is the previous close's HIGHEST(HIGH, 2) level, used from the bar after entry:
+  // after day 2 it is 104 (highs 96, 104); day 3 reaches 105 → out at 104. A gap above the level fills at the open.
+  it('sells where the bar first reaches the previous close\'s level', () => {
+    const r = run(one([[95, 96, 94, 101], [102, 104, 101, 103], [103, 105, 102, 104], ...flat(2, 104)]), { exit: '', target: { kind: 'formula', formula: 'HIGHEST(HIGH, 2)' } });
+    expect(r.trades[0]).toMatchObject({ entryPricePaise: 10200, exitPricePaise: 10400, exitReason: 'target' });
+  });
+  it('a gap above the level fills at the open', () => {
+    const r = run(one([[95, 96, 94, 101], [102, 104, 101, 103], [106, 107, 105, 106], ...flat(2, 106)]), { exit: '', target: { kind: 'formula', formula: 'HIGHEST(HIGH, 2)' } });
+    expect(r.trades[0]).toMatchObject({ exitPricePaise: 10600, exitReason: 'target' });
+  });
+});
+
 describe('stop at the signal candle\'s low', () => {
   it('is fixed at entry and does not move up with later lows', () => {
     // Signal on day 1 (close 101, low 94). Buy day 2 at 102. Lows then rise to 101, 105, 108: a moving stop would follow

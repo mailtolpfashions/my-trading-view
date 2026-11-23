@@ -7,7 +7,7 @@ import { feed } from './feed';
 import type { UniverseSpec } from './screener';
 
 export type StopSpec = { kind: 'none' } | { kind: 'pct'; value: number } | { kind: 'points'; value: number } | { kind: 'atr'; mult: number; length: number } | { kind: 'formula'; formula: string } | { kind: 'signal-low' };
-export type TargetSpec = { kind: 'none' } | { kind: 'pct'; value: number } | { kind: 'points'; value: number } | { kind: 'rr'; value: number };
+export type TargetSpec = { kind: 'none' } | { kind: 'pct'; value: number } | { kind: 'points'; value: number } | { kind: 'rr'; value: number } | { kind: 'formula'; formula: string };
 export type TrailSpec = { kind: 'none' } | { kind: 'pct'; value: number } | { kind: 'points'; value: number } | { kind: 'atr'; mult: number; length: number };
 export type Sizing = { mode: 'qty'; qty: number } | { mode: 'amount'; rupees: number } | { mode: 'percent'; pct: number } | { mode: 'risk'; pct: number };
 export type OrderSpec = { type: 'market' } | { type: 'limit'; offsetPct: number } | { type: 'stop'; offsetPct: number };
@@ -83,6 +83,8 @@ export const TEMPLATES: Template[] = [
     patch: { entry: `${scan('supertrend-flip')} AND ADX(14, 14) > 20`, exit: '', stop: { kind: 'formula', formula: 'SUPERTREND(10, 3)' }, target: { kind: 'none' } } },
   { id: 'bollinger-reversal', name: 'Bollinger Band reversal', style: 'swing', about: 'Buy when the close crosses back above the lower band (20, 2); sell at the middle band. 4% stop.',
     patch: { entry: 'CROSSOVER(CLOSE, BB_LOWER(CLOSE, 20, 2))', exit: 'CLOSE > BB_MIDDLE(CLOSE, 20, 2)', stop: { kind: 'pct', value: 4 }, target: { kind: 'none' } } },
+  { id: 'weekly-below-bb', name: 'Weekly candle below the lower Bollinger band', style: 'positional', about: 'Weekly candles: the whole candle (open, high, low, close) below the lower band (20, 2) while the close is above the 200-week average. Buy 2% above that candle’s high the next week; sell at the upper band, or the week after a close below the 200-week average.',
+    patch: { tf: 'W', entry: 'CLOSE < BB_LOWER(CLOSE, 20, 2) AND OPEN < BB_LOWER(CLOSE, 20, 2) AND HIGH < BB_LOWER(CLOSE, 20, 2) AND LOW < BB_LOWER(CLOSE, 20, 2) AND CLOSE > SMA(CLOSE, 200)', exit: 'CLOSE < SMA(CLOSE, 200)', order: { type: 'stop', offsetPct: 2 }, stop: { kind: 'none' }, target: { kind: 'formula', formula: 'BB_UPPER(CLOSE, 20, 2)' }, trail: { kind: 'none' }, maxOpen: 10, sizing: { mode: 'percent', pct: 10 }, minAvgValueCr: 1, from: '2012-01-01' } },
   { id: '52w-breakout', name: '52-week high breakout on 2× volume', style: 'positional', about: 'The "52-week high breakout" scan (a close above the previous 252-day high) on 2× volume; trail 10% below the highest high.',
     patch: { entry: `${scan('52w-high-breakout')} AND RVOL(20) > 2`, exit: '', stop: { kind: 'pct', value: 8 }, target: { kind: 'none' }, trail: { kind: 'pct', value: 10 } } },
   { id: 'st-rsi-15m', name: 'Supertrend + RSI, 15 minutes', style: 'intraday', about: 'Intraday, 15-minute candles from 09:20: buy while Supertrend (10, 3) is bullish and RSI (14) is above 70; the stop follows the Supertrend line; squared off at 15:15.',
