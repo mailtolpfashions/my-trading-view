@@ -46,7 +46,7 @@ export const quantApi = {
 };
 
 export const FAMILY_LABEL: Record<string, string> = {
-  P2: 'Regimes', A1: 'Monthly premium: walk-forward', A2: 'Monthly premium: sizing & stress', A3: 'Weekly premium', B9: 'Stock momentum', B10: '52-week-high breakout', P11: 'Sizing & combination', P12: 'Holdout (read once)',
+  P2: 'Regimes', A1: 'Monthly premium: walk-forward', A2: 'Monthly premium: sizing & stress', A3: 'Weekly premium', B9: 'Stock momentum', B10: '52-week-high breakout', P11: 'Sizing & combination', P12: 'Holdout (read once)', 'S-scalp': 'Intraday scalping',
 };
 export const VERDICT_LABEL: Record<string, string> = { pass: 'Meets the target', lead: 'Lead', fail: 'Does not meet the target', info: 'Information' };
 

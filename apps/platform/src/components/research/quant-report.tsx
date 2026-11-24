@@ -74,7 +74,8 @@ export function QuantReport() {
           <InfoTip label="About this report">
             <p>The research programme of November 2026: can a systematic NSE strategy reach 35% a year with a drawdown under 10%? Every experiment was registered with its data version, costs, assumptions and validation; this page reads that registry.</p>
             <p>Train 2011 to 2018, validation 2019 to 2023, holdout 2024 to November 2026 read once at the end. Money is one NIFTY lot at today&rsquo;s index level unless lots are stated; ₹1 slippage per option per fill and itemised dated charges are included. Daily closes only: what happened inside a day is not seen.</p>
-            <p>Write-ups: docs/quant/01-audit-and-roadmap.md, 02-results-phase5-11.md, 03-holdout-and-paper.md.</p>
+            <p>Intraday scalping (added 24 November 2026): the setups and breadth from a YouTube scalping series, tested on NIFTY 1-minute data from 2023 (breadth from November 2025), with option costs. None made money after costs.</p>
+            <p>Write-ups: docs/quant/01-audit-and-roadmap.md, 02-results-phase5-11.md, 03-holdout-and-paper.md, 04-scalping.md.</p>
           </InfoTip>
         </h1>
         <Segmented label="Section" value={tab === 'summary' || tab === 'experiments' || tab === 'explore' ? 'expert' : tab} onChange={(v) => setTab(v === 'expert' ? 'summary' : v)}
