@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { shown } from '@/lib/mode';
 import Link from 'next/link';
 import { Search } from 'lucide-react';
 import { RESEARCH_VIEWS } from '@/lib/research-views';
@@ -42,7 +43,7 @@ const GROUPS: { title: string; tools: Tool[] }[] = [
 export default function ToolsPage() {
   const [q, setQ] = useState('');
   const needle = q.trim().toLowerCase();
-  const groups = GROUPS.map((g) => ({ ...g, tools: g.tools.filter((t) => !needle || `${t.label} ${t.about}`.toLowerCase().includes(needle)) })).filter((g) => g.tools.length);
+  const groups = GROUPS.map((g) => ({ ...g, tools: g.tools.filter((t) => shown(t.href) && (!needle || `${t.label} ${t.about}`.toLowerCase().includes(needle))) })).filter((g) => g.tools.length);
   return (
     <div className="grid gap-6">
       <div className="flex flex-wrap items-end gap-4">

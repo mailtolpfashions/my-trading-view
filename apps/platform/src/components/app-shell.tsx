@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PERSONAL, shown } from '@/lib/mode';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { ListChecks, Search } from 'lucide-react';
@@ -79,7 +80,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex h-16 items-center gap-2 px-3 sm:gap-4 sm:px-5">
             <Link href="/today" aria-label="Home" className="shrink-0"><Logo /></Link>
             <nav className="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]" aria-label="Modules">
-              {NAV.map((n) => {
+              {NAV.filter((n) => shown(n.href)).map((n) => {
                 const active = n.match.some((p) => path === p || path.startsWith(`${p}/`));
                 return <Link key={n.href} href={n.href} aria-current={active ? 'page' : undefined} className={`whitespace-nowrap rounded-[10px] px-3 py-2 text-[14px] font-medium ${active ? 'bg-panel text-ink shadow-[var(--shadow-panel)]' : 'text-ink-2 hover:text-ink'}`}>{n.label}</Link>;
               })}
@@ -93,8 +94,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <button type="button" onClick={() => setDrawer(true)} aria-label="Open watchlist" title="Watchlist"
                   className="grid h-11 w-11 place-items-center rounded-[12px] border border-line bg-panel text-ink-2 hover:text-ink lg:hidden"><ListChecks size={17} /></button>
               )}
-              <LiveChip />
-              <AlertsBell />
+              {PERSONAL && <LiveChip />}
+              {PERSONAL && <AlertsBell />}
               <ThemeToggle />
             </div>
           </div>
@@ -111,7 +112,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           setSearch(null);
         }} />
       <DialogHost />
-      {ticket && <OrderTicket start={ticket} onClose={() => setTicket(null)} onPlaced={(m) => setNotice(m.length > 90 ? `${m.slice(0, 88)}…` : m)} />}
+      {PERSONAL && ticket && <OrderTicket start={ticket} onClose={() => setTicket(null)} onPlaced={(m) => setNotice(m.length > 90 ? `${m.slice(0, 88)}…` : m)} />}
       {notice && <div role="status" className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-[12px] bg-deep px-4 py-2.5 text-[13.5px] text-white shadow-[var(--shadow-pop)]">{notice}</div>}
     </ShellContext.Provider>
   );

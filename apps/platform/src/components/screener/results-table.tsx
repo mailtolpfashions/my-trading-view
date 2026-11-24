@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useMemo, useState } from 'react';
+import { PERSONAL } from '@/lib/mode';
 import Link from 'next/link';
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, Download, LineChart, ListPlus, Plus, Search, X } from 'lucide-react';
 import { parseFormula } from '@mtv/rules';
@@ -125,7 +126,7 @@ export function ResultsTable({ result, columns, onColumns, watchlists, onWatchli
                           <Link href={`/chart/${encodeURIComponent(r.symbol)}?tf=${result.tf}`} className="inline-flex shrink-0 h-9 items-center gap-1.5 rounded-[10px] bg-panel px-3 text-[13px] font-semibold text-ink shadow-[var(--shadow-panel)] hover:text-accent-deep">
                             <LineChart size={15} /> Open chart
                           </Link>
-                          <button type="button" onClick={() => openTicket({ symbol: r.symbol })} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[10px] bg-accent-soft px-3 text-[13px] font-bold text-accent-deep hover:bg-accent hover:text-accent-ink">Trade (paper)</button>
+                          {PERSONAL && (<button type="button" onClick={() => openTicket({ symbol: r.symbol })} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[10px] bg-accent-soft px-3 text-[13px] font-bold text-accent-deep hover:bg-accent hover:text-accent-ink">Trade (paper)</button>)}
                           <AddToWatchlist symbols={[r.symbol]} label={`Add ${r.symbol} to a watchlist`} watchlists={watchlists} onChanged={onWatchlists} compact />
                           <CopySymbol symbol={r.symbol} />
                           <div className="grid gap-1">

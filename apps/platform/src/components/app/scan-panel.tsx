@@ -4,6 +4,7 @@
 // on the Scanner page), the same stock lists, run in one click; a result opens its chart.
 
 import { useEffect, useRef, useState } from 'react';
+import { PERSONAL } from '@/lib/mode';
 import Link from 'next/link';
 import { ExternalLink, Play } from 'lucide-react';
 import { chartHref, useShell } from '@/components/app/shell-context';
@@ -99,8 +100,8 @@ export function ScanPanel({ watch, onOpen }: { watch: string[]; onOpen?: () => v
                 <span className={`block text-[11.5px] font-semibold ${r.changePct == null ? 'text-ink-2' : r.changePct >= 0 ? 'text-up' : 'text-down'}`}>{r.changePct == null ? '' : `${r.changePct > 0 ? '+' : ''}${r.changePct.toFixed(2)}%`}</span>
               </span>
             </Link>
-            <button type="button" onClick={() => { onOpen?.(); openTicket({ symbol: r.symbol }); }} aria-label={`Trade ${r.symbol} in Trade lab`} title="Trade (paper)"
-              className="h-7 shrink-0 rounded-[8px] px-1.5 text-[11px] font-bold text-accent-deep opacity-0 hover:bg-accent-soft focus:opacity-100 group-hover:opacity-100">Trade</button>
+            {PERSONAL && (<button type="button" onClick={() => { onOpen?.(); openTicket({ symbol: r.symbol }); }} aria-label={`Trade ${r.symbol} in Trade lab`} title="Trade (paper)"
+              className="h-7 shrink-0 rounded-[8px] px-1.5 text-[11px] font-bold text-accent-deep opacity-0 hover:bg-accent-soft focus:opacity-100 group-hover:opacity-100">Trade</button>)}
           </li>
         ))}
         {result && !result.rows.length && <li className="px-2 py-6 text-center text-[13px] text-muted">No stock matches right now.</li>}

@@ -3,6 +3,7 @@
 // "Your day" on Today: what needs you (alerts), the day's risk limits (edit in place) and the way into the scanner.
 
 import { useEffect, useState } from 'react';
+import { PERSONAL } from '@/lib/mode';
 import Link from 'next/link';
 import { ArrowRight, Bell, CalendarClock, Pencil, Target } from 'lucide-react';
 import type { intraday } from '@mtv/options';
@@ -20,21 +21,23 @@ export function DayCard({ brief, settings, onSave }: { brief: Brief; settings: D
     <section className="panel flex min-h-0 flex-col p-5">
       <div className="card-head !mb-3 !pb-3"><h2 className="text-[16px] font-semibold tracking-[-0.01em]">Your day</h2></div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto text-[13.5px]">
-        <Link href="/alerts" className="flex items-center gap-3 rounded-[12px] px-2 py-1.5 hover:bg-raised">
-          <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-[10px] ${n ? 'bg-accent text-accent-ink' : 'bg-raised text-ink-2'}`}><Bell size={16} /></span>
-          <span className="min-w-0 flex-1">
-            <span className="block font-semibold">{n ? `${n} alert${n === 1 ? '' : 's'} fired today` : 'No alerts fired today'}</span>
-            {brief.needsYou.latest[0] && <span className="block truncate text-[12.5px] text-muted">{brief.needsYou.latest[0].name}: {brief.needsYou.latest[0].symbols.join(', ')}</span>}
-          </span>
-          <ArrowRight size={14} className="shrink-0 text-muted" />
-        </Link>
+        {PERSONAL && (
+          <Link href="/alerts" className="flex items-center gap-3 rounded-[12px] px-2 py-1.5 hover:bg-raised">
+            <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-[10px] ${n ? 'bg-accent text-accent-ink' : 'bg-raised text-ink-2'}`}><Bell size={16} /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold">{n ? `${n} alert${n === 1 ? '' : 's'} fired today` : 'No alerts fired today'}</span>
+              {brief.needsYou.latest[0] && <span className="block truncate text-[12.5px] text-muted">{brief.needsYou.latest[0].name}: {brief.needsYou.latest[0].symbols.join(', ')}</span>}
+            </span>
+            <ArrowRight size={14} className="shrink-0 text-muted" />
+          </Link>
+        )}
         {soon.length > 0 && (
           <p className="flex items-center gap-3 px-2">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-raised text-ink-2"><CalendarClock size={16} /></span>
             <span className="text-ink-2">{soon.map((e) => `${NAMES[e.underlying] ?? e.underlying} expiry ${e.calendarDays === 0 ? 'today' : `in ${e.calendarDays} day${e.calendarDays === 1 ? '' : 's'}`}`).join(' · ')}</span>
           </p>
         )}
-        <SellerLine />
+        {PERSONAL && <SellerLine />}
         {settings && <DayRules s={settings} onSave={onSave} />}
       </div>
       <Link href="/scanner" className="mt-3 inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-[12px] bg-inverse px-4 text-[14px] font-semibold text-on-inverse transition-colors hover:bg-inverse-hover">

@@ -3,7 +3,8 @@
 // so clearing cookies doesn't reset it. A restart forgets the counts, which only ever errs in the visitor's favour.
 
 /** Routes that each count as one run. Everything else (charts, chains, margin) is unlimited. */
-export const COUNTED_ROUTES = new Set(['/api/backtest', '/api/options-backtest', '/api/research/study', '/api/scan', '/api/options-sim']);
+// The platform's own runs (scanner, strategy backtest, option lab) count too; the live match count while editing a scan does not.
+export const COUNTED_ROUTES = new Set(['/api/backtest', '/api/options-backtest', '/api/research/study', '/api/scan', '/api/options-sim', '/api/screener/run', '/api/strategy/backtest', '/api/options-lab/run']);
 
 const IST = 5.5 * 3600_000;
 /** The trading-day key in India, so the allowance resets at midnight IST. */

@@ -4,6 +4,7 @@
 // record carries owner and visibility so sharing can be added later without reshaping the data.
 
 import { randomUUID } from 'node:crypto';
+import { appMode } from '@mtv/shared/mode';
 import { mkdir, readFile, rename, writeFile, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Tf } from '@mtv/rules';
@@ -128,10 +129,12 @@ export class UserStore {
   private data: Data | null = null;
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private file = path.resolve(import.meta.dirname, '../../../../.userdata/user.json')) {}
+  /** `file` null = the public site before accounts: an empty store that reads as empty and refuses every change. */
+  constructor(private file: string | null = path.resolve(import.meta.dirname, '../../../../.userdata/user.json')) {}
 
   private async load(): Promise<Data> {
     if (this.data) return this.data;
+    if (this.file == null) return (this.data = { version: 1, screens: [], watchlists: [], recent: [] });
     try {
       this.data = JSON.parse(await readFile(this.file, 'utf8')) as Data;
     } catch (e) {
@@ -143,14 +146,16 @@ export class UserStore {
 
   /** Runs `fn` on the data and saves it, one change at a time. */
   private change<T>(fn: (d: Data) => T): Promise<T> {
+    const file = this.file;
+    if (file == null) return Promise.reject(new UserStoreError('Saving needs an account. Sign-in is coming soon; until then nothing is saved.'));
     const next = this.queue.then(async () => {
       const d = await this.load();
       const out = fn(d);
-      await mkdir(path.dirname(this.file), { recursive: true });
-      const tmp = `${this.file}.tmp`;
+      await mkdir(path.dirname(file), { recursive: true });
+      const tmp = `${file}.tmp`;
       await writeFile(tmp, JSON.stringify(d, null, 1));
-      await copyFile(this.file, `${this.file}.bak`).catch(() => {}); // no previous file yet
-      await rename(tmp, this.file);
+      await copyFile(file, `${file}.bak`).catch(() => {}); // no previous file yet
+      await rename(tmp, file);
       return out;
     });
     this.queue = next.catch(() => {});
@@ -401,4 +406,5 @@ function clean(symbols: string[]): string[] {
   return out;
 }
 
-export const userStore = new UserStore();
+// The owner's store in the owner's app; on the public site (APP_MODE=public) an empty, read-only one until accounts.
+export const userStore = new UserStore(appMode() === 'public' ? null : undefined);

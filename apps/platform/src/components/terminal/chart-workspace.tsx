@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { PERSONAL } from '@/lib/mode';
 import { AreaChart, BarChart3, Camera, Shapes, CandlestickChart, Check, ChevronDown, History, LineChart, Maximize2, Minimize2, Pause, Play, Plus, Search, Settings2, SkipForward, TrendingUp, X } from 'lucide-react';
 import { EOD_TIMEFRAMES, type Candle, type DataQuality, type Timeframe } from '@mtv/shared';
 import { PULSE_NAMES, useShell } from '@/components/app/shell-context';
@@ -273,8 +274,8 @@ export function ChartWorkspace({ symbol }: { symbol: string }) {
             </button>
             {menu === 'patterns' && <PatternPicker picked={pickedPatterns} onChange={setPickedPatterns} meta={patternMeta?.patterns ?? null} found={patternCount} />}
           </div>
-          <button type="button" onClick={() => openTicket({ symbol })} title="Paper trade this in Trade lab"
-            className="flex h-[30px] items-center gap-1.5 rounded-full bg-accent-soft px-3 text-[12.5px] font-bold text-accent-deep hover:bg-accent hover:text-accent-ink">Trade</button>
+          {PERSONAL && (<button type="button" onClick={() => openTicket({ symbol })} title="Paper trade this in Trade lab"
+            className="flex h-[30px] items-center gap-1.5 rounded-full bg-accent-soft px-3 text-[12.5px] font-bold text-accent-deep hover:bg-accent hover:text-accent-ink">Trade</button>)}
           {loading && <span className="ml-3 text-[12px] text-muted">Loading…</span>}
           <span className="flex-1" />
           {!loading && <span className="hidden sm:block"><DataCheck quality={data.quality} delayed={false} /></span>}

@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./feed-token": "./src/feed-token.ts",
-    "./billing": "./src/billing.ts"
+    "./billing": "./src/billing.ts",
+    "./mode": "./src/mode.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

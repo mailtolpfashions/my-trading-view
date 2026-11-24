@@ -4,6 +4,7 @@
 // collapses to a thin strip (remembered per browser; the W key toggles it). Below lg it opens as a drawer from the header.
 
 import { useEffect, useMemo, useState } from 'react';
+import { PERSONAL } from '@/lib/mode';
 import Link from 'next/link';
 import { ChevronsLeft, ChevronsRight, GripVertical, ListOrdered, Plus, X } from 'lucide-react';
 import { PULSE_NAMES, chartHref, useShell } from '@/components/app/shell-context';
@@ -77,8 +78,8 @@ export function WatchPanel({ open, onToggle, drawer, onCloseDrawer }: { open: bo
                   <span className={`block text-[11.5px] font-semibold ${tone(q?.changePct)}`}>{q ? `${q.changePct > 0 ? '+' : ''}${q.changePct.toFixed(2)}%` : ''}</span>
                 </span>
               </Link>
-              <button type="button" onClick={() => { onCloseDrawer(); openTicket({ symbol: s }); }} aria-label={`Trade ${s} in Trade lab`} title="Trade (paper)"
-                className="h-6 shrink-0 rounded px-1.5 text-[11px] font-bold text-accent-deep opacity-0 hover:bg-accent-soft focus:opacity-100 group-hover:opacity-100">Trade</button>
+              {PERSONAL && (<button type="button" onClick={() => { onCloseDrawer(); openTicket({ symbol: s }); }} aria-label={`Trade ${s} in Trade lab`} title="Trade (paper)"
+                className="h-6 shrink-0 rounded px-1.5 text-[11px] font-bold text-accent-deep opacity-0 hover:bg-accent-soft focus:opacity-100 group-hover:opacity-100">Trade</button>)}
               <button type="button" onClick={() => setWatch(watch.filter((w) => w !== s))} aria-label={`Remove ${s} from watchlist`}
                 className="grid h-6 w-6 shrink-0 place-items-center rounded text-muted opacity-0 hover:text-down focus:opacity-100 group-hover:opacity-100"><X size={13} /></button>
             </li>

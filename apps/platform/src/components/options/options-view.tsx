@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PERSONAL } from '@/lib/mode';
 import { Minus, Plus, Trash2 } from 'lucide-react';
 import { legValue, pnlAt, summarise, summariseCurve, summariseNet, yearsToExpiry, type Leg, type ModelLeg } from '@mtv/options';
 import { BROKERS, brokerById, computeFuturesCharges, computeOptionCharges, expirySettlementCharges, formatRupees, toPaise, type Charges } from '@mtv/paper';
@@ -456,7 +457,7 @@ export function OptionsView() {
             )}
             <SavedPositions underlying={underlying} date={chain?.date ?? null} legs={legs} onLoad={loadSaved}
               suggestedName={`${underlying} ${(template && template.legs === legs ? TEMPLATES.find((t) => t.id === template.id)?.name : null) ?? `${legs.length}-leg position`} · ${chain ? fmtDate(chain.date) : ''}`} />
-            {legs.length > 0 && !past && (
+            {PERSONAL && legs.length > 0 && !past && (
               <button type="button" onClick={() => void tradeInLab()} title="Place these legs in Trade lab (paper) at live prices"
                 className="rounded-full bg-accent-soft px-3 py-1 text-[12px] font-bold text-accent-deep hover:bg-accent hover:text-accent-ink">Paper trade in Trade lab</button>
             )}

@@ -53,6 +53,12 @@ import { calibrationSummary, dayDetail, logRun, settlePending } from './seller/c
 import { StudyError, catalog as studyCatalog, computeStudy, encodeNonFinite } from './studies/library';
 import { findInstrument, loadEquities, searchInstruments } from './symbols';
 import { COUNTED_ROUTES, VisitorQuota } from './visitor-quota';
+import { phonePage, startAutopilot } from './autopilot/daily';
+import { appMode, isPersonalRoute } from '@mtv/shared/mode';
+
+// personal (the owner's app) or public (the website): @mtv/shared/mode lists what the public site leaves out.
+const MODE = appMode();
+const PERSONAL = MODE === 'personal';
 
 const PORT = Number(process.env.FEED_PORT ?? 4001);
 const WEB_ORIGIN = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
@@ -111,6 +117,8 @@ const quota = new VisitorQuota(VISITOR_DAILY_RUNS, VISITOR_DAILY_RUNS_PER_IP);
 const counted = (req: FastifyRequest) => !!req.user?.anon && COUNTED_ROUTES.has(req.url.split('?')[0]);
 app.addHook('onRequest', async (req, reply) => {
   const path = req.url.split('?')[0];
+  // The public site has no owner features: its routes do not exist there (Kite login included).
+  if (!PERSONAL && path.startsWith('/api/') && isPersonalRoute(path)) return reply.code(404).send({ error: 'not_found', message: 'Not available on this site' });
   if (!path.startsWith('/api/') || PUBLIC.has(path)) return;
   const claims = verifyFeedToken(tokenFrom(req), TOKEN_SECRET);
   if (!claims) return reply.code(401).send({ error: 'unauthorised', message: 'Please sign in again' });
@@ -228,8 +236,8 @@ async function sellerLogTick() {
   }
   if (min >= 15 * 60 + 55 && sellerSettledOn !== date) { sellerSettledOn = date; await settlePending(date); }
 }
-setInterval(() => { sellerLogTick().catch((e) => app.log.warn({ err: e }, 'seller calibration log failed')); }, 20_000);
-settlePending(new Date(Date.now() + 19800_000).toISOString().slice(0, 10)).catch((e) => app.log.warn({ err: e }, 'seller calibration settle failed'));
+if (PERSONAL) setInterval(() => { sellerLogTick().catch((e) => app.log.warn({ err: e }, 'seller calibration log failed')); }, 20_000);
+if (PERSONAL) settlePending(new Date(Date.now() + 19800_000).toISOString().slice(0, 10)).catch((e) => app.log.warn({ err: e }, 'seller calibration settle failed'));
 app.get('/api/seller/calibration', async () => calibrationSummary());
 app.get<{ Querystring: { date?: string } }>('/api/seller/calibration-day', async (req, reply) => {
   const date = req.query.date ?? '';
@@ -629,11 +637,11 @@ app.post<{ Body: { rules?: RuleSet } }>('/api/scan', async (req, reply) => {
 });
 
 // ---- Trade lab: paper trading of stocks, futures and options on live Kite prices (tradelab/) ----
-tradeLabRoutes(app);
+if (PERSONAL) tradeLabRoutes(app); // its routes and its rule timers
 
 // ---- Paper log: the blind-buy scan run at 9:30 each trading day, closed at 3:00 pm (paper only; paperlog/blind-buy.ts) ----
 app.get('/api/paperlog/blind-buy', async () => paperLog());
-setInterval(() => { takeTodayIfDue().catch((e) => app.log.warn({ err: e }, 'paper log: could not take the list for today')); }, 60_000);
+if (PERSONAL) setInterval(() => { takeTodayIfDue().catch((e) => app.log.warn({ err: e }, 'paper log: could not take the list for today')); }, 60_000);
 
 // ---- Candlestick patterns: every pattern's rule and its test on NSE daily history (the chart finds the patterns
 // itself with packages/rules findPatterns, on the bars it already shows) ----
@@ -669,8 +677,9 @@ app.post<{ Body: ScreenRequest }>('/api/screener/run', async (req, reply) => {
     const body = req.body ?? ({} as ScreenRequest);
     const r = await runScreen(body);
     req.log.info({ tf: r.tf, eligible: r.eligible, matches: r.matches, ms: r.ms }, 'screen');
-    // History is a convenience: a failed write must not fail the screen.
-    await userStore.recordRun({ at: new Date().toISOString(), asOf: r.asOf, matches: r.matches, scanned: r.scanned, ms: r.ms, screenId: body.screenId ?? null, name: body.name?.slice(0, 120) || 'Untitled screen', formula: r.formula, tf: r.tf })
+    // History is a convenience: a failed write must not fail the screen. The public site has no per-user store yet
+    // (milestone 2), so it keeps no history rather than writing visitors into the owner's.
+    if (PERSONAL) await userStore.recordRun({ at: new Date().toISOString(), asOf: r.asOf, matches: r.matches, scanned: r.scanned, ms: r.ms, screenId: body.screenId ?? null, name: body.name?.slice(0, 120) || 'Untitled screen', formula: r.formula, tf: r.tf })
       .catch((e) => req.log.error(e, 'could not record the run'));
     return r;
   } catch (e) {
@@ -741,7 +750,7 @@ app.post<{ Body: BacktestRequest }>('/api/strategy/backtest', async (req, reply)
     req.log.info({ stocks: r.stocks, trades: r.metrics.trades, ms: r.ms }, 'strategy backtest');
     if (req.body.strategyId) {
       const m = r.metrics, s = req.body.strategy;
-      await userStore.recordBacktest(req.body.strategyId, { at: new Date().toISOString(), from: s.from, to: s.to, trades: m.trades, returnPct: m.returnPct, cagrPct: m.cagrPct, maxDrawdownPct: m.maxDrawdownPct, winRatePct: m.winRatePct })
+      if (PERSONAL) await userStore.recordBacktest(req.body.strategyId, { at: new Date().toISOString(), from: s.from, to: s.to, trades: m.trades, returnPct: m.returnPct, cagrPct: m.cagrPct, maxDrawdownPct: m.maxDrawdownPct, winRatePct: m.winRatePct })
         .catch((e) => req.log.error(e, 'could not record the backtest'));
     }
     return r;
@@ -763,11 +772,15 @@ app.get('/api/kite/status', async (req, reply) => {
 });
 app.get<{ Querystring: { back?: string } }>('/api/kite/login', async (req, reply) => {
   if (!kiteConfigured()) return reply.code(400).send({ error: 'not_configured', message: 'Add KITE_API_KEY and KITE_API_SECRET to .env' });
-  const back = req.query.back === 'platform' ? `&redirect_params=${encodeURIComponent('back=platform')}` : '';
+  const b = req.query.back === 'platform' || req.query.back === 'phone' ? req.query.back : null;
+  const back = b ? `&redirect_params=${encodeURIComponent(`back=${b}`)}` : '';
   return reply.redirect(loginUrl() + back);
 });
 app.get<{ Querystring: { request_token?: string; status?: string; back?: string } }>('/api/kite/callback', async (req, reply) => {
-  const back = (result: string) => reply.redirect(req.query.back === 'platform' ? `${PLATFORM_URL}/connect?kite=${result}` : `${WEB_ORIGIN}/admin?kite=${result}`);
+  const back = (result: string) => req.query.back === 'phone'
+    // a phone cannot open the PC's localhost pages: answer with a small page of its own
+    ? reply.type('text/html').send(phonePage(result === 'connected', result === 'connected' ? 'The app is live for today. You can close this page.' : result === 'cancelled' ? 'The login was cancelled. Tap the link in Telegram to try again.' : 'Kite refused the login. Tap the link in Telegram to try again.'))
+    : reply.redirect(req.query.back === 'platform' ? `${PLATFORM_URL}/connect?kite=${result}` : `${WEB_ORIGIN}/admin?kite=${result}`);
   if (!req.query.request_token || req.query.status === 'cancelled') return back('cancelled');
   try {
     const s = await createSession(req.query.request_token);
@@ -813,7 +826,11 @@ else {
 warmMarketViews((m) => app.log.info(m));
 setLiveLog((m) => app.log.info(m));
 const alerts = new AlertEngine((m) => app.log.info(m));
-if (process.env.FEED_NO_ALERTS !== '1') alerts.start();
-if (process.env.FEED_NO_LIVE !== '1' && (await loadSession())) void live.start();
+// Owner-only jobs: alerts (owner channels), Kite live data and the option recorder (the owner's session).
+if (PERSONAL && process.env.FEED_NO_ALERTS !== '1') alerts.start();
+if (PERSONAL && process.env.FEED_NO_LIVE !== '1' && (await loadSession())) void live.start();
 else live.status.state = 'login-required';
 await app.listen({ port: PORT, host: HOST });
+app.log.info(`Mode: ${MODE}${PERSONAL ? '' : ' (owner features, Kite, Trade lab, alerts, autopilot and the user store are off)'}`);
+// Morning Kite login reminder and evening summary on Telegram (src/autopilot/daily.ts).
+if (PERSONAL) startAutopilot((m) => app.log.info(m));
