@@ -1,6 +1,6 @@
 # Experiment registry
 
-Generated 2026-11-24 06:58 UTC from apps/feed/.data/research/experiments.jsonl (32 entries). Detail files: apps/feed/.data/research/quant/<id>-*.json.
+Generated 2026-11-24 07:06 UTC from apps/feed/.data/research/experiments.jsonl (37 entries). Detail files: apps/feed/.data/research/quant/<id>-*.json.
 
 | ID | Family | Name | Period (role) | Data to | Verdict | Result |
 |---|---|---|---|---|---|---|
@@ -36,6 +36,11 @@ Generated 2026-11-24 06:58 UTC from apps/feed/.data/research/experiments.jsonl (
 | E-20261124-017 | S-scalp | Scalp breadth: A1 ORB (same year) | 2025-11-03 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
 | E-20261124-018 | S-scalp | Scalp breadth: A1 ORB, breadth disagrees | 2025-11-03 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
 | E-20261124-019 | S-scalp | Scalp breadth: A1 ORB, heavy+mid agree | 2025-11-03 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-020 | S-scalp | Intraday sell: straddle no stop, every day | 2019-02-11 → 2026-11-23 (other) | EOD 2026-11-23, F&O 2026-11-23, git 71688d6 | fail | Positive at ₹1 slippage (₹1.1 lakh/yr per lot) but about zero at ₹3: the edge is the size of the execution cost. |
+| E-20261124-021 | S-scalp | Intraday sell: straddle 50% leg stop, every day | 2019-02-11 → 2026-11-23 (other) | EOD 2026-11-23, F&O 2026-11-23, git 71688d6 | fail | Same cost sensitivity as no stop. |
+| E-20261124-022 | S-scalp | Intraday sell: strangle no stop, every day | 2019-02-11 → 2026-11-23 (other) | EOD 2026-11-23, F&O 2026-11-23, git 71688d6 | fail | About zero at ₹3 slippage; strikes ±100 pts are relatively wider in early years. |
+| E-20261124-023 | S-scalp | Intraday sell: straddle no stop, expiry day (0 DTE) | 2019-02-11 → 2026-11-23 (other) | EOD 2026-11-23, F&O 2026-11-23, git 71688d6 | lead | Positive in 8/8 years at ₹1 and 7/8 at ₹3 slippage (2023 −₹14k). Entry is the 9:15 open: needs a forward test in the 9:30–15:00 window. |
+| E-20261124-024 | S-scalp | Intraday sell: straddle 50% leg stop, expiry day (0 DTE) | 2019-02-11 → 2026-11-23 (other) | EOD 2026-11-23, F&O 2026-11-23, git 71688d6 | lead | Halves the worst day (−₹27k vs −₹53k); 6/8 years positive at ₹3 slippage. |
 
 ## E-20261111-001 — Regime table NIFTY/BANKNIFTY 2011-2026
 
@@ -388,3 +393,58 @@ Generated 2026-11-24 06:58 UTC from apps/feed/.data/research/experiments.jsonl (
 - Validation: `{"build202511to202605":{"n":126,"spotAvg":-3.4,"buyerNetAvg":-3.34,"sellerNetAvg":-5.15,"buyerRsPerLot":-27315,"sellerRsPerLot":-42468},"check202606to202611":{"n":91,"spotAvg":-0.73,"buyerNetAvg":-1.73,"sellerNetAvg":-3.8,"buyerRsPerLot":-10222,"sellerRsPerLot":-22487}}`
 - Caveats: Only ~1 year of stock minutes Today's members and estimated weights used for the whole year Option prices are an estimate P state change = price vs its TWAP, the no-breadth baseline
 - Verdict: **fail**. 
+
+## E-20261124-020 — Intraday sell: straddle no stop, every day
+
+- Hypothesis: Selling NIFTY weekly options at the day open and buying back at the close earns intraday time decay after costs.
+- Script: `scripts/research/scalp/intraday-sell.ts`
+- Ran: 2026-11-24 07:06 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit 71688d6
+- Costs: zerodha; ₹1 per fill (₹3 stress; stop fills +₹2); charges itemised, dated
+- Params: `{"structure":"straddle no stop","days":"every day","entry":"9:15 open (NSE daily open = first trade)","exit":"NSE close, or the leg stop judged from the day high","lot":65,"money":"₹ per lot at today's index level"}`
+- Validation: `{"stressSlippage3":{"n":1928,"avgRs":-64,"win":0.589,"worstRs":-99782,"maxDdRs":423337,"byYear":{"2019":-127065,"2020":43824,"2021":78143,"2022":-43457,"2023":-70866,"2024":-47765,"2025":40096,"2026":3724},"losingYears":["2019","2022","2023","2024"]}}`
+- Caveats: Real NSE daily option prices; entry at the 9:15 open and exit at the close, not the 9:30–15:00 window Stop time unknown (judged from the day high) Open-auction fills may cost more than ₹1–3 Margin ~₹2.5 lakh per lot (NSE SPAN, 2026-11-23), more on expiry day
+- Verdict: **fail**. Positive at ₹1 slippage (₹1.1 lakh/yr per lot) but about zero at ₹3: the edge is the size of the execution cost.
+
+## E-20261124-021 — Intraday sell: straddle 50% leg stop, every day
+
+- Hypothesis: Selling NIFTY weekly options at the day open and buying back at the close earns intraday time decay after costs.
+- Script: `scripts/research/scalp/intraday-sell.ts`
+- Ran: 2026-11-24 07:06 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit 71688d6
+- Costs: zerodha; ₹1 per fill (₹3 stress; stop fills +₹2); charges itemised, dated
+- Params: `{"structure":"straddle 50% leg stop","days":"every day","entry":"9:15 open (NSE daily open = first trade)","exit":"NSE close, or the leg stop judged from the day high","lot":65,"money":"₹ per lot at today's index level"}`
+- Validation: `{"stressSlippage3":{"n":1928,"avgRs":48,"win":0.564,"worstRs":-67807,"maxDdRs":266983,"byYear":{"2019":-6128,"2020":40912,"2021":137769,"2022":-3110,"2023":-174501,"2024":28487,"2025":-27842,"2026":97182},"losingYears":["2019","2022","2023","2025"]}}`
+- Caveats: Real NSE daily option prices; entry at the 9:15 open and exit at the close, not the 9:30–15:00 window Stop time unknown (judged from the day high) Open-auction fills may cost more than ₹1–3 Margin ~₹2.5 lakh per lot (NSE SPAN, 2026-11-23), more on expiry day
+- Verdict: **fail**. Same cost sensitivity as no stop.
+
+## E-20261124-022 — Intraday sell: strangle no stop, every day
+
+- Hypothesis: Selling NIFTY weekly options at the day open and buying back at the close earns intraday time decay after costs.
+- Script: `scripts/research/scalp/intraday-sell.ts`
+- Ran: 2026-11-24 07:06 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit 71688d6
+- Costs: zerodha; ₹1 per fill (₹3 stress; stop fills +₹2); charges itemised, dated
+- Params: `{"structure":"strangle no stop","days":"every day","entry":"9:15 open (NSE daily open = first trade)","exit":"NSE close, or the leg stop judged from the day high","lot":65,"money":"₹ per lot at today's index level"}`
+- Validation: `{"stressSlippage3":{"n":1928,"avgRs":-22,"win":0.627,"worstRs":-82653,"maxDdRs":369070,"byYear":{"2019":-130680,"2020":-5842,"2021":132572,"2022":110601,"2023":-33679,"2024":-93962,"2025":22006,"2026":-43563},"losingYears":["2019","2020","2023","2024","2026"]}}`
+- Caveats: Real NSE daily option prices; entry at the 9:15 open and exit at the close, not the 9:30–15:00 window Stop time unknown (judged from the day high) Open-auction fills may cost more than ₹1–3 Margin ~₹2.5 lakh per lot (NSE SPAN, 2026-11-23), more on expiry day
+- Verdict: **fail**. About zero at ₹3 slippage; strikes ±100 pts are relatively wider in early years.
+
+## E-20261124-023 — Intraday sell: straddle no stop, expiry day (0 DTE)
+
+- Hypothesis: Selling NIFTY weekly options at the day open and buying back at the close earns intraday time decay after costs.
+- Script: `scripts/research/scalp/intraday-sell.ts`
+- Ran: 2026-11-24 07:06 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit 71688d6
+- Costs: zerodha; ₹1 per fill (₹3 stress; stop fills +₹2); charges itemised, dated
+- Params: `{"structure":"straddle no stop","days":"expiry day (0 DTE)","entry":"9:15 open (NSE daily open = first trade)","exit":"NSE close, or the leg stop judged from the day high","lot":65,"money":"₹ per lot at today's index level"}`
+- Validation: `{"stressSlippage3":{"n":407,"avgRs":815,"win":0.629,"worstRs":-53602,"maxDdRs":64129,"byYear":{"2019":30118,"2020":101046,"2021":20626,"2022":66803,"2023":-13608,"2024":56927,"2025":39267,"2026":30393},"losingYears":["2023"]}}`
+- Caveats: Real NSE daily option prices; entry at the 9:15 open and exit at the close, not the 9:30–15:00 window Stop time unknown (judged from the day high) Open-auction fills may cost more than ₹1–3 Margin ~₹2.5 lakh per lot (NSE SPAN, 2026-11-23), more on expiry day
+- Verdict: **lead**. Positive in 8/8 years at ₹1 and 7/8 at ₹3 slippage (2023 −₹14k). Entry is the 9:15 open: needs a forward test in the 9:30–15:00 window.
+
+## E-20261124-024 — Intraday sell: straddle 50% leg stop, expiry day (0 DTE)
+
+- Hypothesis: Selling NIFTY weekly options at the day open and buying back at the close earns intraday time decay after costs.
+- Script: `scripts/research/scalp/intraday-sell.ts`
+- Ran: 2026-11-24 07:06 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit 71688d6
+- Costs: zerodha; ₹1 per fill (₹3 stress; stop fills +₹2); charges itemised, dated
+- Params: `{"structure":"straddle 50% leg stop","days":"expiry day (0 DTE)","entry":"9:15 open (NSE daily open = first trade)","exit":"NSE close, or the leg stop judged from the day high","lot":65,"money":"₹ per lot at today's index level"}`
+- Validation: `{"stressSlippage3":{"n":407,"avgRs":906,"win":0.619,"worstRs":-27118,"maxDdRs":44877,"byYear":{"2019":33562,"2020":142871,"2021":61171,"2022":36259,"2023":-37344,"2024":70039,"2025":-6509,"2026":68791},"losingYears":["2023","2025"]}}`
+- Caveats: Real NSE daily option prices; entry at the 9:15 open and exit at the close, not the 9:30–15:00 window Stop time unknown (judged from the day high) Open-auction fills may cost more than ₹1–3 Margin ~₹2.5 lakh per lot (NSE SPAN, 2026-11-23), more on expiry day
+- Verdict: **lead**. Halves the worst day (−₹27k vs −₹53k); 6/8 years positive at ₹3 slippage.

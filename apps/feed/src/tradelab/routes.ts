@@ -7,6 +7,7 @@ import { AutoError, autoTick, baskets, deleteBasket, deleteRule, events, execute
 import { PremiumError, premiumEvents, premiumReport, premiumTick, savePremiumRule, type PremiumRule } from './premium';
 import { PivotError, pivotReport, pivotTick, savePivotRule, type PivotRule } from './pivotbuy';
 import { S920Error, s920Events, s920Report, s920Tick, saveS920Rule, type S920Rule } from './straddle920';
+import { ExpError, expEvents, expReport, expTick, saveExpRule, type ExpRule } from './expiry-straddle';
 import { saveWeekendRule, WeekendError, weekendReport, weekendTick, type WeekendRule } from './weekend';
 import { TradeLab } from './engine';
 import { kiteMarket, liveMargin, nseCloses, prismaRepo } from './live';
@@ -22,7 +23,7 @@ export function tradeLabRoutes(app: FastifyInstance) {
     try {
       return await fn((req.body ?? {}) as B, req);
     } catch (e) {
-      if (e instanceof LabError || e instanceof AutoError || e instanceof PremiumError || e instanceof S920Error || e instanceof PivotError || e instanceof WeekendError || (e instanceof Error && /paise|decimal|number/i.test(e.message))) return reply.code(400).send({ error: 'rejected', message: e.message });
+      if (e instanceof LabError || e instanceof AutoError || e instanceof PremiumError || e instanceof S920Error || e instanceof ExpError || e instanceof PivotError || e instanceof WeekendError || (e instanceof Error && /paise|decimal|number/i.test(e.message))) return reply.code(400).send({ error: 'rejected', message: e.message });
       req.log.error(e);
       return reply.code(500).send({ error: 'failed', message: 'Trade lab could not do that' });
     }
@@ -107,6 +108,11 @@ export function tradeLabRoutes(app: FastifyInstance) {
   app.get('/api/tradelab/straddle920', owner(async () => ({ ...(await s920Report()), events: await s920Events(200) })));
   app.post('/api/tradelab/straddle920', owner(async (b: Partial<S920Rule>) => saveS920Rule(b)));
   setInterval(() => { s920Tick(tradeLab).catch((e) => app.log.warn({ err: e }, '9:20 straddle rule failed')); }, 15_000);
+
+  // The expiry-day straddle forward paper test (docs/quant/05): 9:30 → 15:00 on expiry day, leg stops + a no-stop version.
+  app.get('/api/tradelab/expiry-straddle', owner(async () => ({ ...(await expReport()), events: await expEvents(200) })));
+  app.post('/api/tradelab/expiry-straddle', owner(async (b: Partial<ExpRule>) => saveExpRule(b)));
+  setInterval(() => { expTick(tradeLab).catch((e) => app.log.warn({ err: e }, 'expiry-day straddle rule failed')); }, 15_000);
 
   // The weekend theta test: Friday → Tuesday expiry paper rule (off by default) and the Monday price check (always on).
   app.get('/api/tradelab/weekend', owner(async () => weekendReport()));

@@ -99,6 +99,20 @@ export const s920Api = {
   save: (r: Partial<S920Rule>) => feed<S920Rule>('tradelab/straddle920', r),
 };
 
+// Expiry-day straddle forward paper test (feed: src/tradelab/expiry-straddle.ts).
+export type ExpRule = { id: string; name: string; enabled: boolean; underlying: 'NIFTY'; entry: string; exit: string; stopPct: number; lots: number; updatedAt: string };
+export type ExpLeg = { symbol: string; label: string; kind: 'CE' | 'PE'; qty: number; bidPaise: number; askPaise: number; fillPaise: number | null; stopPaise: number | null; exitPaise: number | null; how: 'stop' | 'time' | 'open' | null };
+export type ExpDay = { date: string; expiry: string; at: number; spotPaise: number; strikePaise: number; legs: ExpLeg[]; closedAt: number | null; clean: boolean; note: string | null; netPaise: number | null; chargesPaise: number; noStop: { legs: { label: string; sellPaise: number; buyPaise: number | null }[]; netPaise: number | null } | null };
+export type ExpReport = {
+  rule: ExpRule; days: ExpDay[]; events: { at: number; action: string; text: string }[];
+  totals: { days: number; clean: number; won: number; netPaise: number; worstPaise: number; chargesPaise: number; stopsHit: number };
+  noStop: { days: number; won: number; netPaise: number; worstPaise: number };
+};
+export const expApi = {
+  report: () => feed<ExpReport>('tradelab/expiry-straddle'),
+  save: (r: Partial<ExpRule>) => feed<ExpRule>('tradelab/expiry-straddle', r),
+};
+
 // ---------------------------------------------------------------- the option pivot buy forward paper test
 
 export type PivotRule = { id: string; name: string; enabled: boolean; lots: number; targetPts: number; stopPts: number; maxTrades: number; entryFrom: string; entryTo: string; exit: string; updatedAt: string };
