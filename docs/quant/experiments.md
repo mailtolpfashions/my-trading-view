@@ -1,6 +1,6 @@
 # Experiment registry
 
-Generated 2026-11-16 20:23 UTC from apps/feed/.data/research/experiments.jsonl (13 entries). Detail files: apps/feed/.data/research/quant/<id>-*.json.
+Generated 2026-11-24 06:58 UTC from apps/feed/.data/research/experiments.jsonl (32 entries). Detail files: apps/feed/.data/research/quant/<id>-*.json.
 
 | ID | Family | Name | Period (role) | Data to | Verdict | Result |
 |---|---|---|---|---|---|---|
@@ -17,6 +17,25 @@ Generated 2026-11-16 20:23 UTC from apps/feed/.data/research/experiments.jsonl (
 | E-20261111-011 | P12 | P12 holdout 2024-01 → last day: weekly Monday books, monthly benchmark, controls (read once) | 2024-01-01 → 2026-11-09 (holdout) | EOD 2026-11-09, F&O 2026-11-09, git 7163c8e | lead | W (Mon→1 day left, high IV) ₹94576; Wx (Mon→expiry) ₹141602 (Thu-era ₹94085, Tue-era ₹28491); M ₹178685. W×3 holdout CAGR 9.14% DD 12.18%. |
 | E-20261116-001 | B9 | B9b momentum with a NIFTY market filter | 2011-09-01 → 2023-12-31 (train+validation) | EOD 2026-11-13, F&O 2026-11-13, git a7fbded | fail | Chosen lb252 open10 stop0 skip0 roc126-keep: validation CAGR 15.96% vs NIFTY 14.8%, DD 44.25% vs 38.44%; 0/24 of its filter pass. |
 | E-20261116-002 | B9-final | B9c momentum + NIFTY 100-day filter, one-time final check 2024→ | 2024-01-01 → 2026-11-13 (holdout) | EOD 2026-11-13, F&O 2026-11-13, git a7fbded | fail | Filter family median CAGR -4% / DD 41% vs NIFTY 5.2% / 15.77%; unfiltered median DD 42%. |
+| E-20261124-001 | S-scalp | Scalp A1 ORB, ST(5,2) exit | 2023-01-02 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-002 | S-scalp | Scalp A2 ORB, EMA-band exit | 2023-01-02 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-003 | S-scalp | Scalp A3 ORB, exit when not strong | 2023-01-02 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-004 | S-scalp | Scalp A4 ORB + 2nd attempt | 2023-01-02 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-005 | S-scalp | Scalp B1 pullback, target prior extreme | 2023-01-02 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-006 | S-scalp | Scalp B2 pullback, ST trail | 2023-01-02 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-007 | S-scalp | Scalp C3 stretched → back to TWAP | 2023-01-02 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-008 | S-scalp | Scalp C2 narrow<0.7 TWAP expansion | 2023-01-02 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-009 | S-scalp | Scalp C1 narrow<0.5 range break | 2023-01-02 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-010 | S-scalp | Scalp C2 narrow<0.5 TWAP expansion | 2023-01-02 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-011 | S-scalp | Scalp C1 narrow<0.6 range break | 2023-01-02 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-012 | S-scalp | Scalp C2 narrow<0.6 TWAP expansion | 2023-01-02 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-013 | S-scalp | Scalp C1 narrow<0.7 range break | 2023-01-02 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-014 | S-scalp | Scalp breadth: H state change | 2025-11-03 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-015 | S-scalp | Scalp breadth: HM state change | 2025-11-03 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-016 | S-scalp | Scalp breadth: P state change | 2025-11-03 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-017 | S-scalp | Scalp breadth: A1 ORB (same year) | 2025-11-03 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-018 | S-scalp | Scalp breadth: A1 ORB, breadth disagrees | 2025-11-03 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
+| E-20261124-019 | S-scalp | Scalp breadth: A1 ORB, heavy+mid agree | 2025-11-03 → 2026-11-23 (train+validation) | EOD 2026-11-23, F&O 2026-11-23, git c37a281 | fail |  |
 
 ## E-20261111-001 — Regime table NIFTY/BANKNIFTY 2011-2026
 
@@ -160,3 +179,212 @@ Generated 2026-11-16 20:23 UTC from apps/feed/.data/research/experiments.jsonl (
 - Validation: `{"holdoutTouched":true,"runs":"once, no tuning","pickedFrom":"E-20261116-001 (seen on 2019–2023, so this is the only fair test)"}`
 - Caveats: Under 3 years of data; one market phase. Slippage 0.03% a side assumed.
 - Verdict: **fail**. Filter family median CAGR -4% / DD 41% vs NIFTY 5.2% / 15.77%; unfiltered median DD 42%.
+
+## E-20261124-001 — Scalp A1 ORB, ST(5,2) exit
+
+- Hypothesis: A "Long and the Short" scalping-series setup (part 5), as fixed rules on NIFTY spot 3-min bars, makes money on the 1-ITM weekly option after costs, as buyer or seller.
+- Script: `scripts/research/scalp/setups.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:51 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill (real recorded spread mean 0.46 pt); charges itemised, dated
+- Params: `{"setup":"A1 ORB, ST(5,2) exit","bars":"3m NIFTY spot","entryWindow":"9:30–14:45 bar open","exitBy":"15:00","strike":"1 ITM vs forward (round 100)","expiry":"nearest weekly; next on 0 DTE (both) / 1 DTE (buyer)"}`
+- Validation: `{"rulesBuiltOn":"2023–2025","holdout2026":{"n":218,"spotAvg":-3.15,"buyerNetAvg":-3.47,"sellerNetAvg":-5.01,"buyerRsPerLot":-49148,"sellerRsPerLot":-71001,"buyerWin":0.3,"sellerWin":0.33},"dev":{"n":725,"spotAvg":-2.16,"buyerNetAvg":-2.76,"sellerNetAvg":-4.6,"buyerRsPerLot":-122586,"sellerRsPerLot":-200530,"buyerWin":0.34,"sellerWin":0.35}}`
+- Caveats: Option prices are a Black-76 estimate (day IV held fixed); on 2 recorded days the 30-min change was within ~1 pt on average, ±6 pt per trade Spot index minutes (no futures before 2026-11) 2023 minute high/low slightly narrower than daily on 60 days
+- Verdict: **fail**. 
+
+## E-20261124-002 — Scalp A2 ORB, EMA-band exit
+
+- Hypothesis: A "Long and the Short" scalping-series setup (part 5), as fixed rules on NIFTY spot 3-min bars, makes money on the 1-ITM weekly option after costs, as buyer or seller.
+- Script: `scripts/research/scalp/setups.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:51 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill (real recorded spread mean 0.46 pt); charges itemised, dated
+- Params: `{"setup":"A2 ORB, EMA-band exit","bars":"3m NIFTY spot","entryWindow":"9:30–14:45 bar open","exitBy":"15:00","strike":"1 ITM vs forward (round 100)","expiry":"nearest weekly; next on 0 DTE (both) / 1 DTE (buyer)"}`
+- Validation: `{"rulesBuiltOn":"2023–2025","holdout2026":{"n":218,"spotAvg":-4.18,"buyerNetAvg":-4.2,"sellerNetAvg":-5.32,"buyerRsPerLot":-59526,"sellerRsPerLot":-75323,"buyerWin":0.29,"sellerWin":0.31},"dev":{"n":725,"spotAvg":-3.36,"buyerNetAvg":-3.59,"sellerNetAvg":-5.21,"buyerRsPerLot":-156996,"sellerRsPerLot":-229226,"buyerWin":0.32,"sellerWin":0.34}}`
+- Caveats: Option prices are a Black-76 estimate (day IV held fixed); on 2 recorded days the 30-min change was within ~1 pt on average, ±6 pt per trade Spot index minutes (no futures before 2026-11) 2023 minute high/low slightly narrower than daily on 60 days
+- Verdict: **fail**. 
+
+## E-20261124-003 — Scalp A3 ORB, exit when not strong
+
+- Hypothesis: A "Long and the Short" scalping-series setup (part 5), as fixed rules on NIFTY spot 3-min bars, makes money on the 1-ITM weekly option after costs, as buyer or seller.
+- Script: `scripts/research/scalp/setups.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:51 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill (real recorded spread mean 0.46 pt); charges itemised, dated
+- Params: `{"setup":"A3 ORB, exit when not strong","bars":"3m NIFTY spot","entryWindow":"9:30–14:45 bar open","exitBy":"15:00","strike":"1 ITM vs forward (round 100)","expiry":"nearest weekly; next on 0 DTE (both) / 1 DTE (buyer)"}`
+- Validation: `{"rulesBuiltOn":"2023–2025","holdout2026":{"n":218,"spotAvg":-4.88,"buyerNetAvg":-5.03,"sellerNetAvg":-5.33,"buyerRsPerLot":-71233,"sellerRsPerLot":-75556,"buyerWin":0.26,"sellerWin":0.26},"dev":{"n":725,"spotAvg":-0.59,"buyerNetAvg":-2.19,"sellerNetAvg":-3.04,"buyerRsPerLot":-91008,"sellerRsPerLot":-129478,"buyerWin":0.31,"sellerWin":0.32}}`
+- Caveats: Option prices are a Black-76 estimate (day IV held fixed); on 2 recorded days the 30-min change was within ~1 pt on average, ±6 pt per trade Spot index minutes (no futures before 2026-11) 2023 minute high/low slightly narrower than daily on 60 days
+- Verdict: **fail**. 
+
+## E-20261124-004 — Scalp A4 ORB + 2nd attempt
+
+- Hypothesis: A "Long and the Short" scalping-series setup (part 5), as fixed rules on NIFTY spot 3-min bars, makes money on the 1-ITM weekly option after costs, as buyer or seller.
+- Script: `scripts/research/scalp/setups.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:51 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill (real recorded spread mean 0.46 pt); charges itemised, dated
+- Params: `{"setup":"A4 ORB + 2nd attempt","bars":"3m NIFTY spot","entryWindow":"9:30–14:45 bar open","exitBy":"15:00","strike":"1 ITM vs forward (round 100)","expiry":"nearest weekly; next on 0 DTE (both) / 1 DTE (buyer)"}`
+- Validation: `{"rulesBuiltOn":"2023–2025","holdout2026":{"n":218,"spotAvg":-3.15,"buyerNetAvg":-3.47,"sellerNetAvg":-5.01,"buyerRsPerLot":-49148,"sellerRsPerLot":-71001,"buyerWin":0.3,"sellerWin":0.33},"dev":{"n":749,"spotAvg":-2.07,"buyerNetAvg":-2.69,"sellerNetAvg":-4.6,"buyerRsPerLot":-117441,"sellerRsPerLot":-201637,"buyerWin":0.33,"sellerWin":0.35}}`
+- Caveats: Option prices are a Black-76 estimate (day IV held fixed); on 2 recorded days the 30-min change was within ~1 pt on average, ±6 pt per trade Spot index minutes (no futures before 2026-11) 2023 minute high/low slightly narrower than daily on 60 days
+- Verdict: **fail**. 
+
+## E-20261124-005 — Scalp B1 pullback, target prior extreme
+
+- Hypothesis: A "Long and the Short" scalping-series setup (part 5), as fixed rules on NIFTY spot 3-min bars, makes money on the 1-ITM weekly option after costs, as buyer or seller.
+- Script: `scripts/research/scalp/setups.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:51 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill (real recorded spread mean 0.46 pt); charges itemised, dated
+- Params: `{"setup":"B1 pullback, target prior extreme","bars":"3m NIFTY spot","entryWindow":"9:30–14:45 bar open","exitBy":"15:00","strike":"1 ITM vs forward (round 100)","expiry":"nearest weekly; next on 0 DTE (both) / 1 DTE (buyer)"}`
+- Validation: `{"rulesBuiltOn":"2023–2025","holdout2026":{"n":78,"spotAvg":0.36,"buyerNetAvg":-1.99,"sellerNetAvg":-2.1,"buyerRsPerLot":-10096,"sellerRsPerLot":-10646,"buyerWin":0.55,"sellerWin":0.55},"dev":{"n":241,"spotAvg":-0.15,"buyerNetAvg":-2.11,"sellerNetAvg":-2.17,"buyerRsPerLot":-31506,"sellerRsPerLot":-31740,"buyerWin":0.58,"sellerWin":0.59}}`
+- Caveats: Option prices are a Black-76 estimate (day IV held fixed); on 2 recorded days the 30-min change was within ~1 pt on average, ±6 pt per trade Spot index minutes (no futures before 2026-11) 2023 minute high/low slightly narrower than daily on 60 days
+- Verdict: **fail**. 
+
+## E-20261124-006 — Scalp B2 pullback, ST trail
+
+- Hypothesis: A "Long and the Short" scalping-series setup (part 5), as fixed rules on NIFTY spot 3-min bars, makes money on the 1-ITM weekly option after costs, as buyer or seller.
+- Script: `scripts/research/scalp/setups.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:51 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill (real recorded spread mean 0.46 pt); charges itemised, dated
+- Params: `{"setup":"B2 pullback, ST trail","bars":"3m NIFTY spot","entryWindow":"9:30–14:45 bar open","exitBy":"15:00","strike":"1 ITM vs forward (round 100)","expiry":"nearest weekly; next on 0 DTE (both) / 1 DTE (buyer)"}`
+- Validation: `{"rulesBuiltOn":"2023–2025","holdout2026":{"n":78,"spotAvg":-3.14,"buyerNetAvg":-3.83,"sellerNetAvg":-4.46,"buyerRsPerLot":-19423,"sellerRsPerLot":-22610,"buyerWin":0.19,"sellerWin":0.21},"dev":{"n":241,"spotAvg":-1.88,"buyerNetAvg":-3.08,"sellerNetAvg":-3.24,"buyerRsPerLot":-48762,"sellerRsPerLot":-50729,"buyerWin":0.26,"sellerWin":0.29}}`
+- Caveats: Option prices are a Black-76 estimate (day IV held fixed); on 2 recorded days the 30-min change was within ~1 pt on average, ±6 pt per trade Spot index minutes (no futures before 2026-11) 2023 minute high/low slightly narrower than daily on 60 days
+- Verdict: **fail**. 
+
+## E-20261124-007 — Scalp C3 stretched → back to TWAP
+
+- Hypothesis: A "Long and the Short" scalping-series setup (part 5), as fixed rules on NIFTY spot 3-min bars, makes money on the 1-ITM weekly option after costs, as buyer or seller.
+- Script: `scripts/research/scalp/setups.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:51 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill (real recorded spread mean 0.46 pt); charges itemised, dated
+- Params: `{"setup":"C3 stretched → back to TWAP","bars":"3m NIFTY spot","entryWindow":"9:30–14:45 bar open","exitBy":"15:00","strike":"1 ITM vs forward (round 100)","expiry":"nearest weekly; next on 0 DTE (both) / 1 DTE (buyer)"}`
+- Validation: `{"rulesBuiltOn":"2023–2025","holdout2026":{"n":51,"spotAvg":2.36,"buyerNetAvg":-0.17,"sellerNetAvg":-1.52,"buyerRsPerLot":-578,"sellerRsPerLot":-5025,"buyerWin":0.51,"sellerWin":0.55},"dev":{"n":127,"spotAvg":-4.54,"buyerNetAvg":-4.66,"sellerNetAvg":-5.22,"buyerRsPerLot":-27088,"sellerRsPerLot":-32997,"buyerWin":0.36,"sellerWin":0.4}}`
+- Caveats: Option prices are a Black-76 estimate (day IV held fixed); on 2 recorded days the 30-min change was within ~1 pt on average, ±6 pt per trade Spot index minutes (no futures before 2026-11) 2023 minute high/low slightly narrower than daily on 60 days
+- Verdict: **fail**. 
+
+## E-20261124-008 — Scalp C2 narrow<0.7 TWAP expansion
+
+- Hypothesis: A "Long and the Short" scalping-series setup (part 5), as fixed rules on NIFTY spot 3-min bars, makes money on the 1-ITM weekly option after costs, as buyer or seller.
+- Script: `scripts/research/scalp/setups.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:51 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill (real recorded spread mean 0.46 pt); charges itemised, dated
+- Params: `{"setup":"C2 narrow<0.7 TWAP expansion","bars":"3m NIFTY spot","entryWindow":"9:30–14:45 bar open","exitBy":"15:00","strike":"1 ITM vs forward (round 100)","expiry":"nearest weekly; next on 0 DTE (both) / 1 DTE (buyer)"}`
+- Validation: `{"rulesBuiltOn":"2023–2025","holdout2026":{"n":39,"spotAvg":-1.32,"buyerNetAvg":-2.92,"sellerNetAvg":-2.73,"buyerRsPerLot":-7403,"sellerRsPerLot":-6917,"buyerWin":0.38,"sellerWin":0.38},"dev":{"n":128,"spotAvg":2.79,"buyerNetAvg":0.15,"sellerNetAvg":-1.11,"buyerRsPerLot":-9413,"sellerRsPerLot":-17183,"buyerWin":0.34,"sellerWin":0.38}}`
+- Caveats: Option prices are a Black-76 estimate (day IV held fixed); on 2 recorded days the 30-min change was within ~1 pt on average, ±6 pt per trade Spot index minutes (no futures before 2026-11) 2023 minute high/low slightly narrower than daily on 60 days
+- Verdict: **fail**. 
+
+## E-20261124-009 — Scalp C1 narrow<0.5 range break
+
+- Hypothesis: A "Long and the Short" scalping-series setup (part 5), as fixed rules on NIFTY spot 3-min bars, makes money on the 1-ITM weekly option after costs, as buyer or seller.
+- Script: `scripts/research/scalp/setups.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:51 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill (real recorded spread mean 0.46 pt); charges itemised, dated
+- Params: `{"setup":"C1 narrow<0.5 range break","bars":"3m NIFTY spot","entryWindow":"9:30–14:45 bar open","exitBy":"15:00","strike":"1 ITM vs forward (round 100)","expiry":"nearest weekly; next on 0 DTE (both) / 1 DTE (buyer)"}`
+- Validation: `{"rulesBuiltOn":"2023–2025","holdout2026":{"n":22,"spotAvg":-16.85,"buyerNetAvg":-11.95,"sellerNetAvg":-12.17,"buyerRsPerLot":-17088,"sellerRsPerLot":-17408,"buyerWin":0.18,"sellerWin":0.23},"dev":{"n":44,"spotAvg":3.05,"buyerNetAvg":0.2,"sellerNetAvg":-0.37,"buyerRsPerLot":4025,"sellerRsPerLot":2218,"buyerWin":0.41,"sellerWin":0.41}}`
+- Caveats: Option prices are a Black-76 estimate (day IV held fixed); on 2 recorded days the 30-min change was within ~1 pt on average, ±6 pt per trade Spot index minutes (no futures before 2026-11) 2023 minute high/low slightly narrower than daily on 60 days
+- Verdict: **fail**. 
+
+## E-20261124-010 — Scalp C2 narrow<0.5 TWAP expansion
+
+- Hypothesis: A "Long and the Short" scalping-series setup (part 5), as fixed rules on NIFTY spot 3-min bars, makes money on the 1-ITM weekly option after costs, as buyer or seller.
+- Script: `scripts/research/scalp/setups.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:51 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill (real recorded spread mean 0.46 pt); charges itemised, dated
+- Params: `{"setup":"C2 narrow<0.5 TWAP expansion","bars":"3m NIFTY spot","entryWindow":"9:30–14:45 bar open","exitBy":"15:00","strike":"1 ITM vs forward (round 100)","expiry":"nearest weekly; next on 0 DTE (both) / 1 DTE (buyer)"}`
+- Validation: `{"rulesBuiltOn":"2023–2025","holdout2026":{"n":18,"spotAvg":-8.82,"buyerNetAvg":-7.15,"sellerNetAvg":-7.1,"buyerRsPerLot":-8371,"sellerRsPerLot":-8307,"buyerWin":0.33,"sellerWin":0.33},"dev":{"n":38,"spotAvg":7.39,"buyerNetAvg":2.93,"sellerNetAvg":2.51,"buyerRsPerLot":10990,"sellerRsPerLot":9786,"buyerWin":0.42,"sellerWin":0.42}}`
+- Caveats: Option prices are a Black-76 estimate (day IV held fixed); on 2 recorded days the 30-min change was within ~1 pt on average, ±6 pt per trade Spot index minutes (no futures before 2026-11) 2023 minute high/low slightly narrower than daily on 60 days
+- Verdict: **fail**. 
+
+## E-20261124-011 — Scalp C1 narrow<0.6 range break
+
+- Hypothesis: A "Long and the Short" scalping-series setup (part 5), as fixed rules on NIFTY spot 3-min bars, makes money on the 1-ITM weekly option after costs, as buyer or seller.
+- Script: `scripts/research/scalp/setups.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:51 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill (real recorded spread mean 0.46 pt); charges itemised, dated
+- Params: `{"setup":"C1 narrow<0.6 range break","bars":"3m NIFTY spot","entryWindow":"9:30–14:45 bar open","exitBy":"15:00","strike":"1 ITM vs forward (round 100)","expiry":"nearest weekly; next on 0 DTE (both) / 1 DTE (buyer)"}`
+- Validation: `{"rulesBuiltOn":"2023–2025","holdout2026":{"n":33,"spotAvg":-3.54,"buyerNetAvg":-4.17,"sellerNetAvg":-4.83,"buyerRsPerLot":-8935,"sellerRsPerLot":-10352,"buyerWin":0.3,"sellerWin":0.33},"dev":{"n":77,"spotAvg":3.02,"buyerNetAvg":0.55,"sellerNetAvg":-1.27,"buyerRsPerLot":-1841,"sellerRsPerLot":-7754,"buyerWin":0.4,"sellerWin":0.4}}`
+- Caveats: Option prices are a Black-76 estimate (day IV held fixed); on 2 recorded days the 30-min change was within ~1 pt on average, ±6 pt per trade Spot index minutes (no futures before 2026-11) 2023 minute high/low slightly narrower than daily on 60 days
+- Verdict: **fail**. 
+
+## E-20261124-012 — Scalp C2 narrow<0.6 TWAP expansion
+
+- Hypothesis: A "Long and the Short" scalping-series setup (part 5), as fixed rules on NIFTY spot 3-min bars, makes money on the 1-ITM weekly option after costs, as buyer or seller.
+- Script: `scripts/research/scalp/setups.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:51 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill (real recorded spread mean 0.46 pt); charges itemised, dated
+- Params: `{"setup":"C2 narrow<0.6 TWAP expansion","bars":"3m NIFTY spot","entryWindow":"9:30–14:45 bar open","exitBy":"15:00","strike":"1 ITM vs forward (round 100)","expiry":"nearest weekly; next on 0 DTE (both) / 1 DTE (buyer)"}`
+- Validation: `{"rulesBuiltOn":"2023–2025","holdout2026":{"n":27,"spotAvg":-1.58,"buyerNetAvg":-3.07,"sellerNetAvg":-2.65,"buyerRsPerLot":-5380,"sellerRsPerLot":-4652,"buyerWin":0.41,"sellerWin":0.41},"dev":{"n":91,"spotAvg":4.54,"buyerNetAvg":1.43,"sellerNetAvg":-0.28,"buyerRsPerLot":1919,"sellerRsPerLot":-5474,"buyerWin":0.37,"sellerWin":0.4}}`
+- Caveats: Option prices are a Black-76 estimate (day IV held fixed); on 2 recorded days the 30-min change was within ~1 pt on average, ±6 pt per trade Spot index minutes (no futures before 2026-11) 2023 minute high/low slightly narrower than daily on 60 days
+- Verdict: **fail**. 
+
+## E-20261124-013 — Scalp C1 narrow<0.7 range break
+
+- Hypothesis: A "Long and the Short" scalping-series setup (part 5), as fixed rules on NIFTY spot 3-min bars, makes money on the 1-ITM weekly option after costs, as buyer or seller.
+- Script: `scripts/research/scalp/setups.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:51 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill (real recorded spread mean 0.46 pt); charges itemised, dated
+- Params: `{"setup":"C1 narrow<0.7 range break","bars":"3m NIFTY spot","entryWindow":"9:30–14:45 bar open","exitBy":"15:00","strike":"1 ITM vs forward (round 100)","expiry":"nearest weekly; next on 0 DTE (both) / 1 DTE (buyer)"}`
+- Validation: `{"rulesBuiltOn":"2023–2025","holdout2026":{"n":47,"spotAvg":3.14,"buyerNetAvg":-0.13,"sellerNetAvg":-1.07,"buyerRsPerLot":-405,"sellerRsPerLot":-3263,"buyerWin":0.38,"sellerWin":0.4},"dev":{"n":136,"spotAvg":-1.37,"buyerNetAvg":-2.4,"sellerNetAvg":-3.91,"buyerRsPerLot":-25799,"sellerRsPerLot":-38782,"buyerWin":0.35,"sellerWin":0.35}}`
+- Caveats: Option prices are a Black-76 estimate (day IV held fixed); on 2 recorded days the 30-min change was within ~1 pt on average, ±6 pt per trade Spot index minutes (no futures before 2026-11) 2023 minute high/low slightly narrower than daily on 60 days
+- Verdict: **fail**. 
+
+## E-20261124-014 — Scalp breadth: H state change
+
+- Hypothesis: Weighted advance–decline lines of NIFTY 50 tiers (series part 4) give NIFTY scalp signals or improve the opening-range breakout, after option costs.
+- Script: `scripts/research/scalp/breadth.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:58 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill; charges itemised, dated
+- Params: `{"setup":"H state change","weights":"least squares on 1-min returns since 2026-09-24, R² 0.908","tiers":"heavy ≥2%, mid 1–2%, light <1%","state":"line vs its running mean since 9:15"}`
+- Validation: `{"build202511to202605":{"n":592,"spotAvg":4.31,"buyerNetAvg":1.08,"sellerNetAvg":-0.62,"buyerRsPerLot":38040,"sellerRsPerLot":-27091},"check202606to202611":{"n":373,"spotAvg":-0.88,"buyerNetAvg":-2.44,"sellerNetAvg":-3.19,"buyerRsPerLot":-59068,"sellerRsPerLot":-77333}}`
+- Caveats: Only ~1 year of stock minutes Today's members and estimated weights used for the whole year Option prices are an estimate P state change = price vs its TWAP, the no-breadth baseline
+- Verdict: **fail**. 
+
+## E-20261124-015 — Scalp breadth: HM state change
+
+- Hypothesis: Weighted advance–decline lines of NIFTY 50 tiers (series part 4) give NIFTY scalp signals or improve the opening-range breakout, after option costs.
+- Script: `scripts/research/scalp/breadth.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:58 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill; charges itemised, dated
+- Params: `{"setup":"HM state change","weights":"least squares on 1-min returns since 2026-09-24, R² 0.908","tiers":"heavy ≥2%, mid 1–2%, light <1%","state":"line vs its running mean since 9:15"}`
+- Validation: `{"build202511to202605":{"n":651,"spotAvg":3.32,"buyerNetAvg":0.47,"sellerNetAvg":-0.86,"buyerRsPerLot":19749,"sellerRsPerLot":-36973},"check202606to202611":{"n":428,"spotAvg":0.81,"buyerNetAvg":-0.93,"sellerNetAvg":-2.5,"buyerRsPerLot":-25765,"sellerRsPerLot":-69685}}`
+- Caveats: Only ~1 year of stock minutes Today's members and estimated weights used for the whole year Option prices are an estimate P state change = price vs its TWAP, the no-breadth baseline
+- Verdict: **fail**. 
+
+## E-20261124-016 — Scalp breadth: P state change
+
+- Hypothesis: Weighted advance–decline lines of NIFTY 50 tiers (series part 4) give NIFTY scalp signals or improve the opening-range breakout, after option costs.
+- Script: `scripts/research/scalp/breadth.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:58 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill; charges itemised, dated
+- Params: `{"setup":"P state change","weights":"least squares on 1-min returns since 2026-09-24, R² 0.908","tiers":"heavy ≥2%, mid 1–2%, light <1%","state":"line vs its running mean since 9:15"}`
+- Validation: `{"build202511to202605":{"n":550,"spotAvg":5.3,"buyerNetAvg":1.4,"sellerNetAvg":0.18,"buyerRsPerLot":50084,"sellerRsPerLot":6000},"check202606to202611":{"n":474,"spotAvg":1.26,"buyerNetAvg":-0.84,"sellerNetAvg":-2.04,"buyerRsPerLot":-25918,"sellerRsPerLot":-62888}}`
+- Caveats: Only ~1 year of stock minutes Today's members and estimated weights used for the whole year Option prices are an estimate P state change = price vs its TWAP, the no-breadth baseline
+- Verdict: **fail**. 
+
+## E-20261124-017 — Scalp breadth: A1 ORB (same year)
+
+- Hypothesis: Weighted advance–decline lines of NIFTY 50 tiers (series part 4) give NIFTY scalp signals or improve the opening-range breakout, after option costs.
+- Script: `scripts/research/scalp/breadth.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:58 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill; charges itemised, dated
+- Params: `{"setup":"A1 ORB (same year)","weights":"least squares on 1-min returns since 2026-09-24, R² 0.908","tiers":"heavy ≥2%, mid 1–2%, light <1%","state":"line vs its running mean since 9:15"}`
+- Validation: `{"build202511to202605":{"n":140,"spotAvg":-2.43,"buyerNetAvg":-2.87,"sellerNetAvg":-4.61,"buyerRsPerLot":-26998,"sellerRsPerLot":-43213},"check202606to202611":{"n":119,"spotAvg":-2.15,"buyerNetAvg":-2.82,"sellerNetAvg":-4.39,"buyerRsPerLot":-21819,"sellerRsPerLot":-33978}}`
+- Caveats: Only ~1 year of stock minutes Today's members and estimated weights used for the whole year Option prices are an estimate P state change = price vs its TWAP, the no-breadth baseline
+- Verdict: **fail**. 
+
+## E-20261124-018 — Scalp breadth: A1 ORB, breadth disagrees
+
+- Hypothesis: Weighted advance–decline lines of NIFTY 50 tiers (series part 4) give NIFTY scalp signals or improve the opening-range breakout, after option costs.
+- Script: `scripts/research/scalp/breadth.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:58 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill; charges itemised, dated
+- Params: `{"setup":"A1 ORB, breadth disagrees","weights":"least squares on 1-min returns since 2026-09-24, R² 0.908","tiers":"heavy ≥2%, mid 1–2%, light <1%","state":"line vs its running mean since 9:15"}`
+- Validation: `{"build202511to202605":{"n":14,"spotAvg":6.22,"buyerNetAvg":1.33,"sellerNetAvg":0.24,"buyerRsPerLot":317,"sellerRsPerLot":-744},"check202606to202611":{"n":28,"spotAvg":-6.74,"buyerNetAvg":-6.37,"sellerNetAvg":-6.31,"buyerRsPerLot":-11597,"sellerRsPerLot":-11491}}`
+- Caveats: Only ~1 year of stock minutes Today's members and estimated weights used for the whole year Option prices are an estimate P state change = price vs its TWAP, the no-breadth baseline
+- Verdict: **fail**. 
+
+## E-20261124-019 — Scalp breadth: A1 ORB, heavy+mid agree
+
+- Hypothesis: Weighted advance–decline lines of NIFTY 50 tiers (series part 4) give NIFTY scalp signals or improve the opening-range breakout, after option costs.
+- Script: `scripts/research/scalp/breadth.ts + options-estimate.ts`
+- Ran: 2026-11-24 06:58 UTC; data: EOD to 2026-11-23, F&O 2011-01-03 → 2026-11-23, minutes to 2026-11, commit c37a281
+- Costs: zerodha; 0.5 pt per option fill; charges itemised, dated
+- Params: `{"setup":"A1 ORB, heavy+mid agree","weights":"least squares on 1-min returns since 2026-09-24, R² 0.908","tiers":"heavy ≥2%, mid 1–2%, light <1%","state":"line vs its running mean since 9:15"}`
+- Validation: `{"build202511to202605":{"n":126,"spotAvg":-3.4,"buyerNetAvg":-3.34,"sellerNetAvg":-5.15,"buyerRsPerLot":-27315,"sellerRsPerLot":-42468},"check202606to202611":{"n":91,"spotAvg":-0.73,"buyerNetAvg":-1.73,"sellerNetAvg":-3.8,"buyerRsPerLot":-10222,"sellerRsPerLot":-22487}}`
+- Caveats: Only ~1 year of stock minutes Today's members and estimated weights used for the whole year Option prices are an estimate P state change = price vs its TWAP, the no-breadth baseline
+- Verdict: **fail**. 
