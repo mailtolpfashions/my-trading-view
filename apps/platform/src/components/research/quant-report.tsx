@@ -11,10 +11,11 @@ import { useFeed } from '@/lib/feed';
 import { FAMILY_LABEL, VERDICT_LABEL, quantApi, type QuantDetail, type QuantExperiment, type QuantSetting, type QuantTrade } from '@/lib/quant';
 import { Card } from '../tools/tool-shell';
 import { Lines, Money, Table, inr, tone } from '../tools/options/selling-charts';
+import { QuantPortfolio } from './quant-portfolio';
 import { QuantSimple } from './quant-simple';
 import { QuantStrategies } from './quant-strategies';
 
-type Tab = 'simple' | 'strategies' | 'summary' | 'experiments' | 'explore';
+type Tab = 'simple' | 'portfolio' | 'strategies' | 'summary' | 'experiments' | 'explore';
 const SEL = `${inputCls} h-9 text-[13px]`;
 const chip = (v: string) => `rounded-full px-2 py-0.5 text-[11px] font-semibold ${v === 'pass' ? 'bg-up/15 text-up' : v === 'lead' ? 'bg-accent-soft text-accent-deep' : v === 'fail' ? 'bg-down/15 text-down' : 'bg-raised text-ink-2'}`;
 const pct = (v: number | null | undefined, d = 1) => (v == null || !Number.isFinite(v) ? '–' : `${v < 0 ? '−' : ''}${Math.abs(v).toFixed(d)}%`);
@@ -77,7 +78,7 @@ export function QuantReport() {
           </InfoTip>
         </h1>
         <Segmented label="Section" value={tab === 'summary' || tab === 'experiments' || tab === 'explore' ? 'expert' : tab} onChange={(v) => setTab(v === 'expert' ? 'summary' : v)}
-          options={[{ value: 'simple', label: 'Summary' }, { value: 'strategies', label: 'All strategies' }, { value: 'expert', label: 'Expert details' }]} />
+          options={[{ value: 'simple', label: 'Summary' }, { value: 'portfolio', label: '₹5 lakh portfolio' }, { value: 'strategies', label: 'All strategies' }, { value: 'expert', label: 'Expert details' }]} />
         {(tab === 'summary' || tab === 'experiments' || tab === 'explore') && (
           <Segmented label="Expert section" value={tab} onChange={setTab} options={[{ value: 'summary', label: 'Verdict' }, { value: 'experiments', label: `Experiments${list.length ? ` (${list.length})` : ''}` }, { value: 'explore', label: 'Raw settings & trades' }]} />
         )}
@@ -85,6 +86,7 @@ export function QuantReport() {
       {error && <p className="text-[13px] text-down">{error}</p>}
       {tab === 'strategies' && <QuantStrategies />}
       {tab === 'simple' && <QuantSimple />}
+      {tab === 'portfolio' && <QuantPortfolio />}
       {tab === 'summary' && <Summary list={list} onOpen={open} />}
       {tab === 'experiments' && <Experiments list={list} onOpen={open} />}
       {tab === 'explore' && <Explore list={list} start={explore} />}

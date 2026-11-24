@@ -49,3 +49,15 @@ export const FAMILY_LABEL: Record<string, string> = {
   P2: 'Regimes', A1: 'Monthly premium: walk-forward', A2: 'Monthly premium: sizing & stress', A3: 'Weekly premium', B9: 'Stock momentum', B10: '52-week-high breakout', P11: 'Sizing & combination', P12: 'Holdout (read once)',
 };
 export const VERDICT_LABEL: Record<string, string> = { pass: 'Meets the target', lead: 'Lead', fail: 'Does not meet the target', info: 'Information' };
+
+// The ₹5 lakh portfolio of the option rules that worked (scripts/research/theta/portfolio.ts).
+export type PortfolioRow = {
+  names: string; from: string; cagrPct: number; perYear: number; maxDdPct: number; worstDay: number; worstDayOn: string;
+  need: number; needOn: string; fits: boolean; losingYears: string[]; curve: [string, number][]; byYear: Record<string, number>;
+};
+export type PortfolioBook = { trades: number; from: string; wonPct: number; total: number; worstTrade: number; worstOpen: number; margin: number | null };
+export type Portfolio = {
+  built: string; capital: number; from: string; recent: string; to: string;
+  books: Record<string, PortfolioBook>; corr: Record<string, number>;
+  rows: PortfolioRow[]; nifty: { curve: [string, number][]; byYear: Record<string, number>; cagrPct: number; maxDdPct: number };
+};

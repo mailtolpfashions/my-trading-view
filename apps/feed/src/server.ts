@@ -42,6 +42,7 @@ import { planAndPaper, startPaperTrade } from './selling/plan';
 import { decayStudy, sellingReport, sellingResearch, sellingThree, studyDetail, studyOverview } from './selling/study';
 import { quantDetail, quantExperiments } from './research/quant';
 import { quantLeads } from './research/quant-leads';
+import { quantPortfolio } from './research/quant-portfolio';
 import { quantStrategies, quantStrategy } from './research/quant-strategies';
 import { intraday } from '@mtv/options';
 import { patternEvidence, presetEvidence } from './screener/evidence';
@@ -243,6 +244,7 @@ app.get('/api/selling-report', async (_req, reply) => (await sellingReport()) ??
 app.get('/api/quant/experiments', async () => ({ experiments: quantExperiments() }));
 app.get('/api/quant/strategies', async () => quantStrategies());
 app.get<{ Querystring: { key?: string } }>('/api/quant/strategy', async (req, reply) => quantStrategy(String(req.query.key ?? '')) ?? reply.code(404).send({ error: 'not_found', message: 'No such strategy' }));
+app.get('/api/quant/portfolio', async (_req, reply) => quantPortfolio() ?? reply.code(404).send({ error: 'not_run', message: 'The portfolio test has not been run yet' }));
 app.get('/api/quant/leads', async (_req, reply) => quantLeads() ?? reply.code(404).send({ error: 'not_run', message: 'The research files are not here yet' }));
 app.get<{ Params: { id: string; name: string }; Querystring: { setting?: string } }>('/api/quant/detail/:id/:name', async (req, reply) => {
   const s = req.query.setting;
