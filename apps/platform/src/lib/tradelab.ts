@@ -140,3 +140,24 @@ export const basketApi = {
   execute: (id: string) => feed<{ basket: string; results: { id: string; label: string; ok: boolean; text: string }[] }>('tradelab/baskets/execute', { id }),
   margin: (orders: { symbol: string; side: Side; product: Product; qty: number; price?: string }[]) => feed<MarginPreview>('tradelab/margin', { orders }),
 };
+
+// ---------------------------------------------------------------- the weekend theta test (Friday → Tuesday expiry)
+
+export type WeekendRule = { id: string; name: string; enabled: boolean; time: string; delta: number; wings: boolean; wingDelta: number; lots: number; updatedAt: string };
+export type WeekendLegRow = { symbol: string; side: 'SELL' | 'BUY'; kind: 'CE' | 'PE'; strikePaise: number; delta: number; bidPaise: number; askPaise: number; fillPaise: number | null };
+export type WeekendEntryRow = { date: string; expiry: string; at: number; spotPaise: number; legs: WeekendLegRow[]; labels: (string | null)[]; settlePaise: (number | null)[]; marks: { time: string; valuePaise: number | null }[]; creditPaise: number | null; netPaise: number | null; done: boolean };
+export type WeekendCheckRow = {
+  friday: string; expiry: string; strikePaise: number; monday: string | null; basePaise: number | null;
+  nse: { friClosePaise: number | null; monOpenPaise: number | null; monClosePaise: number | null };
+  rows: { time: string; fixedPaise: number | null; rolledPaise: number | null; fixedPct: number | null; rolledPct: number | null; spreadPaise: number | null }[];
+};
+export type WeekendReport = {
+  rule: WeekendRule; entries: WeekendEntryRow[]; checks: WeekendCheckRow[];
+  medians: { time: string; weekends: number; fixedPct: number | null; rolledPct: number | null }[];
+  totals: { weekends: number; traded: number; netPaise: number };
+  events: { at: number; action: 'placed' | 'skipped' | 'error' | 'checked'; text: string }[];
+};
+export const weekendApi = {
+  report: () => feed<WeekendReport>('tradelab/weekend'),
+  save: (r: Partial<WeekendRule>) => feed<WeekendRule>('tradelab/weekend', r),
+};

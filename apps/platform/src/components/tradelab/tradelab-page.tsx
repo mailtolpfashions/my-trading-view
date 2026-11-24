@@ -15,6 +15,7 @@ import { Button, Card } from '../ui';
 import { BasketsPanel } from './baskets-panel';
 import { PremiumPanel } from './premium-panel';
 import { Straddle920Panel } from './straddle920-panel';
+import { WeekendPanel } from './weekend-panel';
 import { PivotBuyPanel } from './pivotbuy-panel';
 import { RulesPanel } from './rules-panel';
 
@@ -123,6 +124,9 @@ export function TradeLabPage() {
 
       {/* the weekly premium paper trade kept by the research programme */}
       <PremiumPanel />
+
+      {/* the weekend theta test: Friday → Tuesday expiry, and the Monday price check */}
+      <WeekendPanel />
 
       {/* the 9:20 straddle forward paper test (video rule) */}
       <Straddle920Panel />
